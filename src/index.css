@@ -1,0 +1,335 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+
+    --card: 222 47% 8%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222 47% 8%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 174 72% 46%;
+    --primary-foreground: 222 47% 6%;
+
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217 33% 14%;
+    --muted-foreground: 215 20% 55%;
+
+    --accent: 38 92% 50%;
+    --accent-foreground: 222 47% 6%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 222 47% 6%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 222 47% 6%;
+
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
+    --ring: 174 72% 46%;
+
+    --radius: 0.75rem;
+
+    --chart-1: 174 72% 46%;
+    --chart-2: 38 92% 50%;
+    --chart-3: 142 71% 45%;
+    --chart-4: 262 83% 58%;
+    --chart-5: 0 72% 51%;
+
+    --sidebar-background: 222 47% 6%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 174 72% 46%;
+    --sidebar-primary-foreground: 222 47% 6%;
+    --sidebar-accent: 217 33% 14%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 217 33% 17%;
+    --sidebar-ring: 174 72% 46%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(174 72% 46%), hsl(174 72% 36%));
+    --gradient-accent: linear-gradient(135deg, hsl(38 92% 50%), hsl(38 92% 40%));
+    --gradient-card: linear-gradient(180deg, hsl(222 47% 10%), hsl(222 47% 8%));
+    --gradient-success: linear-gradient(135deg, hsl(142 71% 45%), hsl(142 71% 35%));
+  }
+
+  .light {
+    /* Soft warm background - easier on eyes than pure white */
+    --background: 220 20% 97%;
+    --foreground: 222 47% 18%;
+
+    /* Cards with subtle warmth */
+    --card: 220 20% 99%;
+    --card-foreground: 222 47% 18%;
+
+    --popover: 220 20% 99%;
+    --popover-foreground: 222 47% 18%;
+
+    --primary: 174 65% 38%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Soft secondary backgrounds */
+    --secondary: 220 20% 94%;
+    --secondary-foreground: 222 47% 18%;
+
+    --muted: 220 15% 92%;
+    --muted-foreground: 215 16% 42%;
+
+    --accent: 38 85% 48%;
+    --accent-foreground: 222 47% 10%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 60% 40%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 85% 48%;
+    --warning-foreground: 222 47% 10%;
+
+    /* Softer borders */
+    --border: 220 15% 88%;
+    --input: 220 15% 88%;
+    --ring: 174 65% 38%;
+
+    /* Sidebar for light mode */
+    --sidebar-background: 220 20% 95%;
+    --sidebar-foreground: 222 47% 18%;
+    --sidebar-primary: 174 65% 38%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 15% 90%;
+    --sidebar-accent-foreground: 222 47% 18%;
+    --sidebar-border: 220 15% 88%;
+    --sidebar-ring: 174 65% 38%;
+
+    /* Light mode gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(174 65% 38%), hsl(174 65% 32%));
+    --gradient-accent: linear-gradient(135deg, hsl(38 85% 48%), hsl(38 85% 40%));
+    --gradient-card: linear-gradient(180deg, hsl(220 20% 100%), hsl(220 20% 98%));
+    --gradient-success: linear-gradient(135deg, hsl(142 60% 40%), hsl(142 60% 34%));
+  }
+
+  /* Compact mode - reduces spacing globally */
+  .compact {
+    --spacing-base: 0.75;
+  }
+
+  .compact .card,
+  .compact [class*="Card"] {
+    @apply p-3;
+  }
+
+  .compact table td,
+  .compact table th {
+    @apply py-1.5 px-2;
+  }
+
+  .compact .space-y-4 {
+    @apply space-y-2;
+  }
+
+  .compact .space-y-6 {
+    @apply space-y-3;
+  }
+
+  .compact .gap-4 {
+    @apply gap-2;
+  }
+
+  .compact .gap-6 {
+    @apply gap-3;
+  }
+
+  .compact .p-6 {
+    @apply p-3;
+  }
+
+  .compact .p-4 {
+    @apply p-2;
+  }
+
+  .compact .py-4 {
+    @apply py-2;
+  }
+
+  .compact .px-6 {
+    @apply px-3;
+  }
+
+  .compact .mb-6 {
+    @apply mb-3;
+  }
+
+  .compact .mb-4 {
+    @apply mb-2;
+  }
+
+  .compact .text-sm {
+    @apply text-xs;
+  }
+
+  .compact h1 {
+    @apply text-xl;
+  }
+
+  .compact h2 {
+    @apply text-lg;
+  }
+
+  .compact h3 {
+    @apply text-base;
+  }
+
+  /* Ocean Theme - Cool blues and purples */
+  .theme-ocean {
+    --primary: 199 89% 48%;
+    --primary-foreground: 222 47% 6%;
+    --accent: 239 84% 67%;
+    --accent-foreground: 0 0% 100%;
+    --success: 172 66% 50%;
+    --success-foreground: 222 47% 6%;
+    --warning: 199 89% 48%;
+    --warning-foreground: 222 47% 6%;
+    --ring: 199 89% 48%;
+    --chart-1: 199 89% 48%;
+    --chart-2: 239 84% 67%;
+    --chart-3: 172 66% 50%;
+    --chart-4: 280 87% 65%;
+    --gradient-primary: linear-gradient(135deg, hsl(199 89% 48%), hsl(239 84% 67%));
+  }
+
+  /* Sunset Theme - Warm oranges and reds */
+  .theme-sunset {
+    --primary: 24 95% 53%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 350 89% 60%;
+    --accent-foreground: 0 0% 100%;
+    --success: 142 71% 45%;
+    --success-foreground: 222 47% 6%;
+    --warning: 45 93% 47%;
+    --warning-foreground: 222 47% 6%;
+    --ring: 24 95% 53%;
+    --chart-1: 24 95% 53%;
+    --chart-2: 350 89% 60%;
+    --chart-3: 45 93% 47%;
+    --chart-4: 330 81% 60%;
+    --gradient-primary: linear-gradient(135deg, hsl(24 95% 53%), hsl(350 89% 60%));
+  }
+
+  /* Forest Theme - Natural greens */
+  .theme-forest {
+    --primary: 142 71% 45%;
+    --primary-foreground: 222 47% 6%;
+    --accent: 84 81% 44%;
+    --accent-foreground: 222 47% 6%;
+    --success: 160 84% 39%;
+    --success-foreground: 0 0% 100%;
+    --warning: 48 96% 53%;
+    --warning-foreground: 222 47% 6%;
+    --ring: 142 71% 45%;
+    --chart-1: 142 71% 45%;
+    --chart-2: 84 81% 44%;
+    --chart-3: 160 84% 39%;
+    --chart-4: 120 60% 50%;
+    --gradient-primary: linear-gradient(135deg, hsl(142 71% 45%), hsl(84 81% 44%));
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'DM Sans', system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+  }
+}
+
+@layer components {
+  .card-gradient {
+    background: var(--gradient-card);
+  }
+
+  .metric-positive {
+    @apply text-success;
+  }
+
+  .metric-negative {
+    @apply text-destructive;
+  }
+
+  .metric-neutral {
+    @apply text-muted-foreground;
+  }
+
+  .status-badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .table-header {
+    @apply text-xs font-medium text-muted-foreground uppercase tracking-wider;
+  }
+
+  .input-override {
+    @apply border-accent/50 bg-accent/10;
+  }
+}
+
+@layer utilities {
+  .text-gradient-primary {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .text-gradient-accent {
+    background: var(--gradient-accent);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.4s ease-out;
+  }
+
+  .animate-pulse-slow {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { 
+    opacity: 0; 
+    transform: translateY(10px); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0); 
+  }
+}

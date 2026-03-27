@@ -1,0 +1,49 @@
+project_id = "kqeeldtjusdjmpuomtvs"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = false
+
+[functions.analyze-property]
+verify_jwt = false
+
+[functions.health-check]
+verify_jwt = false
+
+[functions.gmail-auth-url]
+verify_jwt = false
+
+[functions.gmail-exchange-token]
+verify_jwt = false
+
+[functions.gmail-sync]
+verify_jwt = false
+
+[functions.get-mapbox-token]
+verify_jwt = false
+
+[functions.api-analyze-zip]
+verify_jwt = false
+
+[functions.api-process-job]
+verify_jwt = false
