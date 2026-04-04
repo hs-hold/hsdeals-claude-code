@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const PERPLEXITY_API_URL = 'https://api.perplexity.ai/chat/completions';
+const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
 interface ZipMarketData {
   zipCode: string;
@@ -15,7 +15,7 @@ interface ZipMarketData {
   marketTemperature: 'hot' | 'warm' | 'neutral' | 'cool' | 'cold';
   marketTemperatureScore: number; // 1-10
   medianHomePrice: number | null;
-  medianHomePriceTrend: string | null; // e.g. "+5.2% YoY"
+  medianHomePriceTrend: string | null;
   avgDaysOnMarket: number | null;
   listingsCount: number | null;
   avgRent: number | null;
@@ -23,37 +23,37 @@ interface ZipMarketData {
   vacancyRate: string | null;
   medianHouseholdIncome: number | null;
   unemploymentRate: string | null;
-  populationTrend: string | null; // growing/stable/declining
+  populationTrend: string | null;
   schoolRating: number | null; // 1-10
   crimeLevel: 'low' | 'below average' | 'average' | 'above average' | 'high' | null;
   economicStrength: 'strong' | 'moderate' | 'weak' | null;
-  investorScore: number; // 1-10, overall attractiveness for RE investors
+  investorScore: number; // 1-10
   priceToRentRatio: number | null;
-  appreciation5yr: string | null; // e.g. "+28% over 5 years"
-  keyInsights: string[]; // 3-5 bullet points for investors
-  risks: string[]; // 1-3 risks to be aware of
+  appreciation5yr: string | null;
+  keyInsights: string[];
+  risks: string[];
   sources: string[];
   researchedAt: string;
 }
 
 async function researchZipMarket(zipCode: string): Promise<ZipMarketData | null> {
-  const apiKey = Deno.env.get('PERPLEXITY_API_KEY');
+  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
   if (!apiKey) {
-    console.error('PERPLEXITY_API_KEY not configured');
+    console.error('ANTHROPIC_API_KEY not configured');
     return null;
   }
 
-  const prompt = `You are a real estate investment analyst. Research the real estate market for ZIP code ${zipCode} in the United States.
+  const prompt = `You are a real estate investment analyst. Use web search to research the real estate market for ZIP code ${zipCode} in the United States.
 
-Search for REAL, CURRENT data from reliable sources (Zillow, Redfin, Realtor.com, Census Bureau, FBI crime data, GreatSchools, etc.).
+Search Zillow, Redfin, Realtor.com, Census Bureau, GreatSchools, NeighborhoodScout, and other authoritative sources for REAL, CURRENT data.
 
-Return ONLY real data you can verify from web sources. Do NOT invent or estimate numbers without a source.
+Return ONLY verified data from your searches. Use null for anything you cannot confirm from a real source.
 
-Provide a JSON response with this exact structure:
+After researching, return a JSON object with this exact structure:
 {
   "zipCode": "${zipCode}",
   "city": "city name",
-  "state": "state abbreviation (e.g. FL)",
+  "state": "state abbreviation",
   "marketTemperature": "hot|warm|neutral|cool|cold",
   "marketTemperatureScore": 7.5,
   "medianHomePrice": 285000,
@@ -75,50 +75,64 @@ Provide a JSON response with this exact structure:
   "keyInsights": [
     "Strong rental demand with low vacancy rates",
     "Below-median purchase prices with above-median rents",
-    "Growing job market driven by healthcare and tech sectors",
-    "High investor activity — multiple cash offers common"
+    "Growing job market — healthcare and logistics sector"
   ],
   "risks": [
-    "Rising insurance costs in flood-prone areas",
-    "Property taxes increasing 8% annually"
+    "Rising insurance costs",
+    "Property taxes increasing ~8% annually"
   ],
-  "sources": ["Zillow, March 2026", "Census ACS 2023"]
+  "sources": ["Zillow March 2026", "Census ACS 2023"]
 }
 
-Use null for any values you cannot find real data for. The investorScore should reflect overall attractiveness: cash flow potential, appreciation, demand, affordability, and risk.`;
+Return ONLY the JSON object, no other text.`;
 
   try {
-    const response = await fetch(PERPLEXITY_API_URL, {
+    const response = await fetch(ANTHROPIC_API_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'web-search-2025-03-05',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'sonar-pro',
+        model: 'claude-opus-4-6',
+        max_tokens: 2000,
+        tools: [
+          {
+            type: 'web_search_20250305',
+            name: 'web_search',
+            max_uses: 5,
+          },
+        ],
         messages: [{ role: 'user', content: prompt }],
-        search_recency_filter: 'month',
-        temperature: 0.1,
-        max_tokens: 1500,
       }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error('Perplexity API error:', response.status, errText);
+      console.error('Anthropic API error:', response.status, errText);
       return null;
     }
 
     const data = await response.json();
-    const responseText = data.choices?.[0]?.message?.content?.trim();
-    console.log('Perplexity response:', responseText?.substring(0, 500));
+
+    // Extract the final text response (after tool use)
+    const textBlock = data.content?.find((b: any) => b.type === 'text');
+    const responseText = textBlock?.text?.trim();
+
+    console.log('Claude response:', responseText?.substring(0, 500));
+
+    if (!responseText) {
+      console.error('No text in response');
+      return null;
+    }
 
     let jsonStr = responseText;
-    if (jsonStr?.includes('```')) {
+    if (jsonStr.includes('```')) {
       jsonStr = jsonStr.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
     }
-    // Extract JSON object from text
-    const jsonMatch = jsonStr?.match(/\{[\s\S]*\}/);
+    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       console.error('No JSON found in response');
       return null;
@@ -174,7 +188,7 @@ serve(async (req) => {
     }
 
     // Research the market
-    console.log(`Researching market for ZIP ${cleanZip}...`);
+    console.log(`Researching market for ZIP ${cleanZip} with Claude Opus + web search...`);
     const marketData = await researchZipMarket(cleanZip);
 
     if (!marketData) {
