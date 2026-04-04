@@ -102,6 +102,7 @@ import { ExpansionAnalysisCard } from '@/components/deals/ExpansionAnalysisCard'
 import { RentalAnalysisCard } from '@/components/deals/RentalAnalysisCard';
 import { BrrrrAnalysisCard } from '@/components/deals/BrrrrAnalysisCard';
 import { DealInvestorsManager } from '@/components/deals/DealInvestorsManager';
+import { ZipMarketCard } from '@/components/deals/ZipMarketCard';
 
 export default function DealDetailPage() {
   const { id } = useParams();
@@ -2925,6 +2926,26 @@ BRRRR STRATEGY:
         
         return (
           <>
+            {/* OFF MARKET Banner */}
+            {deal.isOffMarket && (
+              <div className="flex items-center justify-center gap-3 py-3 px-4 rounded-xl bg-amber-500/15 border-2 border-amber-500/60">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl font-black tracking-widest text-amber-400 uppercase">OFF MARKET</span>
+                  <Badge className="bg-amber-500 text-black font-bold text-xs px-2">Email Deal</Badge>
+                </div>
+                {deal.emailDate && (
+                  <span className="text-sm text-muted-foreground">
+                    • Received {new Date(deal.emailDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                )}
+                {deal.senderName && (
+                  <span className="text-sm text-muted-foreground">
+                    • From <span className="text-foreground font-medium">{deal.senderName}</span>
+                  </span>
+                )}
+              </div>
+            )}
+
             {/* Suspicious Data Warning Banner */}
             {suspiciousCheck.hasSuspiciousData && (
               <Card className="border-2 border-orange-500 bg-orange-500/10">
@@ -2999,6 +3020,109 @@ BRRRR STRATEGY:
                       ))}
                     </div>
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Email / Off-Market Info Card */}
+            {deal.isOffMarket && deal.emailExtractedData && (
+              <Card className="border border-amber-500/30 bg-amber-500/5">
+                <CardHeader className="pb-2 pt-3 px-4">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2 text-amber-400">
+                    <Mail className="w-4 h-4" />
+                    Off-Market Email Details
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="px-4 pb-4 space-y-4">
+                  {/* Sender + Date row */}
+                  <div className="flex flex-wrap gap-4 text-sm">
+                    {deal.senderName && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-muted-foreground">From:</span>
+                        <span className="font-medium">{deal.senderName}</span>
+                        {deal.senderEmail && (
+                          <span className="text-muted-foreground">({deal.senderEmail})</span>
+                        )}
+                      </div>
+                    )}
+                    {deal.emailDate && (
+                      <div className="flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+                        <span className="text-muted-foreground">Received:</span>
+                        <span className="font-medium">
+                          {new Date(deal.emailDate).toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })}
+                        </span>
+                      </div>
+                    )}
+                    {deal.emailSubject && (
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-muted-foreground shrink-0">Subject:</span>
+                        <span className="text-xs truncate max-w-xs">{deal.emailSubject}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Photo / Gallery links */}
+                  {Array.isArray(deal.emailExtractedData.imageLinks) && deal.emailExtractedData.imageLinks.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Photos / Gallery</p>
+                      <div className="flex flex-wrap gap-2">
+                        {(deal.emailExtractedData.imageLinks as string[]).map((link: string, idx: number) => (
+                          <Button
+                            key={idx}
+                            variant="outline"
+                            size="sm"
+                            className="text-xs h-7 gap-1.5 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+                            onClick={() => window.open(link, '_blank', 'noopener,noreferrer')}
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            {idx === 0 ? 'View Photos' : `Photo Link ${idx + 1}`}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Property Description from AI */}
+                  {deal.emailExtractedData.propertyDescription && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Property Description</p>
+                      <div className="p-3 rounded-lg bg-muted/30 text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
+                        {deal.emailExtractedData.propertyDescription}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Additional extracted info */}
+                  {(() => {
+                    const ed = deal.emailExtractedData;
+                    const infoRows: { label: string; value: string }[] = [];
+                    if (ed.occupancy) infoRows.push({ label: 'Occupancy', value: ed.occupancy });
+                    if (ed.condition) infoRows.push({ label: 'Condition', value: ed.condition });
+                    if (ed.yearBuilt) infoRows.push({ label: 'Year Built', value: String(ed.yearBuilt) });
+                    if (ed.lotSize) infoRows.push({ label: 'Lot Size', value: String(ed.lotSize) });
+                    if (ed.units) infoRows.push({ label: 'Units', value: String(ed.units) });
+                    if (ed.capRate) infoRows.push({ label: 'Cap Rate', value: `${ed.capRate}%` });
+                    if (ed.cashFlow) infoRows.push({ label: 'Cash Flow', value: `$${Number(ed.cashFlow).toLocaleString()}/mo` });
+                    if (ed.existingLoanBalance) infoRows.push({ label: 'Existing Loan', value: `$${Number(ed.existingLoanBalance).toLocaleString()}` });
+                    if (ed.monthlyPITI) infoRows.push({ label: 'Monthly PITI', value: `$${Number(ed.monthlyPITI).toLocaleString()}` });
+                    if (ed.financingNotes) infoRows.push({ label: 'Financing', value: ed.financingNotes });
+                    if (ed.dealNotes) infoRows.push({ label: 'Deal Notes', value: ed.dealNotes });
+                    if (infoRows.length === 0) return null;
+                    return (
+                      <div className="space-y-2">
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Additional Info from Email</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {infoRows.map((row, i) => (
+                            <div key={i} className="flex items-start gap-2 p-2 rounded bg-muted/30 text-sm">
+                              <span className="text-muted-foreground shrink-0 min-w-[90px]">{row.label}:</span>
+                              <span className="font-medium">{row.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </CardContent>
               </Card>
             )}
@@ -5695,6 +5819,15 @@ BRRRR STRATEGY:
                 </CollapsibleContent>
               </Card>
             </Collapsible>
+
+            {/* ZIP Market Intelligence */}
+            {deal.address.zip && (
+              <ZipMarketCard
+                zipCode={deal.address.zip}
+                city={deal.address.city}
+                state={deal.address.state}
+              />
+            )}
 
             {/* SENSITIVITY ANALYSIS - Interactive What-If with Sliders */}
             <WhatIfAnalysis

@@ -232,6 +232,7 @@ export interface Deal {
   owner: string;
   createdBy: string | null;
   isLocked: boolean;
+  isOffMarket: boolean;
   dealType: string | null;
   emailExtractedData: Record<string, any> | null;
 }
