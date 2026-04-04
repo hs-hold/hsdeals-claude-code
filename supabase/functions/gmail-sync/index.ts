@@ -24,6 +24,11 @@ const PORTAL_DOMAINS = [
   'compass.com',
   'opendoor.com',
   'offerpad.com',
+  'loopnet.com',
+  'crexi.com',
+  'costar.com',
+  'apartments.com',
+  'rent.com',
 ];
 
 interface GmailMessage {
@@ -33,7 +38,8 @@ interface GmailMessage {
   payload?: {
     headers?: Array<{ name: string; value: string }>;
     body?: { data?: string };
-    parts?: Array<{ body?: { data?: string }; mimeType?: string }>;
+    parts?: Array<{ body?: { data?: string }; mimeType?: string; parts?: any[] }>;
+    mimeType?: string;
   };
 }
 
@@ -64,12 +70,10 @@ function decodeBase64Url(data: string): string {
 /** Strip HTML tags and clean up whitespace for AI parsing */
 function stripHtml(html: string): string {
   return html
-    // Convert common block tags to newlines so addresses don't merge
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/?(p|div|li|tr|td|th|h[1-6]|section|article)[^>]*>/gi, '\n')
-    // Remove all remaining HTML tags
+    .replace(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi, ' $1 ') // keep href text
     .replace(/<[^>]+>/g, ' ')
-    // Decode common HTML entities
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -77,7 +81,6 @@ function stripHtml(html: string): string {
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, ' ')
     .replace(/&#\d+;/g, ' ')
-    // Collapse whitespace
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -90,11 +93,9 @@ function extractEmailBody(message: GmailMessage): string {
 
   if (message.payload?.body?.data) {
     const raw = decodeBase64Url(message.payload.body.data);
-    // Detect if it's HTML (very rough check)
     plainText = raw.trim().startsWith('<') ? stripHtml(raw) : raw;
   } else if (message.payload?.parts) {
-    // Walk all parts — prefer plain text; collect HTML as fallback
-    const walk = (parts: typeof message.payload.parts) => {
+    const walk = (parts: any[]) => {
       for (const part of parts ?? []) {
         if (part.mimeType === 'text/plain' && part.body?.data && !plainText) {
           plainText = decodeBase64Url(part.body.data);
@@ -102,16 +103,15 @@ function extractEmailBody(message: GmailMessage): string {
         if (part.mimeType === 'text/html' && part.body?.data && !htmlText) {
           htmlText = stripHtml(decodeBase64Url(part.body.data));
         }
-        // Recurse into nested multipart parts
-        if ((part as any).parts) walk((part as any).parts);
+        if (part.parts) walk(part.parts);
       }
     };
     walk(message.payload.parts);
   }
 
   const body = plainText || htmlText || message.snippet || '';
-  // Limit to 8000 chars so AI prompt doesn't blow up
-  return body.substring(0, 8000);
+  // Limit to 10000 chars
+  return body.substring(0, 10000);
 }
 
 // Get header value from Gmail message
@@ -124,7 +124,6 @@ function getHeader(message: GmailMessage, headerName: string): string {
 
 // Parse sender info from "From" header
 function parseSenderInfo(fromHeader: string): { name: string; email: string } {
-  // Format can be: "Name <email@domain.com>" or just "email@domain.com"
   const match = fromHeader.match(/^(?:"?([^"<]*)"?\s*)?<?([^>]+@[^>]+)>?$/);
   if (match) {
     return {
@@ -140,11 +139,10 @@ function isPortalEmail(senderEmail: string): boolean {
   return PORTAL_DOMAINS.some(domain => senderEmail.includes(domain));
 }
 
-// Extract image/photo links from email body (direct image URLs + gallery links)
+// Extract image/photo links from email body
 function extractImageLinks(emailBody: string): string[] {
   const found = new Set<string>();
 
-  // img src attributes
   const imgSrcRegex = /<img[^>]+src=["']([^"']+)["']/gi;
   let m: RegExpExecArray | null;
   while ((m = imgSrcRegex.exec(emailBody)) !== null) {
@@ -154,19 +152,17 @@ function extractImageLinks(emailBody: string): string[] {
     }
   }
 
-  // Direct image file URLs
   const directImgRegex = /https?:\/\/[^\s"'<>]+\.(jpg|jpeg|png|webp|gif)/gi;
   while ((m = directImgRegex.exec(emailBody)) !== null) {
     found.add(m[0].split('"')[0].split("'")[0]);
   }
 
-  // Gallery / cloud storage links (Google Drive, Dropbox, OneDrive, iCloud, etc.)
   const galleryRegex = /https?:\/\/(?:drive\.google\.com|photos\.google\.com|dropbox\.com|1drv\.ms|onedrive\.live\.com|icloud\.com|photos\.app\.goo\.gl|album\.link|flickr\.com|imgur\.com|cloudinary\.com)[^\s"'<>]*/gi;
   while ((m = galleryRegex.exec(emailBody)) !== null) {
     found.add(m[0].split('"')[0].split("'")[0]);
   }
 
-  return [...found].slice(0, 20); // cap at 20
+  return [...found].slice(0, 20);
 }
 
 // Normalize address for fuzzy matching
@@ -185,31 +181,69 @@ function normalizeAddress(address: string): string {
 function addressesMatch(addr1: string, addr2: string): boolean {
   const norm1 = normalizeAddress(addr1);
   const norm2 = normalizeAddress(addr2);
-  
-  // Exact match after normalization
   if (norm1 === norm2) return true;
-  
-  // Check if one contains the other (for partial matches)
   if (norm1.includes(norm2) || norm2.includes(norm1)) return true;
-  
-  // Extract street number and name for comparison
   const extractStreetParts = (addr: string) => {
     const parts = addr.split(' ');
     const number = parts.find(p => /^\d+$/.test(p));
     const words = parts.filter(p => !/^\d+$/.test(p) && p.length > 2);
     return { number, words };
   };
-  
   const parts1 = extractStreetParts(norm1);
   const parts2 = extractStreetParts(norm2);
-  
-  // If street numbers match and at least 2 words match
   if (parts1.number && parts1.number === parts2.number) {
     const matchingWords = parts1.words.filter(w => parts2.words.includes(w));
     if (matchingWords.length >= 2) return true;
   }
-  
   return false;
+}
+
+// ─── Regex-based US address extractor (no AI needed) ───────────────────────
+function extractAddressesWithRegex(text: string): string[] {
+  const STREET_TYPES = [
+    'Street', 'St', 'Avenue', 'Ave', 'Drive', 'Dr', 'Road', 'Rd',
+    'Lane', 'Ln', 'Court', 'Ct', 'Boulevard', 'Blvd', 'Way', 'Place', 'Pl',
+    'Circle', 'Cir', 'Northwest', 'Northeast', 'Southwest', 'Southeast',
+    'Parkway', 'Pkwy', 'Highway', 'Hwy', 'Terrace', 'Ter', 'Trail', 'Trl',
+    'Loop', 'Run', 'Pass', 'Pike', 'Row', 'Alley', 'Point', 'Pointe',
+    'Ridge', 'Glen', 'Grove', 'Park', 'Path', 'View', 'Walk', 'Wood',
+    'Commons', 'Landing', 'Crossing', 'Creek', 'Mill', 'Spring', 'Square',
+  ].join('|');
+
+  const pattern = new RegExp(
+    `\\b(\\d{1,5})\\s+` +                          // street number
+    `([A-Za-z0-9][A-Za-z0-9\\s\\.]{1,40}?)\\s+` + // street name
+    `(${STREET_TYPES})` +                           // street type
+    `(?:\\s+(?:NW|NE|SW|SE|N|S|E|W))?` +           // optional direction
+    `,?\\s+` +
+    `([A-Za-z][A-Za-z\\s\\.]{1,30}?)` +            // city
+    `,?\\s+` +
+    `([A-Z]{2})` +                                  // state
+    `\\s+(\\d{5}(?:-\\d{4})?)`,                    // ZIP
+    'gi'
+  );
+
+  const addresses: string[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text)) !== null) {
+    const num    = match[1];
+    const name   = match[2].trim().replace(/\s+/g, ' ');
+    const type   = match[3];
+    const city   = match[4].trim().replace(/\s+/g, ' ');
+    const state  = match[5].toUpperCase();
+    const zip    = match[6];
+    const addr   = `${num} ${name} ${type}, ${city}, ${state} ${zip}`;
+
+    // Skip clearly bad matches
+    if (name.length < 2 || city.length < 2) continue;
+    if (!addresses.some(a => normalizeAddress(a) === normalizeAddress(addr))) {
+      addresses.push(addr);
+    }
+  }
+
+  console.log(`[regex] Found ${addresses.length} addresses:`, addresses);
+  return addresses;
 }
 
 interface ExtractedDeal {
@@ -217,6 +251,7 @@ interface ExtractedDeal {
   purchasePrice: number | null;
   dealType: string | null;
   extractedData: Record<string, any>;
+  source: 'ai' | 'regex';
 }
 
 // Detect if a string looks like a US street address: "123 Main St, City, ST 12345"
@@ -224,106 +259,85 @@ function looksLikeAddress(s: string): boolean {
   return /^\d+\s+[a-zA-Z0-9\s]+(?:st|ave|dr|blvd|rd|ln|ct|pl|way|cir|pkwy|hwy|sw|nw|se|ne)\b.*,\s*[a-zA-Z\s]+,\s*[a-zA-Z]{2}\s+\d{5}/i.test(s.trim());
 }
 
-// Use Anthropic claude-haiku to extract ALL property addresses and comprehensive deal info from email content
+// Use Anthropic claude-haiku to extract ALL property addresses and deal info from email
 async function extractDealsWithAI(emailContent: string, subject: string): Promise<ExtractedDeal[]> {
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
   if (!apiKey) {
-    console.error('ANTHROPIC_API_KEY not configured');
-    return [];
+    console.error('[extractDeals] ANTHROPIC_API_KEY not set — using regex fallback');
+    return extractAddressesWithRegex(emailContent + '\n' + subject).map(addr => ({
+      address: addr, purchasePrice: null, dealType: null, extractedData: {}, source: 'regex' as const,
+    }));
   }
 
-  // Fast path: if the subject itself IS a full property address, return it immediately
-  // (no need to call AI — common pattern for wholesaler blast emails)
+  // Fast path: subject IS a full property address
   if (looksLikeAddress(subject)) {
-    console.log('[extractDeals] subject IS an address, skipping AI:', subject);
-    return [{ address: subject.trim(), purchasePrice: null, dealType: null, extractedData: {} }];
+    console.log('[extractDeals] subject is an address:', subject);
+    return [{ address: subject.trim(), purchasePrice: null, dealType: null, extractedData: {}, source: 'ai' }];
   }
 
-  const prompt = `You are a real estate deal analyzer. Extract ALL properties and their details from this email.
-
-IMPORTANT: Real estate wholesalers often put the property address directly in the email subject line.
-If the Subject line looks like a US property address (e.g. "123 Main St, Atlanta, GA 30311"), treat it as the property address even if the body doesn't repeat it.
+  const prompt = `You are a real estate deal analyzer. Extract ALL properties from this wholesaler email.
 
 Email Subject: ${subject}
 
 Email Content:
 ${emailContent}
 
-CRITICAL RULES:
-- Search the ENTIRE email body carefully — addresses are often in the middle of paragraphs or after bullet points
-- A valid address MUST have a street number (e.g. "1234 Main St"). City-only mentions like "in Atlanta" are NOT addresses.
-- Wholesaler emails often list several properties — find ALL of them
-- If the body mentions "123 Oak Ave" and the subject mentions "Atlanta, GA 30311", combine them into "123 Oak Ave, Atlanta, GA 30311"
-- Common wholesaler formats: "123 Main St | Atlanta | $150K", "Property: 456 Elm Dr, Smyrna GA 30080"
+RULES:
+- Find ALL properties listed — wholesalers often list 2-10 properties per email
+- Each property needs a street number (e.g. "463 Main St"). City-only phrases are NOT addresses.
+- Common formats: "463 Voyles Drive, Riverdale, GA 30274", "Property: 456 Elm Dr, Atlanta GA 30311"
+- If the subject mentions a city/state and the body has street addresses, combine them
 
-For EACH property found, extract as much of the following as possible:
+For each property, extract:
+- address: Full US address with street, city, state, ZIP (required)
+- purchasePrice: Asking price (NOT ARV, NOT rehab cost)
+- arv: After Repair Value
+- dealType: Fix & Flip / Wholesale / Buy & Hold / BRRRR / Subject To / Seller Financing / Multifamily / Other / null
+- bedrooms, bathrooms, sqft, units, yearBuilt, lotSize
+- rehabCost, rent, capRate, cashFlow, downPayment
+- existingLoanBalance, monthlyPITI
+- propertyType: single_family / multi_family / condo / townhouse / duplex / triplex / fourplex / commercial / land / other
+- condition, occupancy
+- financingNotes, dealNotes
+- propertyDescription: 2-3 paragraph organized summary of all details (do not invent data)
+- photoLinks: Array of Google Drive / Dropbox / photo URLs found in email (empty array if none)
 
-1. **address** (required): Full US property address with street number, street name, city, state, ZIP
-2. **purchasePrice**: The asking/purchase price (NOT rehab, NOT ARV)
-3. **dealType**: Classify the deal. Choose the MOST specific type that applies:
-   - "Fix & Flip", "Wholetail", "Wholesale", "Buy & Hold", "BRRRR", "Co-Living",
-   - "Multifamily", "Mixed Use", "Triple Net", "Subject To", "Seller Financing",
-   - "Wrap Mortgage", "Assumable Mortgage", "Ground Up Development", "Tax Lien / Tax Deed",
-   - "Other" (put exact term from email), or null if unknown
-4. **units**: Number of units (for multifamily)
-5. **bedrooms**: Number of bedrooms (per unit if multi)
-6. **bathrooms**: Number of bathrooms (per unit if multi)
-7. **sqft**: Square footage
-8. **arv**: After Repair Value if mentioned
-9. **rehabCost**: Estimated rehab/renovation cost
-10. **rent**: Monthly rent or rental estimate (total or per unit)
-11. **downPayment**: Down payment amount or required cash
-12. **existingLoanBalance**: Existing mortgage/loan balance (for SubTo, Assumable)
-13. **monthlyPITI**: Monthly PITI payment
-14. **monthlyExpenses**: Other monthly expenses
-15. **capRate**: Cap rate if mentioned
-16. **cashFlow**: Monthly cash flow if mentioned
-17. **lotSize**: Lot size
-18. **yearBuilt**: Year built
-19. **propertyType**: single_family, multi_family, condo, townhouse, duplex, triplex, fourplex, commercial, land, other
-20. **condition**: Property condition notes
-21. **occupancy**: occupied, vacant, tenant-occupied, owner-occupied
-22. **financingNotes**: Any financing details, terms, interest rates mentioned
-23. **dealNotes**: Any other important deal details from the email
-24. **propertyDescription**: A clean, well-organized 2-3 paragraph description of the property. Include ALL details mentioned in the email (location, specs, condition, financials, opportunity). Do NOT invent or change any data — only organize and present what is in the email.
-25. **photoLinks**: Array of any photo gallery links, Google Drive/Dropbox/OneDrive links, or direct photo URLs found in the email body. Empty array if none.
-
-Return ONLY a JSON object:
+Return ONLY valid JSON, nothing else:
 {
   "deals": [
     {
-      "address": "123 Main St, City, State ZIP",
-      "purchasePrice": 150000,
-      "dealType": "Subject To",
-      "units": 4,
-      "bedrooms": 2,
-      "bathrooms": 2,
+      "address": "463 Voyles Drive, Riverdale, GA 30274",
+      "purchasePrice": 160000,
+      "arv": 250000,
+      "dealType": "Fix & Flip",
+      "bedrooms": 4,
+      "bathrooms": 2.5,
       "sqft": 1350,
-      "arv": null,
+      "units": null,
+      "yearBuilt": 1970,
+      "lotSize": "0.37 acres",
       "rehabCost": null,
-      "rent": 2200,
-      "downPayment": 75000,
-      "existingLoanBalance": 580000,
-      "monthlyPITI": 4564,
-      "monthlyExpenses": null,
+      "rent": null,
       "capRate": null,
       "cashFlow": null,
-      "lotSize": null,
-      "yearBuilt": null,
-      "propertyType": "multi_family",
+      "downPayment": null,
+      "existingLoanBalance": null,
+      "monthlyPITI": null,
+      "propertyType": "single_family",
       "condition": null,
       "occupancy": null,
-      "financingNotes": "Existing loan at $580k, $75k down required",
-      "dealNotes": "4 units, each 2bd/2ba ~1350 SF, rent potential $2200/unit",
-      "propertyDescription": "This 4-unit multifamily property is located at 123 Main St...",
+      "financingNotes": null,
+      "dealNotes": null,
+      "propertyDescription": "...",
       "photoLinks": ["https://drive.google.com/..."]
     }
   ]
 }
 
-Return { "deals": [] } if no valid US property addresses are found.`;
+Return { "deals": [] } if no valid US property addresses with street numbers are found.`;
 
   try {
+    console.log('[extractDeals] Calling Claude Haiku...');
     const response = await fetch(ANTHROPIC_API_URL, {
       method: 'POST',
       headers: {
@@ -333,87 +347,105 @@ Return { "deals": [] } if no valid US property addresses are found.`;
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 3000,
-        messages: [
-          { role: 'user', content: prompt }
-        ],
+        max_tokens: 4096,
+        messages: [{ role: 'user', content: prompt }],
       }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error('Anthropic API error:', response.status, errText);
-      return [];
+      console.error('[extractDeals] Anthropic API error:', response.status, errText);
+      // Fall back to regex
+      return extractAddressesWithRegex(emailContent + '\n' + subject).map(addr => ({
+        address: addr, purchasePrice: null, dealType: null, extractedData: {}, source: 'regex' as const,
+      }));
     }
 
     const data = await response.json();
-    const responseText = data.content?.[0]?.text?.trim();
+    const responseText = data.content?.[0]?.text?.trim() || '';
+    console.log('[extractDeals] AI raw response (first 600 chars):', responseText.substring(0, 600));
 
-    console.log('AI response for deals extraction:', responseText);
-
-    try {
-      let jsonStr = responseText;
-      if (jsonStr.includes('```')) {
-        jsonStr = jsonStr.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
-      }
-      const parsed = JSON.parse(jsonStr);
-      const deals = Array.isArray(parsed) ? parsed : (parsed.deals || []);
-
-      return deals
-        .filter((d: any) => d.address && typeof d.address === 'string' && d.address.length > 5)
-        .map((d: any) => {
-          const { address, purchasePrice, dealType, ...rest } = d;
-          return {
-            address: address.trim(),
-            purchasePrice: purchasePrice ? Number(purchasePrice) : null,
-            dealType: dealType || null,
-            extractedData: rest,
-          };
-        });
-    } catch (e) {
-      console.error('Error parsing AI response:', e);
-      return [];
+    // ── Robust JSON extraction ─────────────────────────────────────────────
+    let jsonStr = responseText;
+    // Strip markdown fences
+    if (jsonStr.includes('```')) {
+      jsonStr = jsonStr.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
     }
+    // Extract the first JSON object from anywhere in the string
+    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error('[extractDeals] No JSON found in AI response — trying regex fallback');
+      return extractAddressesWithRegex(emailContent + '\n' + subject).map(addr => ({
+        address: addr, purchasePrice: null, dealType: null, extractedData: {}, source: 'regex' as const,
+      }));
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    const deals = Array.isArray(parsed) ? parsed : (parsed.deals || []);
+    console.log(`[extractDeals] AI extracted ${deals.length} deals`);
+
+    const aiDeals: ExtractedDeal[] = deals
+      .filter((d: any) => d.address && typeof d.address === 'string' && d.address.length > 10)
+      .map((d: any) => {
+        const { address, purchasePrice, dealType, ...rest } = d;
+        return {
+          address: address.trim(),
+          purchasePrice: purchasePrice ? Number(purchasePrice) : null,
+          dealType: dealType || null,
+          extractedData: rest,
+          source: 'ai' as const,
+        };
+      });
+
+    // If AI found nothing, try regex as backup
+    if (aiDeals.length === 0) {
+      console.log('[extractDeals] AI found 0 deals — trying regex fallback');
+      return extractAddressesWithRegex(emailContent + '\n' + subject).map(addr => ({
+        address: addr, purchasePrice: null, dealType: null, extractedData: {}, source: 'regex' as const,
+      }));
+    }
+
+    return aiDeals;
   } catch (error) {
-    console.error('Error extracting deals with AI:', error);
-    return [];
+    console.error('[extractDeals] Error:', error);
+    // Final fallback to regex
+    return extractAddressesWithRegex(emailContent + '\n' + subject).map(addr => ({
+      address: addr, purchasePrice: null, dealType: null, extractedData: {}, source: 'regex' as const,
+    }));
   }
 }
 
 // Mark email as read in Gmail
 async function markEmailAsRead(accessToken: string, messageId: string): Promise<void> {
   try {
-    await fetch(
-      `${GMAIL_API_BASE}/users/me/messages/${messageId}/modify`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          removeLabelIds: ['UNREAD'],
-        }),
-      }
-    );
-    console.log(`Marked email ${messageId} as read`);
+    await fetch(`${GMAIL_API_BASE}/users/me/messages/${messageId}/modify`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ removeLabelIds: ['UNREAD'] }),
+    });
   } catch (error) {
     console.error(`Failed to mark email ${messageId} as read:`, error);
   }
 }
 
-// Compare deals to determine which is "better" (has more/better data)
+// Mark email as unread in Gmail
+async function markEmailAsUnread(accessToken: string, messageId: string): Promise<void> {
+  try {
+    await fetch(`${GMAIL_API_BASE}/users/me/messages/${messageId}/modify`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ addLabelIds: ['UNREAD'] }),
+    });
+  } catch (error) {
+    console.error(`Failed to mark email ${messageId} as unread:`, error);
+  }
+}
+
 function isBetterDeal(newDealData: any, existingDeal: any): boolean {
-  // If new deal has purchase price from email and existing doesn't, new is better
   const newHasPrice = newDealData.emailPurchasePrice || newDealData.purchasePrice;
   const existingHasPrice = existingDeal.overrides?.purchasePrice || existingDeal.api_data?.purchasePrice;
-  
   if (newHasPrice && !existingHasPrice) return true;
-  
-  // If new deal has lower purchase price, it's better
   if (newHasPrice && existingHasPrice && newHasPrice < existingHasPrice) return true;
-  
-  // Otherwise, keep existing
   return false;
 }
 
@@ -423,8 +455,19 @@ serve(async (req) => {
   }
 
   try {
-    const { access_token, max_results = 50, since_days, mark_all_read = false, include_read = false, target_state, mark_old_only = false } = await req.json();
-    
+    const body = await req.json();
+    const {
+      access_token,
+      max_results = 50,
+      since_days,
+      mark_all_read = false,
+      include_read = false,
+      target_state,
+      mark_old_only = false,
+      mark_unread_recent = false,  // NEW: mark recent emails as unread for re-scanning
+      dry_run = false,             // NEW: extract but don't save to DB
+    } = body;
+
     if (!access_token) {
       return new Response(
         JSON.stringify({ success: false, error: 'No access token provided' }),
@@ -432,7 +475,7 @@ serve(async (req) => {
       );
     }
 
-    // ── Mark-old-only mode: mark all unread emails older than since_days as read ──
+    // ── Mark old emails as read ───────────────────────────────────────────
     if (mark_old_only) {
       const olderThan = since_days ?? 7;
       const query = encodeURIComponent(`is:unread older_than:${olderThan}d`);
@@ -448,35 +491,48 @@ serve(async (req) => {
       }
       const listData = await listResp.json();
       const oldMessages = listData.messages || [];
-      let marked = 0;
-      for (const msg of oldMessages) {
-        await markEmailAsRead(access_token, msg.id);
-        marked++;
-      }
-      console.log(`[mark_old_only] Marked ${marked} emails older than ${olderThan} days as read`);
+      for (const msg of oldMessages) await markEmailAsRead(access_token, msg.id);
       return new Response(
-        JSON.stringify({ success: true, marked, message: `Marked ${marked} old emails as read` }),
+        JSON.stringify({ success: true, marked: oldMessages.length, message: `Marked ${oldMessages.length} old emails as read` }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log(`Fetching emails from Gmail... (since_days: ${since_days ?? 'all'}, mark_all_read: ${mark_all_read}, include_read: ${include_read})`);
+    // ── NEW: Mark recent emails as UNREAD so they can be re-scanned ──────
+    if (mark_unread_recent) {
+      const days = since_days ?? 7;
+      // Fetch recent emails (both read and unread)
+      const query = encodeURIComponent(`newer_than:${days}d`);
+      const listResp = await fetch(
+        `${GMAIL_API_BASE}/users/me/messages?maxResults=200&q=${query}`,
+        { headers: { 'Authorization': `Bearer ${access_token}` } }
+      );
+      if (!listResp.ok) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Failed to fetch recent emails' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      const listData = await listResp.json();
+      const recentMessages = listData.messages || [];
+      console.log(`[mark_unread_recent] Marking ${recentMessages.length} emails as unread`);
+      for (const msg of recentMessages) await markEmailAsUnread(access_token, msg.id);
+      return new Response(
+        JSON.stringify({ success: true, marked: recentMessages.length, message: `Marked ${recentMessages.length} recent emails as unread` }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log(`Fetching emails... (since_days: ${since_days ?? 'all'}, include_read: ${include_read}, dry_run: ${dry_run})`);
 
     // Build Gmail search query
     let query = include_read ? '' : 'is:unread';
-    if (since_days) {
-      query += `${query ? ' ' : ''}newer_than:${since_days}d`;
-    }
+    if (since_days) query += `${query ? ' ' : ''}newer_than:${since_days}d`;
     const encodedQuery = encodeURIComponent(query.trim());
 
-    // Fetch recent unread emails
     const listResponse = await fetch(
       `${GMAIL_API_BASE}/users/me/messages?maxResults=${max_results}&q=${encodedQuery}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${access_token}`,
-        },
-      }
+      { headers: { 'Authorization': `Bearer ${access_token}` } }
     );
 
     if (!listResponse.ok) {
@@ -490,22 +546,18 @@ serve(async (req) => {
 
     const listData = await listResponse.json();
     const messages = listData.messages || [];
-    console.log(`Found ${messages.length} unread emails`);
+    console.log(`Found ${messages.length} emails to process`);
 
-    // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch all existing deals for duplicate detection
     const { data: existingDeals } = await supabase
       .from('deals')
       .select('id, address_full, gmail_message_id, overrides, api_data');
-    
-    const existingAddresses = existingDeals?.map(d => ({ 
-      id: d.id, 
-      address: d.address_full,
-      deal: d,
+
+    const existingAddresses = existingDeals?.map(d => ({
+      id: d.id, address: d.address_full, deal: d,
     })) || [];
 
     const syncDetails: SyncDetails[] = [];
@@ -516,53 +568,30 @@ serve(async (req) => {
     let dealsSkippedDuplicate = 0;
     let dealsSkippedPortal = 0;
 
-    // If no emails found, return early
     if (messages.length === 0) {
-      // Save sync history
-      await supabase.from('sync_history').insert({
-        total_emails_scanned: 0,
-        deals_created: 0,
-        deals_skipped_duplicate: 0,
-        deals_skipped_portal: 0,
-        skipped_addresses: [],
-        portal_emails: [],
-        errors: [],
-        details: [],
-      });
-
       return new Response(
-        JSON.stringify({
-          success: true,
-          processed: 0,
-          deals: [],
-          message: 'No unread emails found',
-          syncDetails: [],
-        }),
+        JSON.stringify({ success: true, processed: 0, deals: [], message: 'No unread emails found', syncDetails: [] }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Process each email
     for (const msg of messages) {
       try {
-        // Check if already processed by gmail_message_id
-        const alreadyProcessed = existingDeals?.some(d => d.gmail_message_id === msg.id);
-        if (alreadyProcessed) {
-          console.log(`Email ${msg.id} already processed, skipping`);
-          await markEmailAsRead(access_token, msg.id);
-          continue;
+        // Skip already-processed message IDs (unless dry_run or include_read)
+        if (!dry_run && !include_read) {
+          const alreadyProcessed = existingDeals?.some(d => d.gmail_message_id === msg.id);
+          if (alreadyProcessed) {
+            console.log(`Email ${msg.id} already processed, skipping`);
+            await markEmailAsRead(access_token, msg.id);
+            continue;
+          }
         }
 
         // Fetch full message
         const msgResponse = await fetch(
           `${GMAIL_API_BASE}/users/me/messages/${msg.id}?format=full`,
-          {
-            headers: {
-              'Authorization': `Bearer ${access_token}`,
-            },
-          }
+          { headers: { 'Authorization': `Bearer ${access_token}` } }
         );
-
         if (!msgResponse.ok) {
           console.error(`Failed to fetch message ${msg.id}`);
           continue;
@@ -570,164 +599,96 @@ serve(async (req) => {
 
         const fullMessage: GmailMessage = await msgResponse.json();
         const subject = getHeader(fullMessage, 'subject');
-        const date = getHeader(fullMessage, 'date');
-        const fromHeader = getHeader(fullMessage, 'from');
-        const senderInfo = parseSenderInfo(fromHeader);
-        const body = extractEmailBody(fullMessage);
+        const date    = getHeader(fullMessage, 'date');
+        const from    = getHeader(fullMessage, 'from');
+        const senderInfo = parseSenderInfo(from);
+        const body    = extractEmailBody(fullMessage);
         const snippet = fullMessage.snippet || '';
 
-        console.log(`Processing email from: ${senderInfo.email}, subject: ${subject}`);
+        console.log(`Processing: from=${senderInfo.email} | subject="${subject}" | body_len=${body.length}`);
 
-        // Check if from portal
+        // Skip portal emails — mark them as read immediately
         if (isPortalEmail(senderInfo.email)) {
-          console.log(`Skipping portal email from: ${senderInfo.email}`);
           portalEmails.push(`${senderInfo.email}: ${subject}`);
           dealsSkippedPortal++;
-          syncDetails.push({
-            address: '',
-            action: 'skipped_portal',
-            senderEmail: senderInfo.email,
-            senderName: senderInfo.name,
-            subject,
-            reason: `Portal email from ${senderInfo.email}`,
-          });
-          await markEmailAsRead(access_token, msg.id);
+          syncDetails.push({ address: '', action: 'skipped_portal', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `Portal: ${senderInfo.email}` });
+          if (!dry_run) await markEmailAsRead(access_token, msg.id);
           continue;
         }
 
-        // Extract ALL addresses and purchase prices using AI (supports multiple properties per email)
+        // Extract deals (AI + regex fallback)
         const extractedDeals = await extractDealsWithAI(body, subject);
-        
+
         if (extractedDeals.length === 0) {
-          console.log(`No addresses found in email: ${subject}`);
-          syncDetails.push({
-            address: '',
-            action: 'no_address',
-            senderEmail: senderInfo.email,
-            senderName: senderInfo.name,
-            subject,
-            reason: 'No property address found in email',
-          });
-          await markEmailAsRead(access_token, msg.id);
+          console.log(`No addresses found in: "${subject}"`);
+          syncDetails.push({ address: '', action: 'no_address', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: 'No property address found (AI + regex both returned nothing)' });
+          // ── KEY FIX: Do NOT mark as read — leave unread so it can be retried ──
           continue;
         }
 
-        console.log(`Found ${extractedDeals.length} deal(s) in email: ${subject}`);
+        console.log(`Found ${extractedDeals.length} deal(s) in "${subject}"`);
 
-        // Process each deal from this email
+        let dealsFromThisEmail = 0;
+
         for (const dealInfo of extractedDeals) {
           const address = dealInfo.address;
           const emailPurchasePrice = dealInfo.purchasePrice;
-          console.log(`Processing address: ${address}, price: ${emailPurchasePrice}`);
+          console.log(`  Deal: "${address}" price=$${emailPurchasePrice} source=${dealInfo.source}`);
 
-          // Skip deals over budget
+          // Skip over-budget
           if (emailPurchasePrice && emailPurchasePrice > MAX_DEAL_PRICE) {
-            console.log(`Skipping over-budget deal: ${address} at $${emailPurchasePrice}`);
-            syncDetails.push({
-              address,
-              action: 'skipped_over_budget',
-              senderEmail: senderInfo.email,
-              senderName: senderInfo.name,
-              subject,
-              reason: `Price $${emailPurchasePrice.toLocaleString()} exceeds $${MAX_DEAL_PRICE.toLocaleString()} limit`,
-            });
+            syncDetails.push({ address, action: 'skipped_over_budget', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `$${emailPurchasePrice.toLocaleString()} > $${MAX_DEAL_PRICE.toLocaleString()}` });
             continue;
           }
 
-          // Check for duplicate address (fuzzy matching)
+          // Duplicate check
           const duplicateMatch = existingAddresses.find(ea => addressesMatch(ea.address, address));
-          
           if (duplicateMatch) {
-            console.log(`Duplicate address found: ${address} matches existing ${duplicateMatch.address}`);
-            
-            // Check if this is a better deal
             const newDealData = { emailPurchasePrice, purchasePrice: emailPurchasePrice };
-            if (isBetterDeal(newDealData, duplicateMatch.deal)) {
-              console.log(`New deal is better, updating existing deal ${duplicateMatch.id}`);
-              
-              // Update existing deal with better data
-              const { error: updateError } = await supabase
-                .from('deals')
-                .update({
-                  overrides: {
-                    ...(duplicateMatch.deal.overrides || {}),
-                    purchasePrice: emailPurchasePrice,
-                  },
-                  is_off_market: true,
-                  sender_name: senderInfo.name,
-                  sender_email: senderInfo.email,
-                  email_snippet: snippet,
-                  email_subject: subject,
-                  email_date: date ? new Date(date).toISOString() : null,
-                })
-                .eq('id', duplicateMatch.id);
-
-              if (updateError) {
-                console.error('Error updating deal:', updateError);
-              } else {
-                syncDetails.push({
-                  address,
-                  action: 'updated_existing',
-                  existingDealId: duplicateMatch.id,
-                  senderEmail: senderInfo.email,
-                  senderName: senderInfo.name,
-                  subject,
-                  reason: `Updated with better price: $${emailPurchasePrice}`,
-                });
-              }
+            if (!dry_run && isBetterDeal(newDealData, duplicateMatch.deal)) {
+              await supabase.from('deals').update({
+                overrides: { ...(duplicateMatch.deal.overrides || {}), purchasePrice: emailPurchasePrice },
+                is_off_market: true,
+                sender_name: senderInfo.name,
+                sender_email: senderInfo.email,
+                email_snippet: snippet,
+                email_subject: subject,
+                email_date: date ? new Date(date).toISOString() : null,
+              }).eq('id', duplicateMatch.id);
+              syncDetails.push({ address, action: 'updated_existing', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `Better price: $${emailPurchasePrice}` });
+              dealsFromThisEmail++;
             } else {
               skippedAddresses.push(address);
               dealsSkippedDuplicate++;
-              syncDetails.push({
-                address,
-                action: 'skipped_duplicate',
-                existingDealId: duplicateMatch.id,
-                senderEmail: senderInfo.email,
-                senderName: senderInfo.name,
-                subject,
-                reason: `Duplicate of existing deal: ${duplicateMatch.address}`,
-              });
+              syncDetails.push({ address, action: 'skipped_duplicate', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject });
             }
-            continue; // Continue to next deal in this email
+            continue;
           }
 
           // Parse address parts
           const addressParts = address.split(',').map((p: string) => p.trim());
-          const street = addressParts[0] || address;
-          const city = addressParts[1] || '';
+          const street   = addressParts[0] || address;
+          const city     = addressParts[1] || '';
           const stateZip = addressParts[2] || '';
           const [state, zip] = stateZip.split(' ').filter(Boolean);
 
-          // Check if deal matches target state
+          // State filter
           if (target_state && state) {
-            const normalizedState = state.toUpperCase().trim();
-            const normalizedTarget = target_state.toUpperCase().trim();
-            if (normalizedState !== normalizedTarget) {
-              console.log(`Skipping deal in wrong state: ${address} (${normalizedState} != ${normalizedTarget})`);
-              syncDetails.push({
-                address,
-                action: 'skipped_wrong_state',
-                senderEmail: senderInfo.email,
-                senderName: senderInfo.name,
-                subject,
-                reason: `State ${normalizedState} doesn't match target ${normalizedTarget}`,
-              });
+            const normState = state.toUpperCase().trim();
+            const normTarget = target_state.toUpperCase().trim();
+            if (normState !== normTarget) {
+              syncDetails.push({ address, action: 'skipped_wrong_state', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `State ${normState} != ${normTarget}` });
               continue;
             }
           }
 
-          // Merge regex-extracted image links with AI-found photo links
+          // Merge image links
           const regexImageLinks = extractImageLinks(body);
           const aiPhotoLinks: string[] = Array.isArray(dealInfo.extractedData?.photoLinks)
-            ? dealInfo.extractedData.photoLinks
-            : [];
+            ? dealInfo.extractedData.photoLinks : [];
           const allImageLinks = [...new Set([...aiPhotoLinks, ...regexImageLinks])].slice(0, 20);
-          const enrichedExtractedData = {
-            ...dealInfo.extractedData,
-            imageLinks: allImageLinks,
-          };
+          const enrichedExtractedData = { ...dealInfo.extractedData, imageLinks: allImageLinks };
 
-          // Prepare deal data
           const dealData: Record<string, any> = {
             address_street: street,
             address_city: city,
@@ -749,87 +710,66 @@ serve(async (req) => {
             email_extracted_data: Object.keys(enrichedExtractedData).length > 0 ? enrichedExtractedData : null,
           };
 
-          // Insert into database
-          const { data: newDeal, error: insertError } = await supabase
-            .from('deals')
-            .insert(dealData)
-            .select()
-            .single();
-
-          if (insertError) {
-            console.error('Error inserting deal:', insertError);
-            errors.push(`Failed to save deal for ${address}: ${insertError.message}`);
-            syncDetails.push({
-              address,
-              action: 'error',
-              senderEmail: senderInfo.email,
-              senderName: senderInfo.name,
-              subject,
-              reason: insertError.message,
-            });
+          if (dry_run) {
+            // Don't save — just report
+            processedDeals.push({ ...dealData, dry_run: true, extractionSource: dealInfo.source });
+            syncDetails.push({ address, action: 'created', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `[DRY RUN] Would create. Source: ${dealInfo.source}` });
+            existingAddresses.push({ id: 'dry-run', address, deal: dealData });
+            dealsFromThisEmail++;
             continue;
           }
 
-          // Add to existing addresses for subsequent duplicate detection in this batch
-          existingAddresses.push({ id: newDeal.id, address: newDeal.address_full, deal: newDeal });
+          const { data: newDeal, error: insertError } = await supabase
+            .from('deals').insert(dealData).select().single();
 
+          if (insertError) {
+            console.error('Error inserting deal:', insertError);
+            errors.push(`Failed to save ${address}: ${insertError.message}`);
+            syncDetails.push({ address, action: 'error', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: insertError.message });
+            continue;
+          }
+
+          existingAddresses.push({ id: newDeal.id, address: newDeal.address_full, deal: newDeal });
           processedDeals.push(newDeal);
-          syncDetails.push({
-            address,
-            action: 'created',
-            dealId: newDeal.id,
-            senderEmail: senderInfo.email,
-            senderName: senderInfo.name,
-            subject,
-          });
-          console.log(`Successfully created deal: ${address}`);
+          syncDetails.push({ address, action: 'created', dealId: newDeal.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject });
+          dealsFromThisEmail++;
+          console.log(`  ✓ Created deal: ${address}`);
         }
 
-        // Mark email as read after processing all deals from it
-        await markEmailAsRead(access_token, msg.id);
+        // ── Mark as read only if we actually processed deals from this email ──
+        if (!dry_run && dealsFromThisEmail > 0) {
+          await markEmailAsRead(access_token, msg.id);
+        }
+        // If no deals found from a non-portal email → leave unread for retry
 
       } catch (error) {
         console.error(`Error processing message ${msg.id}:`, error);
-        errors.push(`Error processing email: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        syncDetails.push({
-          address: '',
-          action: 'error',
-          reason: error instanceof Error ? error.message : 'Unknown error',
-        });
+        errors.push(`Error: ${error instanceof Error ? error.message : 'Unknown'}`);
+        syncDetails.push({ address: '', action: 'error', reason: error instanceof Error ? error.message : 'Unknown error' });
       }
     }
 
-    // Mark all older unread emails as read if requested
+    // Mark older unread emails as read if requested
     let olderMarkedRead = 0;
-    if (mark_all_read && since_days) {
-      try {
-        // Fetch ALL unread emails (not just recent ones)
-        const allUnreadResponse = await fetch(
-          `${GMAIL_API_BASE}/users/me/messages?maxResults=500&q=${encodeURIComponent('is:unread')}`,
-          { headers: { 'Authorization': `Bearer ${access_token}` } }
-        );
-        if (allUnreadResponse.ok) {
-          const allUnreadData = await allUnreadResponse.json();
-          const allUnread = allUnreadData.messages || [];
-          // Filter out messages we already processed in this batch
-          const processedIds = new Set(messages.map((m: any) => m.id));
-          const olderMessages = allUnread.filter((m: any) => !processedIds.has(m.id));
-          
-          for (const oldMsg of olderMessages) {
-            await markEmailAsRead(access_token, oldMsg.id);
-            olderMarkedRead++;
-          }
-          console.log(`Marked ${olderMarkedRead} older emails as read`);
+    if (!dry_run && mark_all_read && since_days) {
+      const allUnreadResp = await fetch(
+        `${GMAIL_API_BASE}/users/me/messages?maxResults=500&q=${encodeURIComponent('is:unread')}`,
+        { headers: { 'Authorization': `Bearer ${access_token}` } }
+      );
+      if (allUnreadResp.ok) {
+        const allUnreadData = await allUnreadResp.json();
+        const processedIds = new Set(messages.map((m: any) => m.id));
+        const olderMessages = (allUnreadData.messages || []).filter((m: any) => !processedIds.has(m.id));
+        for (const oldMsg of olderMessages) {
+          await markEmailAsRead(access_token, oldMsg.id);
+          olderMarkedRead++;
         }
-      } catch (e) {
-        console.error('Error marking older emails as read:', e);
       }
     }
 
     // Save sync history
-    const { data: syncHistoryRecord } = await supabase
-      .from('sync_history')
-      .insert({
+    if (!dry_run) {
+      await supabase.from('sync_history').insert({
         total_emails_scanned: messages.length,
         deals_created: processedDeals.length,
         deals_skipped_duplicate: dealsSkippedDuplicate,
@@ -838,9 +778,8 @@ serve(async (req) => {
         portal_emails: portalEmails,
         errors,
         details: syncDetails,
-      })
-      .select()
-      .single();
+      });
+    }
 
     return new Response(
       JSON.stringify({
@@ -852,14 +791,14 @@ serve(async (req) => {
         totalScanned: messages.length,
         olderMarkedRead,
         syncDetails,
-        syncHistoryId: syncHistoryRecord?.id,
         errors: errors.length > 0 ? errors : undefined,
+        dry_run,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error) {
-    console.error('Error in gmail-sync function:', error);
+    console.error('Error in gmail-sync:', error);
     return new Response(
       JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

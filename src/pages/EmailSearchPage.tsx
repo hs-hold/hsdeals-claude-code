@@ -18,7 +18,7 @@ import { toast } from 'sonner';
 import {
   Mail, Loader2, CheckCircle, CheckCircle2, XCircle,
   Zap, MapPin, MailOpen, AlertCircle, Trash2,
-  ExternalLink, Pencil, Plus,
+  ExternalLink, Pencil, Plus, RotateCcw,
 } from 'lucide-react';
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -81,7 +81,7 @@ function actionBadge(action: EmailAction, subjectIsAddr: boolean) {
 
 export default function EmailSearchPage() {
   const { isConnected, isLoading: isAuthLoading, tokens, connect, disconnect } = useGmailAuth();
-  const { isSyncing, isMarkingOld, sync, markOldAsRead } = useGmailSync();
+  const { isSyncing, isMarkingOld, sync, markOldAsRead, markUnreadRecent } = useGmailSync();
   const { selectedState } = useUserState();
   const { deals, refetch } = useDeals();
   const {
@@ -150,6 +150,11 @@ export default function EmailSearchPage() {
     if (!tokens?.access_token) return;
     await markOldAsRead(tokens.access_token, 7);
   }, [tokens, markOldAsRead]);
+
+  const handleMarkUnreadRecent = useCallback(async () => {
+    if (!tokens?.access_token) return;
+    await markUnreadRecent(tokens.access_token, 7);
+  }, [tokens, markUnreadRecent]);
 
   // ── Selection ────────────────────────────────────────────────────────────
 
@@ -336,6 +341,17 @@ export default function EmailSearchPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="sm" onClick={handleMarkUnreadRecent} disabled={isMarkingOld || isSyncing}>
+                  {isMarkingOld ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                  <span className="ml-1.5 hidden sm:inline">Re-scan Last 7 Days</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-xs">
+                Marks emails from the last 7 days as unread so they appear in the next scan. Use when emails were scanned but deals weren't extracted.
+              </TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="outline" size="sm" onClick={handleMarkOld} disabled={isMarkingOld || isSyncing}>
@@ -552,6 +568,9 @@ export default function EmailSearchPage() {
                             <span className="text-[10px] text-muted-foreground/50">
                               {item.senderName}
                             </span>
+                          )}
+                          {item.reason && (item.action === 'no_address' || item.action === 'error') && (
+                            <span className="text-[10px] text-muted-foreground/60 italic">{item.reason}</span>
                           )}
                           {isError && qItem?.error && (
                             <span className="text-[10px] text-red-400">{qItem.error}</span>

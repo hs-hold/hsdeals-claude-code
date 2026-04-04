@@ -140,11 +140,30 @@ export function useGmailSync() {
     }
   }, [toast]);
 
+  const markUnreadRecent = useCallback(async (accessToken: string, sinceDays = 7): Promise<number> => {
+    setIsMarkingOld(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('gmail-sync', {
+        body: { access_token: accessToken, mark_unread_recent: true, since_days: sinceDays },
+      });
+      if (error) throw error;
+      const count: number = data.marked ?? 0;
+      toast({ title: 'Done', description: count > 0 ? `Marked ${count} recent emails as unread — ready to re-scan` : 'No recent emails found' });
+      return count;
+    } catch (err) {
+      toast({ title: 'Failed', description: 'Could not mark emails as unread', variant: 'destructive' });
+      return 0;
+    } finally {
+      setIsMarkingOld(false);
+    }
+  }, [toast]);
+
   return {
     isSyncing,
     isMarkingOld,
     lastSyncResult,
     sync,
     markOldAsRead,
+    markUnreadRecent,
   };
 }
