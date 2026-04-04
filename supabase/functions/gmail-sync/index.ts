@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 
 const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1';
-const LOVABLE_AI_URL = 'https://ai.gateway.lovable.dev/v1/chat/completions';
+const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const MAX_DEAL_PRICE = 300000; // Skip deals above this price
 
 // List of portal/listing service domains to skip
@@ -108,6 +108,35 @@ function isPortalEmail(senderEmail: string): boolean {
   return PORTAL_DOMAINS.some(domain => senderEmail.includes(domain));
 }
 
+// Extract image/photo links from email body (direct image URLs + gallery links)
+function extractImageLinks(emailBody: string): string[] {
+  const found = new Set<string>();
+
+  // img src attributes
+  const imgSrcRegex = /<img[^>]+src=["']([^"']+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = imgSrcRegex.exec(emailBody)) !== null) {
+    const url = m[1];
+    if (url.startsWith('http') && !/tracking|pixel|beacon|spacer|logo|icon/i.test(url)) {
+      found.add(url);
+    }
+  }
+
+  // Direct image file URLs
+  const directImgRegex = /https?:\/\/[^\s"'<>]+\.(jpg|jpeg|png|webp|gif)/gi;
+  while ((m = directImgRegex.exec(emailBody)) !== null) {
+    found.add(m[0].split('"')[0].split("'")[0]);
+  }
+
+  // Gallery / cloud storage links (Google Drive, Dropbox, OneDrive, iCloud, etc.)
+  const galleryRegex = /https?:\/\/(?:drive\.google\.com|photos\.google\.com|dropbox\.com|1drv\.ms|onedrive\.live\.com|icloud\.com|photos\.app\.goo\.gl|album\.link|flickr\.com|imgur\.com|cloudinary\.com)[^\s"'<>]*/gi;
+  while ((m = galleryRegex.exec(emailBody)) !== null) {
+    found.add(m[0].split('"')[0].split("'")[0]);
+  }
+
+  return [...found].slice(0, 20); // cap at 20
+}
+
 // Normalize address for fuzzy matching
 function normalizeAddress(address: string): string {
   return address
@@ -158,11 +187,11 @@ interface ExtractedDeal {
   extractedData: Record<string, any>;
 }
 
-// Use Lovable AI to extract ALL property addresses and comprehensive deal info from email content
+// Use Anthropic claude-haiku to extract ALL property addresses and comprehensive deal info from email content
 async function extractDealsWithAI(emailContent: string, subject: string): Promise<ExtractedDeal[]> {
-  const apiKey = Deno.env.get('LOVABLE_API_KEY');
+  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
   if (!apiKey) {
-    console.error('LOVABLE_API_KEY not configured');
+    console.error('ANTHROPIC_API_KEY not configured');
     return [];
   }
 
@@ -177,24 +206,11 @@ For EACH property found, extract as much of the following as possible:
 
 1. **address** (required): Full US property address with street, city, state, ZIP
 2. **purchasePrice**: The asking/purchase price (NOT rehab, NOT ARV)
-3. **dealType**: Classify the deal based on the email content. Choose the MOST specific type that applies:
-   - "Fix & Flip" - buy, rehab, sell for profit
-   - "Wholetail" - buy below market, light cleanup, relist on MLS
-   - "Wholesale" - assignment of contract
-   - "Buy & Hold" - traditional rental investment
-   - "BRRRR" - Buy Rehab Rent Refinance Repeat
-   - "Co-Living" - rent by room strategy
-   - "Multifamily" - 2+ unit residential (duplex, triplex, fourplex, apartment)
-   - "Mixed Use" - residential + commercial
-   - "Triple Net" - NNN lease commercial
-   - "Subject To" - taking over existing mortgage
-   - "Seller Financing" - owner financed
-   - "Wrap Mortgage" - wrap-around mortgage
-   - "Assumable Mortgage" - FHA/VA assumable loan
-   - "Ground Up Development" - new construction / land development
-   - "Tax Lien / Tax Deed" - tax sale property
-   - "Other" - if deal type is mentioned but doesn't fit above categories, put the exact term from the email
-   - null - if deal type cannot be determined from the email
+3. **dealType**: Classify the deal. Choose the MOST specific type that applies:
+   - "Fix & Flip", "Wholetail", "Wholesale", "Buy & Hold", "BRRRR", "Co-Living",
+   - "Multifamily", "Mixed Use", "Triple Net", "Subject To", "Seller Financing",
+   - "Wrap Mortgage", "Assumable Mortgage", "Ground Up Development", "Tax Lien / Tax Deed",
+   - "Other" (put exact term from email), or null if unknown
 4. **units**: Number of units (for multifamily)
 5. **bedrooms**: Number of bedrooms (per unit if multi)
 6. **bathrooms**: Number of bathrooms (per unit if multi)
@@ -215,6 +231,8 @@ For EACH property found, extract as much of the following as possible:
 21. **occupancy**: occupied, vacant, tenant-occupied, owner-occupied
 22. **financingNotes**: Any financing details, terms, interest rates mentioned
 23. **dealNotes**: Any other important deal details from the email
+24. **propertyDescription**: A clean, well-organized 2-3 paragraph description of the property. Include ALL details mentioned in the email (location, specs, condition, financials, opportunity). Do NOT invent or change any data — only organize and present what is in the email.
+25. **photoLinks**: Array of any photo gallery links, Google Drive/Dropbox/OneDrive links, or direct photo URLs found in the email body. Empty array if none.
 
 Return ONLY a JSON object:
 {
@@ -242,40 +260,43 @@ Return ONLY a JSON object:
       "condition": null,
       "occupancy": null,
       "financingNotes": "Existing loan at $580k, $75k down required",
-      "dealNotes": "4 units, each 2bd/2ba ~1350 SF, rent potential $2200/unit"
+      "dealNotes": "4 units, each 2bd/2ba ~1350 SF, rent potential $2200/unit",
+      "propertyDescription": "This 4-unit multifamily property is located at 123 Main St...",
+      "photoLinks": ["https://drive.google.com/..."]
     }
   ]
 }
 
-Return { "deals": [] } if no valid US property addresses are found.
-Response:`;
+Return { "deals": [] } if no valid US property addresses are found.`;
 
   try {
-    const response = await fetch(LOVABLE_AI_URL, {
+    const response = await fetch(ANTHROPIC_API_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 2500,
         messages: [
           { role: 'user', content: prompt }
         ],
-        max_tokens: 2000,
       }),
     });
 
     if (!response.ok) {
-      console.error('AI API error:', response.status);
+      const errText = await response.text();
+      console.error('Anthropic API error:', response.status, errText);
       return [];
     }
 
     const data = await response.json();
-    const responseText = data.choices?.[0]?.message?.content?.trim();
-    
+    const responseText = data.content?.[0]?.text?.trim();
+
     console.log('AI response for deals extraction:', responseText);
-    
+
     try {
       let jsonStr = responseText;
       if (jsonStr.includes('```')) {
@@ -283,11 +304,10 @@ Response:`;
       }
       const parsed = JSON.parse(jsonStr);
       const deals = Array.isArray(parsed) ? parsed : (parsed.deals || []);
-      
+
       return deals
         .filter((d: any) => d.address && typeof d.address === 'string' && d.address.length > 5)
         .map((d: any) => {
-          // Separate core fields from extracted data
           const { address, purchasePrice, dealType, ...rest } = d;
           return {
             address: address.trim(),
@@ -551,6 +571,7 @@ serve(async (req) => {
                     ...(duplicateMatch.deal.overrides || {}),
                     purchasePrice: emailPurchasePrice,
                   },
+                  is_off_market: true,
                   sender_name: senderInfo.name,
                   sender_email: senderInfo.email,
                   email_snippet: snippet,
@@ -613,6 +634,17 @@ serve(async (req) => {
             }
           }
 
+          // Merge regex-extracted image links with AI-found photo links
+          const regexImageLinks = extractImageLinks(body);
+          const aiPhotoLinks: string[] = Array.isArray(dealInfo.extractedData?.photoLinks)
+            ? dealInfo.extractedData.photoLinks
+            : [];
+          const allImageLinks = [...new Set([...aiPhotoLinks, ...regexImageLinks])].slice(0, 20);
+          const enrichedExtractedData = {
+            ...dealInfo.extractedData,
+            imageLinks: allImageLinks,
+          };
+
           // Prepare deal data
           const dealData: Record<string, any> = {
             address_street: street,
@@ -622,6 +654,7 @@ serve(async (req) => {
             address_full: address,
             status: 'new',
             source: 'email',
+            is_off_market: true,
             api_data: emailPurchasePrice ? { emailPurchasePrice } : null,
             overrides: emailPurchasePrice ? { arv: null, rent: null, rehabCost: null, purchasePrice: emailPurchasePrice } : undefined,
             email_subject: subject,
@@ -631,7 +664,7 @@ serve(async (req) => {
             sender_email: senderInfo.email,
             email_snippet: snippet,
             deal_type: dealInfo.dealType || null,
-            email_extracted_data: Object.keys(dealInfo.extractedData).length > 0 ? dealInfo.extractedData : null,
+            email_extracted_data: Object.keys(enrichedExtractedData).length > 0 ? enrichedExtractedData : null,
           };
 
           // Insert into database

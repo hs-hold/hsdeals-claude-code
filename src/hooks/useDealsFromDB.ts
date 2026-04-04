@@ -28,6 +28,7 @@ interface DBDeal {
   created_at: string;
   updated_at: string;
   is_locked: boolean;
+  is_off_market: boolean;
   deal_type: string | null;
   email_extracted_data: any;
 }
@@ -144,6 +145,7 @@ function mapDBDealToDeal(dbDeal: DBDeal, loanDefaults?: ReturnType<typeof import
     owner: 'Default User',
     createdBy: (dbDeal as any).created_by || null,
     isLocked: dbDeal.is_locked || false,
+    isOffMarket: dbDeal.is_off_market || false,
     dealType: dbDeal.deal_type || null,
     emailExtractedData: dbDeal.email_extracted_data || null,
     _jobId: (dbDeal as any).job_id || null,

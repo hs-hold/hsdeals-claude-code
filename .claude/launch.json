@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "hsdeals",
+      "runtimeExecutable": "/opt/homebrew/bin/node",
+      "runtimeArgs": ["/Users/dvirsi/hsdeals-claude-code/node_modules/.bin/vite", "--config", "/Users/dvirsi/hsdeals-claude-code/.claude/worktrees/vigilant-heyrovsky/vite.config.ts"],
+      "cwd": "/Users/dvirsi/hsdeals-claude-code/.claude/worktrees/vigilant-heyrovsky",
+      "port": 8080,
+      "autoPort": true
+    }
+  ]
+}
