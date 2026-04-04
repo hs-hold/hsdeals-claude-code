@@ -99,9 +99,12 @@ export function FlipAnalysisCard({
   const totalSaleCostsCash = agentCommissionCalc + titleFeesCalc + closingCostsSaleCalc + cashNotaryFee;
   
   // CASH DEAL calculations
-  const cashTotalInvestment = purchasePrice + closingCostsBuyCalc + rehabCost + rehabContingencyCalc + totalHoldingCosts;
-  const cashNetProfit = arv - cashTotalInvestment - totalSaleCostsCash;
-  const cashRoi = cashTotalInvestment > 0 ? cashNetProfit / cashTotalInvestment : 0;
+  // cashAcquisitionCost = money put IN before the sale (used as ROI denominator)
+  const cashAcquisitionCost = purchasePrice + closingCostsBuyCalc + rehabCost + rehabContingencyCalc + totalHoldingCosts;
+  // cashTotalInvestment = ALL costs including sale costs (shown as "Total Investment" in the display)
+  const cashTotalInvestment = cashAcquisitionCost + totalSaleCostsCash;
+  const cashNetProfit = arv - cashTotalInvestment;
+  const cashRoi = cashAcquisitionCost > 0 ? cashNetProfit / cashAcquisitionCost : 0;
   
   // HML financing assumptions
   const hmlLtvPurchase = localOverrides.hmlLtvPurchasePercent 
@@ -393,6 +396,10 @@ export function FlipAnalysisCard({
                       </div>
                     </div>
                     <div className="flex justify-between items-center pt-1 border-t border-border">
+                      <span className="text-muted-foreground text-[10px]">Acquisition</span>
+                      <span className="text-muted-foreground text-[10px]">{formatCurrency(cashAcquisitionCost)}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
                       <span className="font-semibold">Total Investment</span>
                       <span className="font-bold">{formatCurrency(cashTotalInvestment)}</span>
                     </div>

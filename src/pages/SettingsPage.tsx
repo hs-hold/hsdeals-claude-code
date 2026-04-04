@@ -18,6 +18,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { ApiKeysManager } from '@/components/settings/ApiKeysManager';
+import { ExternalApiKeysManager } from '@/components/settings/ExternalApiKeysManager';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -617,7 +618,10 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* API Keys Management */}
+      {/* External API Keys (third-party services this app calls) */}
+      <ExternalApiKeysManager />
+
+      {/* API Keys Management (keys this app generates for external access) */}
       <ApiKeysManager />
 
       {/* Danger Zone */}

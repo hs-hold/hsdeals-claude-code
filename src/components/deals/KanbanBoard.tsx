@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { DealAgeFilter, AgeFilterType, applyDealAgeFilter } from './DealAgeFilter';
 import { Deal, DealStatus, DEAL_STATUS_CONFIG } from '@/types/deal';
 import { formatCurrency, formatPercent } from '@/utils/financialCalculations';
 import { useDeals } from '@/context/DealsContext';
@@ -124,7 +125,8 @@ function KanbanColumn({ status, deals }: KanbanColumnProps) {
 
 export function KanbanBoard() {
   const { deals } = useDeals();
-  
+  const [ageFilter, setAgeFilter] = useState<AgeFilterType>('month');
+
   const dealsByStatus = useMemo(() => {
     const grouped: Record<DealStatus, Deal[]> = {
       new: [],
@@ -136,30 +138,37 @@ export function KanbanBoard() {
       not_relevant: [],
       filtered_out: [],
     };
-    
-    deals.forEach(deal => {
+
+    const filtered = applyDealAgeFilter(deals, ageFilter);
+
+    filtered.forEach(deal => {
       grouped[deal.status].push(deal);
     });
-    
+
     // Sort each column by profitability
     Object.keys(grouped).forEach(status => {
-      grouped[status as DealStatus].sort((a, b) => 
+      grouped[status as DealStatus].sort((a, b) =>
         (b.financials?.cashOnCashReturn ?? 0) - (a.financials?.cashOnCashReturn ?? 0)
       );
     });
-    
+
     return grouped;
-  }, [deals]);
-  
+  }, [deals, ageFilter]);
+
   return (
-    <div className="flex gap-4 overflow-x-auto pb-4">
-      {PIPELINE_STATUSES.map(status => (
-        <KanbanColumn 
-          key={status} 
-          status={status} 
-          deals={dealsByStatus[status]} 
-        />
-      ))}
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <DealAgeFilter value={ageFilter} onChange={setAgeFilter} />
+      </div>
+      <div className="flex gap-4 overflow-x-auto pb-4">
+        {PIPELINE_STATUSES.map(status => (
+          <KanbanColumn
+            key={status}
+            status={status}
+            deals={dealsByStatus[status]}
+          />
+        ))}
+      </div>
     </div>
   );
 }

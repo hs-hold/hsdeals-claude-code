@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useDeals } from '@/context/DealsContext';
 import { getUnanalyzedDeals } from '@/utils/dealHelpers';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,7 @@ import { Plus, Zap, Loader2, Search, Inbox, CheckCircle2, XCircle, Clock } from 
 import { formatIL as format } from '@/utils/dateFormat';
 import { toast } from 'sonner';
 import { DealStatusBadge } from '@/components/deals/DealStatusBadge';
+import { DealAgeFilter, AgeFilterType, applyDealAgeFilter } from '@/components/deals/DealAgeFilter';
 
 type QueueStatus = 'queued' | 'analyzing' | 'done' | 'error';
 
@@ -28,8 +29,10 @@ interface QueueItem {
 }
 
 export default function NewDealsPage() {
+  const navigate = useNavigate();
   const { deals, analyzeDeal, refetch } = useDeals();
   const [search, setSearch] = useState('');
+  const [ageFilter, setAgeFilter] = useState<AgeFilterType>('month');
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const isProcessingRef = useRef(false);
   const queueRef = useRef<QueueItem[]>([]);
@@ -41,7 +44,7 @@ export default function NewDealsPage() {
 
   const unanalyzedDeals = useMemo(() => {
     let result = getUnanalyzedDeals(deals);
-    
+
     if (search) {
       const searchLower = search.toLowerCase();
       result = result.filter(d =>
@@ -49,15 +52,21 @@ export default function NewDealsPage() {
         d.address.zip.includes(search)
       );
     }
-    
-    return result.sort((a, b) => 
+
+    // Age filter: use createdAt (strict) since all deals here are unanalyzed
+    result = applyDealAgeFilter(result, ageFilter, { dateField: 'createdAt', strict: true });
+
+    return result.sort((a, b) =>
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
-  }, [deals, search]);
+  }, [deals, search, ageFilter]);
 
   const processQueue = useCallback(async () => {
     if (isProcessingRef.current) return;
     isProcessingRef.current = true;
+
+    // Track successful deal IDs locally — don't rely on stale queueRef state
+    const successfulDealIds: string[] = [];
 
     while (true) {
       const currentQueue = queueRef.current;
@@ -71,10 +80,12 @@ export default function NewDealsPage() {
 
       try {
         await analyzeDeal(nextItem.dealId);
+        successfulDealIds.push(nextItem.dealId);
         setQueue(prev => prev.map(item =>
           item.dealId === nextItem.dealId ? { ...item, status: 'done' } : item
         ));
       } catch (err) {
+        console.error('[NewDealsPage] analyzeDeal error:', err);
         setQueue(prev => prev.map(item =>
           item.dealId === nextItem.dealId
             ? { ...item, status: 'error', error: err instanceof Error ? err.message : 'Failed' }
@@ -84,14 +95,26 @@ export default function NewDealsPage() {
     }
 
     isProcessingRef.current = false;
-    
-    // Check if any were completed
-    const finalQueue = queueRef.current;
-    const doneCount = finalQueue.filter(i => i.status === 'done').length;
-    if (doneCount > 0) {
-      toast.success(`Analyzed ${doneCount} deal${doneCount > 1 ? 's' : ''} successfully!`);
+
+    if (successfulDealIds.length === 1) {
+      // Single deal — navigate directly to its page with the success banner
+      await refetch();
+      navigate(`/deals/${successfulDealIds[0]}`, {
+        state: {
+          analysisResult: 'new',
+          apiCharged: true,
+          analyzedAt: new Date().toISOString(),
+        },
+      });
+    } else if (successfulDealIds.length > 1) {
+      // Multiple deals — stay on page, show summary toast
+      await refetch();
+      toast.success(`Analyzed ${successfulDealIds.length} deals successfully!`);
+    } else {
+      // All failed
+      toast.error('Analysis failed. Please try again.');
     }
-  }, [analyzeDeal]);
+  }, [analyzeDeal, navigate, refetch]);
 
   const handleAnalyze = useCallback((dealId: string) => {
     // Don't add if already in queue
@@ -174,15 +197,18 @@ export default function NewDealsPage() {
       {/* Gmail Connect Card */}
       <GmailConnect onSyncComplete={refetch} />
 
-      {/* Search */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          placeholder="Search by address or zip..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="pl-9"
-        />
+      {/* Search + Age filter */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by address or zip..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <DealAgeFilter value={ageFilter} onChange={setAgeFilter} />
       </div>
 
       {/* Table */}

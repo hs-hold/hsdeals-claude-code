@@ -66,6 +66,7 @@ export function BrrrrAnalysisCard({
   orderIndex,
 }: BrrrrAnalysisCardProps) {
   const [refiFeesOpen, setRefiFeesOpen] = useState(false);
+  const [brrrrMode, setBrrrrMode] = useState<'hml' | 'cash'>('hml');
   // HML financing
   const hmlLtvPurchase = localOverrides.hmlLtvPurchasePercent 
     ? parseFloat(localOverrides.hmlLtvPurchasePercent) / 100 

@@ -27,6 +27,7 @@ import {
 import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter, Zap, Loader2, Lock, X, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { DealAgeFilter, AgeFilterType, applyDealAgeFilter } from '@/components/deals/DealAgeFilter';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -61,6 +62,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
   const [minYield, setMinYield] = useState<string>('');
   const [sortField, setSortField] = useState<SortField>('created');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [ageFilter, setAgeFilter] = useState<AgeFilterType>('month');
 
   const handleAnalyze = async (dealId: string) => {
     setAnalyzingId(dealId);
@@ -141,6 +143,9 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
       }
     }
 
+    // Age filter (based on updatedAt; hide stale analyzed deals by default)
+    result = applyDealAgeFilter(result, ageFilter);
+
     // Sort
     result.sort((a, b) => {
       let aVal: number | string = 0;
@@ -180,8 +185,8 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
           bVal = b.financials?.capRate ?? 0;
           break;
         case 'created':
-          aVal = new Date(a.createdAt).getTime();
-          bVal = new Date(b.createdAt).getTime();
+          aVal = new Date(a.updatedAt).getTime();
+          bVal = new Date(b.updatedAt).getTime();
           break;
       }
 
@@ -195,7 +200,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
     });
 
     return result;
-  }, [deals, search, statusFilter, lockedFilter, minCashflow, minYield, sortField, sortDirection, excludeStatuses]);
+  }, [deals, search, statusFilter, lockedFilter, minCashflow, minYield, ageFilter, sortField, sortDirection, excludeStatuses]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -283,6 +288,8 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
           onChange={e => setMinYield(e.target.value)}
           className="w-[120px]"
         />
+
+        <DealAgeFilter value={ageFilter} onChange={setAgeFilter} className="ml-auto" />
       </div>
 
       {/* Table */}
@@ -315,7 +322,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                 <SortHeader field="capRate">Cap Rate</SortHeader>
               </TableHead>
               <TableHead className="text-right">
-                <SortHeader field="created">Created</SortHeader>
+                <SortHeader field="created">Analyzed</SortHeader>
               </TableHead>
               <TableHead className="w-[100px]">Actions</TableHead>
             </TableRow>
@@ -432,8 +439,13 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                     <TableCell className="text-right">
                       {formatPercent(deal.financials?.capRate ?? 0)}
                     </TableCell>
-                    <TableCell className="text-right text-sm text-muted-foreground">
-                      {format(new Date(deal.createdAt), 'MMM d, yyyy')}
+                    <TableCell className="text-right">
+                      <div className="text-xs text-muted-foreground space-y-0.5">
+                        <div>Created: {format(new Date(deal.createdAt), 'MMM d, yy')}</div>
+                        {deal.analyzedAt && format(new Date(deal.analyzedAt), 'MMM d') !== format(new Date(deal.createdAt), 'MMM d') && (
+                          <div className="text-primary/70">Analyzed: {format(new Date(deal.analyzedAt), 'MMM d, yy')}</div>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1">

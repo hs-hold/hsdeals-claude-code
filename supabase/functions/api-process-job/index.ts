@@ -8,6 +8,24 @@ const corsHeaders = {
 
 const PARTNERS_API_BASE = 'https://partnersapi-6cqhbrsewa-uc.a.run.app';
 
+async function getPartnersKey(): Promise<string | null> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (supabaseUrl && serviceKey) {
+    try {
+      const db = createClient(supabaseUrl, serviceKey);
+      const result = await Promise.race([
+        db.from('service_api_keys').select('api_key').eq('service_name', 'dealbeast').single(),
+        new Promise<null>((_, reject) => setTimeout(() => reject(new Error('DB timeout')), 4000)),
+      ]) as any;
+      if (result?.data?.api_key) return result.data.api_key;
+    } catch (e) {
+      console.error('[getPartnersKey] DB error/timeout:', String(e));
+    }
+  }
+  return Deno.env.get('PARTNERS_API_KEY') || null;
+}
+
 // ─── Financial Constants (same as api-analyze-zip) ───
 const FINANCIAL = {
   closingCostsPercent: 0.02,
@@ -571,7 +589,7 @@ serve(async (req) => {
       });
     }
 
-    const partnersApiKey = Deno.env.get('PARTNERS_API_KEY');
+    const partnersApiKey = await getPartnersKey();
     if (!partnersApiKey) {
       await supabase.from('api_jobs').update({ status: 'failed', error: 'API key not configured' }).eq('id', job_id);
       return new Response(JSON.stringify({ error: 'API key not configured' }), { status: 500, headers: corsHeaders });
@@ -645,41 +663,23 @@ serve(async (req) => {
         continue;
       }
 
-      const ANALYSIS_TIMEOUT = 220000;
-      const MAX_ANALYSIS_RETRIES = 3;
+      // No timeout per property — let DealBeast take as long as it needs
       let analyzeResponse: Response | null = null;
 
-      for (let attempt = 1; attempt <= MAX_ANALYSIS_RETRIES; attempt++) {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), ANALYSIS_TIMEOUT);
-
-        try {
-          analyzeResponse = await fetch(`${PARTNERS_API_BASE}/partners/sniper-mode`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${partnersApiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ address: fullAddress, filters: {}, extraParams: {} }),
-            signal: controller.signal,
-          });
-          clearTimeout(timeout);
-          break;
-        } catch (retryErr) {
-          clearTimeout(timeout);
-          const isTimeout = retryErr instanceof Error && retryErr.name === 'AbortError';
-          if (attempt < MAX_ANALYSIS_RETRIES && isTimeout) {
-            console.warn(`[Job ${job_id}] Timeout on ${fullAddress}, retrying (${attempt}/${MAX_ANALYSIS_RETRIES})...`);
-            await logActivity(supabase, job_id, 'analyzing', `Retry ${attempt}/${MAX_ANALYSIS_RETRIES} after timeout...`, fullAddress);
-            await new Promise(r => setTimeout(r, 2000));
-            continue;
-          }
-          const msg = retryErr instanceof Error && retryErr.name === 'AbortError' ? 'timeout (300s)' : (retryErr instanceof Error ? retryErr.message : 'unknown');
-          errors.push(`${fullAddress}: ${msg}`);
-          await logActivity(supabase, job_id, 'error', msg, fullAddress);
-          analyzeResponse = null;
-          break;
-        }
+      try {
+        analyzeResponse = await fetch(`${PARTNERS_API_BASE}/partners/sniper-mode`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${partnersApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ address: fullAddress, filters: {}, extraParams: {} }),
+        });
+      } catch (retryErr) {
+        const msg = retryErr instanceof Error ? retryErr.message : 'unknown fetch error';
+        errors.push(`${fullAddress}: ${msg}`);
+        await logActivity(supabase, job_id, 'error', msg, fullAddress);
+        analyzeResponse = null;
       }
 
       if (!analyzeResponse) {

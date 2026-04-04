@@ -36,6 +36,7 @@ interface SyncOptions {
 
 export function useGmailSync() {
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isMarkingOld, setIsMarkingOld] = useState(false);
   const [lastSyncResult, setLastSyncResult] = useState<SyncResult | null>(null);
   const { toast } = useToast();
 
@@ -121,9 +122,29 @@ export function useGmailSync() {
     }
   }, [toast]);
 
+  const markOldAsRead = useCallback(async (accessToken: string, sinceDays = 7): Promise<number> => {
+    setIsMarkingOld(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('gmail-sync', {
+        body: { access_token: accessToken, mark_old_only: true, since_days: sinceDays },
+      });
+      if (error) throw error;
+      const count: number = data.marked ?? 0;
+      toast({ title: 'Done', description: count > 0 ? `Marked ${count} old emails as read` : 'No old unread emails found' });
+      return count;
+    } catch (err) {
+      toast({ title: 'Failed', description: 'Could not mark old emails as read', variant: 'destructive' });
+      return 0;
+    } finally {
+      setIsMarkingOld(false);
+    }
+  }, [toast]);
+
   return {
     isSyncing,
+    isMarkingOld,
     lastSyncResult,
     sync,
+    markOldAsRead,
   };
 }

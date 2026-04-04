@@ -172,7 +172,8 @@ export default function Dashboard() {
   const doneCount = analyzedDeals.filter(d => d.status === 'done' || d.status === 'error').length;
 
   const stats = useMemo(() => {
-    const activeDeals = deals.filter(d => d.status !== 'not_relevant');
+    const NON_BUYABLE = ['not_relevant', 'filtered_out', 'closed', 'under_contract', 'pending_other'];
+    const activeDeals = deals.filter(d => !NON_BUYABLE.includes(d.status));
     const qualifiedDeals = deals.filter(d => d.status === 'qualified');
     const thisMonth = deals.filter(d => {
       const created = new Date(d.createdAt);
@@ -211,7 +212,8 @@ export default function Dashboard() {
 
   // Calculate top deals for each strategy
   const { topFlipDeals, topRentalDeals, topBrrrrDeals } = useMemo(() => {
-    const activeDeals = deals.filter(d => d.status !== 'not_relevant' && d.status !== 'closed');
+    const NON_BUYABLE_TOP = ['not_relevant', 'filtered_out', 'closed', 'under_contract', 'pending_other'];
+    const activeDeals = deals.filter(d => !NON_BUYABLE_TOP.includes(d.status));
     
     const dealsWithScores = activeDeals.map(deal => ({
       deal,
@@ -302,23 +304,13 @@ export default function Dashboard() {
                 )}
               </Button>
               <Button
-                onClick={isRunning ? () => navigate('/sync-progress') : handleScanAllAndAnalyze}
-                disabled={isRunning}
+                onClick={() => navigate('/analyze/email')}
                 variant="outline"
                 size="sm"
                 className="border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/10"
               >
-                {isRunning ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    In Progress
-                  </>
-                ) : (
-                  <>
-                    <Mail className="w-4 h-4 mr-2" />
-                    Scan All 50
-                  </>
-                )}
+                <Mail className="w-4 h-4 mr-2" />
+                Email Scanner
               </Button>
               <Button
                 onClick={isRunning ? () => navigate('/sync-progress') : handleAnalyzeUnanalyzed}

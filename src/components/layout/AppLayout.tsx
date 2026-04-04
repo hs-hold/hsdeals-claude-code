@@ -21,6 +21,8 @@ import {
   Flame,
   Wifi,
   ChevronRight,
+  Bot,
+  Telescope,
   Calendar,
   CalendarDays,
   Star,
@@ -70,6 +72,7 @@ const hotDealsSubItems = [
   { to: '/hot-deals?filter=today', label: 'Today', icon: Calendar },
   { to: '/hot-deals?filter=week', label: 'This Week', icon: CalendarDays },
   { to: '/hot-deals?filter=top', label: 'Top Rated (9+)', icon: Star },
+  { to: '/hot-deals/claude-picks', label: "Claude's Picks", icon: Bot },
 ];
 
 const dealsNavItems = [
@@ -81,6 +84,7 @@ const dealsNavItems = [
 ];
 
 const otherNavItems = [
+  { to: '/scout', icon: Telescope, label: 'Scout (Beta)' },
   { to: '/gmail-history', icon: Mail, label: 'Gmail History' },
   { to: '/investors', icon: Users, label: 'Investors' },
 ];

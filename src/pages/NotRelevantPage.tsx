@@ -16,14 +16,18 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { RotateCcw, Loader2 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { DealAgeFilter, AgeFilterType, applyDealAgeFilter } from '@/components/deals/DealAgeFilter';
+import { formatIL as format } from '@/utils/dateFormat';
 
 export default function NotRelevantPage() {
   const { deals, updateDealStatus } = useDeals();
   const [restoringId, setRestoringId] = useState<string | null>(null);
-  
+  const [ageFilter, setAgeFilter] = useState<AgeFilterType>('month');
+
   const notRelevantDeals = useMemo(() => {
-    return deals.filter(d => d.status === 'not_relevant');
-  }, [deals]);
+    const base = deals.filter(d => d.status === 'not_relevant');
+    return applyDealAgeFilter(base, ageFilter);
+  }, [deals, ageFilter]);
 
   const handleRestore = async (id: string) => {
     const deal = deals.find(d => d.id === id);
@@ -46,11 +50,14 @@ export default function NotRelevantPage() {
   return (
     <div className="p-6 space-y-6 animate-fade-in">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold">Not Relevant Deals</h1>
-        <p className="text-muted-foreground">
-          Deals that have been marked as not suitable for investment
-        </p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-3xl font-bold">Not Relevant Deals</h1>
+          <p className="text-muted-foreground">
+            Deals that have been marked as not suitable for investment
+          </p>
+        </div>
+        <DealAgeFilter value={ageFilter} onChange={setAgeFilter} className="mt-1" />
       </div>
 
       {/* Table */}
@@ -63,13 +70,14 @@ export default function NotRelevantPage() {
               <TableHead className="text-right">ARV</TableHead>
               <TableHead className="text-right">Cashflow</TableHead>
               <TableHead className="text-right">CoC Return</TableHead>
+              <TableHead>Dates</TableHead>
               <TableHead className="w-[100px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {notRelevantDeals.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
+                <TableCell colSpan={7} className="h-32 text-center text-muted-foreground">
                   No rejected deals
                 </TableCell>
               </TableRow>
@@ -93,13 +101,19 @@ export default function NotRelevantPage() {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatCurrency(deal.overrides.arv ?? deal.apiData.arv ?? 0)}
+                    {formatCurrency(deal.overrides.arv ?? deal.apiData?.arv ?? 0)}
                   </TableCell>
                   <TableCell className="text-right text-destructive">
                     {formatCurrency(deal.financials?.monthlyCashflow ?? 0)}/mo
                   </TableCell>
                   <TableCell className="text-right text-destructive">
                     {formatPercent(deal.financials?.cashOnCashReturn ?? 0)}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground space-y-0.5">
+                    <div>Created: {format(new Date(deal.createdAt), 'MMM d, yy')}</div>
+                    {deal.analyzedAt && format(new Date(deal.analyzedAt), 'MMM d') !== format(new Date(deal.createdAt), 'MMM d') && (
+                      <div className="text-primary/70">Analyzed: {format(new Date(deal.analyzedAt), 'MMM d, yy')}</div>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Tooltip>

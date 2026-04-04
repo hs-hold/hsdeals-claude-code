@@ -61,25 +61,57 @@ function decodeBase64Url(data: string): string {
   }
 }
 
-// Extract email body from Gmail message
+/** Strip HTML tags and clean up whitespace for AI parsing */
+function stripHtml(html: string): string {
+  return html
+    // Convert common block tags to newlines so addresses don't merge
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/?(p|div|li|tr|td|th|h[1-6]|section|article)[^>]*>/gi, '\n')
+    // Remove all remaining HTML tags
+    .replace(/<[^>]+>/g, ' ')
+    // Decode common HTML entities
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#\d+;/g, ' ')
+    // Collapse whitespace
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// Extract email body from Gmail message — always returns clean plain text
 function extractEmailBody(message: GmailMessage): string {
-  let body = '';
-  
+  let plainText = '';
+  let htmlText  = '';
+
   if (message.payload?.body?.data) {
-    body = decodeBase64Url(message.payload.body.data);
+    const raw = decodeBase64Url(message.payload.body.data);
+    // Detect if it's HTML (very rough check)
+    plainText = raw.trim().startsWith('<') ? stripHtml(raw) : raw;
   } else if (message.payload?.parts) {
-    for (const part of message.payload.parts) {
-      if (part.mimeType === 'text/plain' && part.body?.data) {
-        body = decodeBase64Url(part.body.data);
-        break;
+    // Walk all parts — prefer plain text; collect HTML as fallback
+    const walk = (parts: typeof message.payload.parts) => {
+      for (const part of parts ?? []) {
+        if (part.mimeType === 'text/plain' && part.body?.data && !plainText) {
+          plainText = decodeBase64Url(part.body.data);
+        }
+        if (part.mimeType === 'text/html' && part.body?.data && !htmlText) {
+          htmlText = stripHtml(decodeBase64Url(part.body.data));
+        }
+        // Recurse into nested multipart parts
+        if ((part as any).parts) walk((part as any).parts);
       }
-      if (part.mimeType === 'text/html' && part.body?.data && !body) {
-        body = decodeBase64Url(part.body.data);
-      }
-    }
+    };
+    walk(message.payload.parts);
   }
-  
-  return body || message.snippet || '';
+
+  const body = plainText || htmlText || message.snippet || '';
+  // Limit to 8000 chars so AI prompt doesn't blow up
+  return body.substring(0, 8000);
 }
 
 // Get header value from Gmail message
@@ -187,6 +219,11 @@ interface ExtractedDeal {
   extractedData: Record<string, any>;
 }
 
+// Detect if a string looks like a US street address: "123 Main St, City, ST 12345"
+function looksLikeAddress(s: string): boolean {
+  return /^\d+\s+[a-zA-Z0-9\s]+(?:st|ave|dr|blvd|rd|ln|ct|pl|way|cir|pkwy|hwy|sw|nw|se|ne)\b.*,\s*[a-zA-Z\s]+,\s*[a-zA-Z]{2}\s+\d{5}/i.test(s.trim());
+}
+
 // Use Anthropic claude-haiku to extract ALL property addresses and comprehensive deal info from email content
 async function extractDealsWithAI(emailContent: string, subject: string): Promise<ExtractedDeal[]> {
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
@@ -195,16 +232,33 @@ async function extractDealsWithAI(emailContent: string, subject: string): Promis
     return [];
   }
 
+  // Fast path: if the subject itself IS a full property address, return it immediately
+  // (no need to call AI — common pattern for wholesaler blast emails)
+  if (looksLikeAddress(subject)) {
+    console.log('[extractDeals] subject IS an address, skipping AI:', subject);
+    return [{ address: subject.trim(), purchasePrice: null, dealType: null, extractedData: {} }];
+  }
+
   const prompt = `You are a real estate deal analyzer. Extract ALL properties and their details from this email.
+
+IMPORTANT: Real estate wholesalers often put the property address directly in the email subject line.
+If the Subject line looks like a US property address (e.g. "123 Main St, Atlanta, GA 30311"), treat it as the property address even if the body doesn't repeat it.
 
 Email Subject: ${subject}
 
 Email Content:
-${emailContent.substring(0, 6000)}
+${emailContent}
+
+CRITICAL RULES:
+- Search the ENTIRE email body carefully — addresses are often in the middle of paragraphs or after bullet points
+- A valid address MUST have a street number (e.g. "1234 Main St"). City-only mentions like "in Atlanta" are NOT addresses.
+- Wholesaler emails often list several properties — find ALL of them
+- If the body mentions "123 Oak Ave" and the subject mentions "Atlanta, GA 30311", combine them into "123 Oak Ave, Atlanta, GA 30311"
+- Common wholesaler formats: "123 Main St | Atlanta | $150K", "Property: 456 Elm Dr, Smyrna GA 30080"
 
 For EACH property found, extract as much of the following as possible:
 
-1. **address** (required): Full US property address with street, city, state, ZIP
+1. **address** (required): Full US property address with street number, street name, city, state, ZIP
 2. **purchasePrice**: The asking/purchase price (NOT rehab, NOT ARV)
 3. **dealType**: Classify the deal. Choose the MOST specific type that applies:
    - "Fix & Flip", "Wholetail", "Wholesale", "Buy & Hold", "BRRRR", "Co-Living",
@@ -279,7 +333,7 @@ Return { "deals": [] } if no valid US property addresses are found.`;
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 2500,
+        max_tokens: 3000,
         messages: [
           { role: 'user', content: prompt }
         ],
@@ -369,12 +423,40 @@ serve(async (req) => {
   }
 
   try {
-    const { access_token, max_results = 50, since_days, mark_all_read = false, include_read = false, target_state } = await req.json();
+    const { access_token, max_results = 50, since_days, mark_all_read = false, include_read = false, target_state, mark_old_only = false } = await req.json();
     
     if (!access_token) {
       return new Response(
         JSON.stringify({ success: false, error: 'No access token provided' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // ── Mark-old-only mode: mark all unread emails older than since_days as read ──
+    if (mark_old_only) {
+      const olderThan = since_days ?? 7;
+      const query = encodeURIComponent(`is:unread older_than:${olderThan}d`);
+      const listResp = await fetch(
+        `${GMAIL_API_BASE}/users/me/messages?maxResults=500&q=${query}`,
+        { headers: { 'Authorization': `Bearer ${access_token}` } }
+      );
+      if (!listResp.ok) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Failed to fetch old unread emails' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      const listData = await listResp.json();
+      const oldMessages = listData.messages || [];
+      let marked = 0;
+      for (const msg of oldMessages) {
+        await markEmailAsRead(access_token, msg.id);
+        marked++;
+      }
+      console.log(`[mark_old_only] Marked ${marked} emails older than ${olderThan} days as read`);
+      return new Response(
+        JSON.stringify({ success: true, marked, message: `Marked ${marked} old emails as read` }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 

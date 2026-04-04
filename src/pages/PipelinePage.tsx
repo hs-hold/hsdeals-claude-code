@@ -1,8 +1,11 @@
+import { useNavigate } from 'react-router-dom';
 import { KanbanBoard } from '@/components/deals/KanbanBoard';
 import { Button } from '@/components/ui/button';
-import { Plus, RefreshCw } from 'lucide-react';
+import { Plus } from 'lucide-react';
 
 export default function PipelinePage() {
+  const navigate = useNavigate();
+
   return (
     <div className="p-6 space-y-6 animate-fade-in">
       {/* Header */}
@@ -14,13 +17,9 @@ export default function PipelinePage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline">
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Refresh
-          </Button>
-          <Button>
+          <Button onClick={() => navigate('/analyze/address')}>
             <Plus className="w-4 h-4 mr-2" />
-            Add Deal
+            Analyze New Deal
           </Button>
         </div>
       </div>

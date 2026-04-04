@@ -27,6 +27,7 @@ interface DBDeal {
   email_snippet: string | null;
   created_at: string;
   updated_at: string;
+  analyzed_at: string | null;
   is_locked: boolean;
   is_off_market: boolean;
   deal_type: string | null;
@@ -142,6 +143,7 @@ function mapDBDealToDeal(dbDeal: DBDeal, loanDefaults?: ReturnType<typeof import
     emailSnippet: dbDeal.email_snippet,
     createdAt: dbDeal.created_at,
     updatedAt: dbDeal.updated_at,
+    analyzedAt: dbDeal.analyzed_at,
     owner: 'Default User',
     createdBy: (dbDeal as any).created_by || null,
     isLocked: dbDeal.is_locked || false,
@@ -171,15 +173,28 @@ export function useDealsFromDB() {
       if (error) throw error;
 
       const mappedDeals = (data || []).map(d => mapDBDealToDeal(d, loanDefaults));
-      
-      // Deduplicate by normalized address - keep the most recent (first, since ordered desc)
+
+      // Deduplicate by normalized address.
+      // Priority: analyzed deal > unanalyzed deal (regardless of creation date).
+      // Tie-break: most recently updated/created wins.
       const seen = new Map<string, Deal>();
       for (const deal of mappedDeals) {
         const key = deal.address.full
           .toLowerCase()
           .replace(/[^a-z0-9]/g, '');
-        if (!seen.has(key)) {
+        const existing = seen.get(key);
+        if (!existing) {
           seen.set(key, deal);
+        } else {
+          // Prefer the analyzed deal; if both have same analysis state, keep most recent
+          const dealAnalyzed = !!(deal.apiData && Object.keys(deal.apiData).length > 0 &&
+            (deal.apiData.grade || deal.apiData.aiSummary || deal.apiData.rawResponse || (deal.apiData.arv && deal.apiData.arv > 0)));
+          const existingAnalyzed = !!(existing.apiData && Object.keys(existing.apiData).length > 0 &&
+            (existing.apiData.grade || existing.apiData.aiSummary || existing.apiData.rawResponse || (existing.apiData.arv && existing.apiData.arv > 0)));
+          if (dealAnalyzed && !existingAnalyzed) {
+            seen.set(key, deal); // replace unanalyzed with analyzed
+          }
+          // if existing is already analyzed (or both unanalyzed), keep existing (more recent created_at)
         }
       }
       setDeals(Array.from(seen.values()));
@@ -448,10 +463,16 @@ export function useDealsFromDB() {
 
     if (error) throw error;
 
-    // Extract data from nested API response - prioritize analysis.metrics over property data
-    const property = data?.data?.property || data?.property || {};
-    const analysis = data?.data?.analysis || data?.analysis || {};
-    const metrics = analysis?.metrics || {};
+    // Extract data from nested API response.
+    // API shape A (with analysis key): { success, data: { analysis: {...}, property: {...} } }
+    // API shape B (property only):     { success, data: { success, property: {...} } }
+    // In shape B, 'analysis' is absent — fall back to the property object so field lookups
+    // like analysis.grade / analysis.ai_summary / analysis.metrics still resolve correctly.
+    const inner    = data?.data || data;
+    const property = inner?.property || {};
+    const analysis = inner?.analysis || inner?.property || {};
+    // metrics may live at analysis.metrics OR as top-level fields on the property/analysis object
+    const metrics  = analysis?.metrics || property?.metrics || {};
     
     // Map API response to our apiData format
     // IMPORTANT: Use analysis.metrics values (AI analysis) over property values (Zillow estimates)
@@ -474,55 +495,61 @@ export function useDealsFromDB() {
       || (metrics.monthly_property_taxes ? metrics.monthly_property_taxes * 12 : null) 
       || (property.latest_tax_assessment ? Math.round(property.latest_tax_assessment * (property.propertyTaxRate || 0.01)) : null);
     
-    // Extract ARV - prefer numeric field, fallback to extracting from AI summary
-    const numericArv = metrics.arv;
-    const arv = (numericArv && numericArv > 0) ? numericArv : extractArvFromSummary(analysis.ai_summary);
-    
+    // Extract ARV — prefer validated_arv (confirmed by comps), fall back to metrics.arv
+    const numericArv = metrics.validated_arv ?? metrics.arv ?? analysis.arv ?? property.arv ?? null;
+    const aiSummaryText = analysis.ai_summary || analysis.aiSummary || property.ai_summary || property.aiSummary || null;
+    const arv = (numericArv && numericArv > 0) ? numericArv : extractArvFromSummary(aiSummaryText);
+
+    console.log('[analyzeDeal] inner keys:', Object.keys(inner));
+    console.log('[analyzeDeal] analysis keys:', Object.keys(analysis));
+    console.log('[analyzeDeal] metrics keys:', Object.keys(metrics));
+    console.log('[analyzeDeal] arv:', arv, '| grade:', analysis.grade ?? property.grade, '| rent:', metrics.monthly_rent ?? property.monthly_rent);
+
     const apiData = {
       // Core property values from AI analysis metrics
       arv: arv,
-      purchasePrice: analysis.asking_price || property.price || property.asking_price || null,
-      rent: metrics.monthly_rent || null,
-      rehabCost: metrics.rehab_cost || null,
+      purchasePrice: analysis.asking_price || analysis.price || property.price || property.asking_price || null,
+      rent: metrics.monthly_rent || property.monthly_rent || null,
+      rehabCost: metrics.rehab_cost || property.rehab_cost || null,
       propertyTax: propertyTaxAnnual,
       insurance: metrics.monthly_insurance ? metrics.monthly_insurance * 12 : (property.annual_homeowners_insurance || null),
-      
+
       // Property details
       bedrooms: analysis.bedrooms || property.bedrooms || null,
       bathrooms: analysis.bathrooms || property.bathrooms || null,
-      sqft: analysis.living_area || property.living_area || null,
-      yearBuilt: property.year_built || null,
-      propertyType: property.property_type || null,
-      lotSize: property.lot_area || null,
-      
+      sqft: analysis.living_area || analysis.sqft || property.living_area || property.sqft || null,
+      yearBuilt: property.year_built || analysis.year_built || null,
+      propertyType: property.property_type || analysis.property_type || null,
+      lotSize: property.lot_area || analysis.lot_area || null,
+
       // Location & Listing
       latitude: analysis.latitude || property.latitude || null,
       longitude: analysis.longitude || property.longitude || null,
       daysOnMarket: property.days_on_zillow || null,
       daysOnMarketFetchedAt: new Date().toISOString(),
-      county: property.county || null,
+      county: property.county || analysis.county || null,
       detailUrl: analysis.detail_url || property.detail_url || null,
       imgSrc: analysis.img_src || property.img_src || null,
-      
+
       // Location scores
       crimeScore: null,
       schoolScore: null,
       medianIncome: null,
-      neighborhoodRating: analysis.grade || null,
-      
+      neighborhoodRating: analysis.grade || property.grade || null,
+
       // AI Analysis values - USE THESE DIRECTLY, don't recalculate!
-      grade: analysis.grade || null,
-      aiSummary: analysis.ai_summary || null,
-      monthlyCashFlow: metrics.monthly_cash_flow || null,
-      cashOnCashRoi: metrics.cash_on_cash_roi || null,
-      capRate: metrics.cap_rate || null,
-      monthlyExpenses: metrics.monthly_expenses || null,
-      monthlyPiti: metrics.monthly_piti || null,
-      monthlyMortgage: metrics.monthly_mortgage_payment || null,
-      downPayment: metrics.down_payment || null,
-      loanAmount: metrics.loan_amount || null,
-      wholesalePrice: metrics.wholesale_price || null,
-      arvMargin: metrics.arv_margin || null,
+      grade: analysis.grade || property.grade || null,
+      aiSummary: aiSummaryText,
+      monthlyCashFlow: metrics.monthly_cash_flow || property.monthly_cash_flow || null,
+      cashOnCashRoi: metrics.cash_on_cash_roi || property.cash_on_cash_roi || null,
+      capRate: metrics.cap_rate || property.cap_rate || null,
+      monthlyExpenses: metrics.monthly_expenses || property.monthly_expenses || null,
+      monthlyPiti: metrics.monthly_piti || property.monthly_piti || null,
+      monthlyMortgage: metrics.monthly_mortgage_payment || property.monthly_mortgage_payment || null,
+      downPayment: metrics.down_payment || property.down_payment || null,
+      loanAmount: metrics.loan_amount || property.loan_amount || null,
+      wholesalePrice: metrics.wholesale_price || property.wholesale_price || null,
+      arvMargin: metrics.arv_margin || property.arv_margin || null,
       
       // Agent / Broker info
       agentName: attribution.agentName || listedBy.display_name || null,
@@ -549,14 +576,9 @@ export function useDealsFromDB() {
         valueIncreaseRate: t.valueIncreaseRate,
       })),
       
-      section8: metrics.section8 ? {
-        areaName: metrics.section8.areaName || '',
-        minRent: metrics.section8.minRent || 0,
-        maxRent: metrics.section8.maxRent || 0,
-        bedrooms: metrics.section8.bedrooms || 0,
-      } : null,
-      
-      saleComps: (metrics.comps || []).slice(0, 4).map((c: any) => ({
+      section8: (() => { const s8 = metrics.section8 || property.section8 || null; return s8 ? { areaName: s8.areaName || '', minRent: s8.minRent || 0, maxRent: s8.maxRent || 0, bedrooms: s8.bedrooms || 0 } : null; })(),
+
+      saleComps: (metrics.comps || property.comps || property.saleComps || []).slice(0, 4).map((c: any) => ({
         address: c.address || '',
         salePrice: c.sale_price || 0,
         saleDate: c.sale_date || '',
@@ -566,9 +588,10 @@ export function useDealsFromDB() {
         distance: c.distance || 0,
         similarityScore: c.similarity?.overall_score || 0,
         notes: c.similarity?.notes || [],
+        daysOnMarket: c.days_on_market ?? c.daysOnMarket ?? null,
       })),
       
-      rentComps: (metrics.rent_comps || []).map((r: any) => ({
+      rentComps: (metrics.rent_comps || property.rent_comps || property.rentComps || []).map((r: any) => ({
         address: r.address || '',
         bedrooms: r.bedrooms || 0,
         bathrooms: r.bathrooms || 0,
@@ -586,6 +609,10 @@ export function useDealsFromDB() {
     // Calculate financials with new API data
     const financials = calculateFinancials(apiData, deal.overrides, loanDefaults);
 
+    console.log('[analyzeDeal] saving to DB — arv:', apiData.arv, 'grade:', apiData.grade, 'aiSummary:', !!apiData.aiSummary, 'rawResponse:', !!apiData.rawResponse);
+
+    const nowIso = new Date().toISOString();
+
     // Update the database
     const { error: updateError } = await supabase
       .from('deals')
@@ -593,10 +620,16 @@ export function useDealsFromDB() {
         api_data: apiData as any,
         financials: financials as any,
         status: 'under_analysis',
+        analyzed_at: nowIso,
+        updated_at: nowIso,
       })
       .eq('id', id);
 
-    if (updateError) throw updateError;
+    if (updateError) {
+      console.error('[analyzeDeal] DB update error:', updateError);
+      throw updateError;
+    }
+    console.log('[analyzeDeal] DB update success for deal:', id);
 
     // Update local state
     setDeals(prev => prev.map(d => {
@@ -606,7 +639,8 @@ export function useDealsFromDB() {
         apiData,
         financials,
         status: 'under_analysis' as DealStatus,
-        updatedAt: new Date().toISOString(),
+        analyzedAt: nowIso,
+        updatedAt: nowIso,
       };
     }));
 

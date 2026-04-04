@@ -75,7 +75,7 @@ export function getDefaultLoanDefaults(): LoanDefaults {
     flipLoanTermYears: 30, // 30 years (though typically short-term for flip)
     flipClosingCostsPercent: 2, // 2%
     contingencyPercent: FINANCIAL_CONFIG.flip.rehabContingencyPercent * 100, // 12%
-    agentCommissionPercent: FINANCIAL_CONFIG.flip.saleCosts.agentCommissionPercent * 100, // 6%
+    agentCommissionPercent: FINANCIAL_CONFIG.flip.saleCosts.agentCommissionPercent * 100, // 5%
     holdingMonths: FINANCIAL_CONFIG.flip.defaultRehabMonths, // 4
     // HML defaults
     hmlLtvPurchasePercent: FINANCIAL_CONFIG.hml.ltvPurchasePercent * 100, // 90%

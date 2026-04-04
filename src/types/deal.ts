@@ -1,9 +1,10 @@
-export type DealStatus = 
+export type DealStatus =
   | 'new'
   | 'under_analysis'
   | 'qualified'
   | 'offer_sent'
   | 'under_contract'
+  | 'pending_other'
   | 'closed'
   | 'not_relevant'
   | 'filtered_out';
@@ -41,6 +42,7 @@ export interface SaleComp {
   distance: number;
   similarityScore: number;
   notes?: string[];
+  daysOnMarket?: number | null;
 }
 
 export interface PriceHistoryItem {
@@ -157,6 +159,7 @@ export interface DealOverrides {
   titleFees: number | null;                 // Override title fees (fixed $)
   // HML overrides
   hmlLoanType: string | null;                // 'ltv' (% of ARV) or 'ltc' (% of purchase price), default ltc
+  brrrrPhase1Type: string | null;            // 'hml' or 'cash' (default hml)
   hmlLtvPurchasePercent: number | null;     // HML LTV for purchase (e.g., 90 = 90%)
   hmlLtvRehabPercent: number | null;        // HML LTV for rehab (e.g., 100 = 100%)
   hmlPointsPercent: number | null;          // HML points (e.g., 2 = 2%)
@@ -229,6 +232,7 @@ export interface Deal {
   emailSnippet: string | null;
   createdAt: string;
   updatedAt: string;
+  analyzedAt?: string | null;
   owner: string;
   createdBy: string | null;
   isLocked: boolean;
@@ -242,7 +246,8 @@ export const DEAL_STATUS_CONFIG: Record<DealStatus, { label: string; color: stri
   under_analysis: { label: 'Under Analysis', color: 'bg-warning/20 text-warning' },
   qualified: { label: 'Qualified', color: 'bg-success/20 text-success' },
   offer_sent: { label: 'Offer Sent', color: 'bg-chart-4/20 text-chart-4' },
-  under_contract: { label: 'Under Contract', color: 'bg-accent/20 text-accent' },
+  under_contract: { label: 'Under Contract (Me)', color: 'bg-accent/20 text-accent' },
+  pending_other: { label: 'Pending - Other Buyer', color: 'bg-orange-500/20 text-orange-400' },
   closed: { label: 'Closed', color: 'bg-success/20 text-success' },
   not_relevant: { label: 'Not Relevant', color: 'bg-muted text-muted-foreground' },
   filtered_out: { label: 'Filtered Out', color: 'bg-destructive/20 text-destructive' },

@@ -1,7 +1,8 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useDeals } from '@/context/DealsContext';
 import { useSettings } from '@/context/SettingsContext';
+import { DealAgeFilter, AgeFilterType, applyDealAgeFilter } from '@/components/deals/DealAgeFilter';
 import { formatCurrency, getEffectiveMonthlyInsurance } from '@/utils/financialCalculations';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -66,11 +67,13 @@ export default function HotDealsPage() {
   const { settings } = useSettings();
   const loanDefaults = settings.loanDefaults;
   const [searchParams, setSearchParams] = useSearchParams();
-  
+  const [ageFilter, setAgeFilter] = useState<AgeFilterType>('month');
+
   const filter = (searchParams.get('filter') as FilterType) || 'all';
 
   const hotDeals = useMemo(() => {
-    const activeDeals = deals.filter(d => d.status !== 'not_relevant');
+    const NON_BUYABLE = ['not_relevant', 'filtered_out', 'closed', 'under_contract', 'pending_other'];
+    const activeDeals = deals.filter(d => !NON_BUYABLE.includes(d.status));
     
     const minScore = filter === 'top' ? 9 : 8;
     
@@ -95,7 +98,12 @@ export default function HotDealsPage() {
         return { deal, ...result };
       })
       .filter(Boolean)
-      .sort((a, b) => b!.score - a!.score || b!.flipRoi - a!.flipRoi) as {
+      .sort((a, b) => b!.score - a!.score || b!.flipRoi - a!.flipRoi)
+      .filter(item => {
+        // Apply age filter: pass the deal for filtering
+        const filtered = applyDealAgeFilter([item!.deal], ageFilter);
+        return filtered.length > 0;
+      }) as {
         deal: Deal;
         score: number;
         flipRoi: number;
@@ -105,7 +113,7 @@ export default function HotDealsPage() {
         rehabCost: number;
         totalInvestment: number;
       }[];
-  }, [deals, loanDefaults, filter]);
+  }, [deals, loanDefaults, filter, ageFilter]);
 
   const handleFilterChange = (value: string) => {
     if (value === 'all') {
@@ -139,7 +147,9 @@ export default function HotDealsPage() {
         <p className="text-muted-foreground">{config.description}</p>
       </div>
 
-      {/* Filter Tabs */}
+
+      {/* Filter Tabs + Age Filter */}
+      <div className="flex flex-wrap items-center gap-3">
       <Tabs value={filter} onValueChange={handleFilterChange}>
         <TabsList>
           <TabsTrigger value="all" className="gap-1.5">
@@ -156,6 +166,8 @@ export default function HotDealsPage() {
           </TabsTrigger>
         </TabsList>
       </Tabs>
+      <DealAgeFilter value={ageFilter} onChange={setAgeFilter} />
+      </div>
 
       {/* Stats */}
       <div className="flex gap-2">

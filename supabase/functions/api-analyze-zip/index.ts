@@ -10,6 +10,24 @@ const RAPIDAPI_HOST = 'real-estate101.p.rapidapi.com';
 const RAPIDAPI_BASE = `https://${RAPIDAPI_HOST}`;
 const PARTNERS_API_BASE = 'https://partnersapi-6cqhbrsewa-uc.a.run.app';
 
+async function getPartnersKey(): Promise<string | null> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (supabaseUrl && serviceKey) {
+    try {
+      const db = createClient(supabaseUrl, serviceKey);
+      const result = await Promise.race([
+        db.from('service_api_keys').select('api_key').eq('service_name', 'dealbeast').single(),
+        new Promise<null>((_, reject) => setTimeout(() => reject(new Error('DB timeout')), 4000)),
+      ]) as any;
+      if (result?.data?.api_key) return result.data.api_key;
+    } catch (e) {
+      console.error('[getPartnersKey] DB error/timeout:', String(e));
+    }
+  }
+  return Deno.env.get('PARTNERS_API_KEY') || null;
+}
+
 // ─── Financial Constants (mirror frontend config) ───
 const FINANCIAL = {
   closingCostsPercent: 0.02,
@@ -412,7 +430,7 @@ async function handleAddressMode(address: string, supabase: any): Promise<Respon
     );
   }
 
-  const partnersApiKey = Deno.env.get('PARTNERS_API_KEY');
+  const partnersApiKey = await getPartnersKey();
   if (!partnersApiKey) {
     return new Response(
       JSON.stringify({ success: false, error: 'Analysis API not configured', source: 'config' }),

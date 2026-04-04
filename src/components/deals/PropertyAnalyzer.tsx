@@ -4,11 +4,11 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
+import { useDeals } from '@/context/DealsContext';
 import { ApiResponse, PropertyAnalysis, PropertyData } from '@/types/apiResponse';
 import { toast } from 'sonner';
-import { Loader2, Search, MapPin, Calendar, ExternalLink, RefreshCw } from 'lucide-react';
+import { Loader2, Search, MapPin } from 'lucide-react';
 import { calculateFinancials } from '@/utils/financialCalculations';
 import { coerceLotSizeSqft } from '@/utils/lotSize';
 import { DealApiData, DealOverrides } from '@/types/deal';
@@ -28,14 +28,9 @@ interface PropertyAnalyzerProps {
 
 export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps) {
   const navigate = useNavigate();
+  const { refetch } = useDeals();
   const [address, setAddress] = useState(initialAddress);
   const [loading, setLoading] = useState(false);
-  const [existingDealDialog, setExistingDealDialog] = useState<{
-    open: boolean;
-    dealId: string;
-    addressFull: string;
-    updatedAt: string;
-  } | null>(null);
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [mapboxToken, setMapboxToken] = useState<string | null>(null);
@@ -243,66 +238,71 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
     }
   };
 
-  // Normalize address for comparison - remove punctuation, extra spaces, lowercase
-  const normalizeForComparison = (addr: string): string => {
-    return addr
+  // Extract street number from an address string
+  const extractStreetNumber = (addr: string): string | null => {
+    const match = addr.match(/^\s*(\d+)\s+/);
+    return match ? match[1] : null;
+  };
+
+  // Extract ZIP code from an address string
+  const extractZip = (addr: string): string | null => {
+    const match = addr.match(/\b(\d{5})(?:-\d{4})?\b/);
+    return match ? match[1] : null;
+  };
+
+  // Normalize a street name: lowercase, expand common abbreviations, strip punctuation
+  const normalizeStreetName = (name: string): string => {
+    return name
       .toLowerCase()
-      .replace(/[,\.]/g, ' ')  // Replace commas and dots with spaces
-      .replace(/\s+/g, ' ')     // Collapse multiple spaces
-      .trim();
+      .replace(/\brd\b/g, 'road').replace(/\bst\b/g, 'street')
+      .replace(/\bave?\b/g, 'avenue').replace(/\bblvd\b/g, 'boulevard')
+      .replace(/\bdr\b/g, 'drive').replace(/\bln\b/g, 'lane')
+      .replace(/\bct\b/g, 'court').replace(/\bcir\b/g, 'circle')
+      .replace(/\bpl\b/g, 'place').replace(/\bpkwy\b/g, 'parkway')
+      .replace(/\bhwy\b/g, 'highway').replace(/\bter?\b/g, 'terrace')
+      .replace(/\btrl\b/g, 'trail').replace(/[^a-z0-9\s]/g, '')
+      .replace(/\s+/g, ' ').trim();
   };
 
-  // Extract street number and name for matching
-  const extractStreetParts = (addr: string): { number: string; name: string } | null => {
-    const match = addr.match(/^(\d+)\s+(.+?)(?:,|$)/i);
-    if (match) {
-      return { number: match[1], name: match[2].toLowerCase().trim() };
-    }
-    return null;
-  };
-
-  // Check if property already exists in database
-  const checkExistingDeal = async (addressToCheck: string): Promise<{ exists: boolean; dealId?: string; addressFull?: string; updatedAt?: string }> => {
+  // Check if property already exists in database.
+  // Strategy: street number + ZIP is a reliable unique key across address formats.
+  // Fallback: street number + normalized street name start.
+  const checkExistingDeal = async (addressToCheck: string): Promise<{ exists: boolean; dealId?: string; addressFull?: string; updatedAt?: string; status?: string }> => {
     try {
-      const streetParts = extractStreetParts(addressToCheck);
-      
-      if (!streetParts) {
-        return { exists: false };
-      }
+      const inputNumber = extractStreetNumber(addressToCheck);
+      if (!inputNumber) return { exists: false };
 
-      // Search for deals with matching street number using wildcard
-      const searchPattern = `${streetParts.number}%`;
-      
+      const inputZip   = extractZip(addressToCheck);
+      const inputNorm  = normalizeStreetName(addressToCheck);
+
+      // Fetch all deals with the same street number (fast indexed query)
       const { data: matches, error } = await supabase
         .from('deals')
-        .select('id, address_full, address_street, updated_at')
-        .ilike('address_street', searchPattern)
-        .limit(10);
-      
-      if (error || !matches || matches.length === 0) {
-        return { exists: false };
-      }
+        .select('id, address_full, address_street, address_zip, updated_at, status')
+        .ilike('address_street', `${inputNumber} %`)
+        .limit(20);
 
-      // Compare normalized addresses
-      const normalizedInput = normalizeForComparison(addressToCheck);
-      
+      if (error || !matches || matches.length === 0) return { exists: false };
+
       for (const deal of matches) {
-        const normalizedDeal = normalizeForComparison(deal.address_full);
-        
-        // Check if normalized addresses match (ignoring minor differences)
-        if (normalizedDeal.includes(normalizedInput) || normalizedInput.includes(normalizedDeal)) {
-          return { exists: true, dealId: deal.id, addressFull: deal.address_full, updatedAt: deal.updated_at };
+        const dealNumber = extractStreetNumber(deal.address_street || deal.address_full);
+        if (dealNumber !== inputNumber) continue;
+
+        // 1. ZIP match (most reliable — same street number + ZIP = same property)
+        const dealZip = deal.address_zip || extractZip(deal.address_full);
+        if (inputZip && dealZip && inputZip === dealZip) {
+          return { exists: true, dealId: deal.id, addressFull: deal.address_full, updatedAt: deal.updated_at, status: deal.status };
         }
 
-        // Also check street-level match
-        const dealStreetParts = extractStreetParts(deal.address_street);
-        if (dealStreetParts && 
-            dealStreetParts.number === streetParts.number &&
-            normalizeForComparison(dealStreetParts.name).includes(normalizeForComparison(streetParts.name).split(' ')[0])) {
-          return { exists: true, dealId: deal.id, addressFull: deal.address_full, updatedAt: deal.updated_at };
+        // 2. Normalized street name starts with the same word (fallback when ZIP missing)
+        const dealNorm = normalizeStreetName(deal.address_street || deal.address_full);
+        const inputFirstWord = inputNorm.split(' ')[1] || ''; // word after house number
+        const dealFirstWord  = dealNorm.split(' ')[1]  || '';
+        if (inputFirstWord.length >= 4 && dealFirstWord.length >= 4 && inputFirstWord === dealFirstWord) {
+          return { exists: true, dealId: deal.id, addressFull: deal.address_full, updatedAt: deal.updated_at, status: deal.status };
         }
       }
-      
+
       return { exists: false };
     } catch (err) {
       console.error('Error checking existing deal:', err);
@@ -319,26 +319,26 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
     setLoading(true);
     setShowSuggestions(false);
 
-    // Check if property already exists
+    // ── Duplicate check — no API call if already exists ──────────────────
     const existingCheck = await checkExistingDeal(address);
     if (existingCheck.exists && existingCheck.dealId) {
-      setExistingDealDialog({
-        open: true,
-        dealId: existingCheck.dealId,
-        addressFull: existingCheck.addressFull || address,
-        updatedAt: existingCheck.updatedAt || '',
+      await refetch();
+      navigate(`/deals/${existingCheck.dealId}`, {
+        state: {
+          analysisResult: 'duplicate',
+          originalAddress: address,
+          analyzedAt: existingCheck.updatedAt,
+        },
       });
-      setLoading(false);
       return;
     }
 
+    // ── New analysis — call API ───────────────────────────────────────────
     let dealId: string | null = null;
 
     try {
       const { data, error } = await supabase.functions.invoke('analyze-property', {
-        body: {
-          address: address.trim(),
-        },
+        body: { address: address.trim() },
       });
 
       if (error) {
@@ -348,38 +348,66 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
         return;
       }
 
-      const apiResponse = data as ApiResponse;
-      
-      if (apiResponse?.success && apiResponse.data?.analysis) {
-        // CRITICAL: Save immediately after receiving API response
-        // This ensures data is persisted even if browser crashes afterward
-        try {
-          dealId = await saveDealToDb(apiResponse.data.analysis, apiResponse.data.property);
-        } catch (saveError) {
-          console.error('Error saving deal:', saveError);
-          toast.error('Failed to save deal');
-          setLoading(false);
-          return;
-        }
+      // Log full response for debugging
+      console.log('[analyze-property] raw response:', JSON.stringify(data).slice(0, 800));
 
-        if (dealId) {
-          toast.success('Property analyzed and saved');
-          // Navigate after save is confirmed
-          navigate(`/deals/${dealId}`);
-        } else {
-          toast.error('Property analyzed but failed to save');
-          setLoading(false);
-        }
+      const raw = data as any;
+      console.log('[analyze-property] raw response:', JSON.stringify(raw).slice(0, 800));
+
+      const isSuccess = raw?.success === true;
+      if (!isSuccess) {
+        const errMsg = raw?.error || raw?.message || raw?.detail || 'Analysis failed';
+        console.error('[analyze-property] API returned success=false:', raw);
+        toast.error(errMsg);
+        setLoading(false);
+        return;
+      }
+
+      // Resolve the inner payload — try multiple shapes:
+      //   Shape A (standard):  { success, data: { analysis, property } }
+      //   Shape B (no nested): { success, data: { property } }  → use property as analysis
+      //   Shape C (flat):      { success, analysis, property }
+      const inner   = raw?.data || raw?.result || raw;
+      const analysis: PropertyAnalysis = inner?.analysis ?? inner?.property ?? inner;
+      const property: PropertyData | undefined = inner?.property;
+
+      if (!analysis || typeof analysis !== 'object') {
+        const errMsg = `Analysis returned no data — keys: ${Object.keys(inner || {}).join(', ')}`;
+        console.error('[analyze-property] no analysis object:', raw);
+        toast.error(errMsg);
+        setLoading(false);
+        return;
+      }
+
+      try {
+        dealId = await saveDealToDb(analysis, property);
+      } catch (saveError) {
+        console.error('Error saving deal:', saveError);
+        toast.error('Failed to save deal');
+        setLoading(false);
+        return;
+      }
+
+      if (dealId) {
+        await refetch();
+        navigate(`/deals/${dealId}`, {
+          state: {
+            analysisResult: 'new',
+            apiCharged: true,
+            analyzedAt: new Date().toISOString(),
+          },
+        });
       } else {
-        toast.error(apiResponse?.error || 'Analysis failed');
+        toast.error('Property analyzed but failed to save to database');
         setLoading(false);
       }
     } catch (err) {
       console.error('Error:', err);
-      // If we have a dealId, the deal was saved successfully - navigate to it
       if (dealId) {
-        toast.success('Deal saved');
-        navigate(`/deals/${dealId}`);
+        await refetch();
+        navigate(`/deals/${dealId}`, {
+          state: { analysisResult: 'new', apiCharged: true, analyzedAt: new Date().toISOString() },
+        });
       } else {
         toast.error('Failed to connect to analysis service');
         setLoading(false);
@@ -387,7 +415,10 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
     }
   };
 
-  // Map API response to DealApiData format
+  // Map API response to DealApiData format.
+  // NOTE: When the API returns { data: { property } } with no separate `analysis` key,
+  // `analysis` here is actually the PropertyData/property object from the API.
+  // We therefore try multiple field paths so both response shapes work.
   const mapToDealApiData = (analysis: PropertyAnalysis, property?: PropertyData): DealApiData => {
     const mapPropertyType = (type?: string): DealApiData['propertyType'] => {
       const typeMap: Record<string, DealApiData['propertyType']> = {
@@ -402,93 +433,114 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
       return typeMap[type?.toUpperCase() || ''] || 'other';
     };
 
+    // `p` gives us direct (any-typed) access to the raw object —
+    // needed when `analysis` is actually the property object with flat/alternative field names.
+    const p = analysis as any;
+
+    // Resolve the metrics sub-object — could live at analysis.metrics, p.metrics, p.analysis.metrics, etc.
+    const m: any = analysis.metrics || p.metrics || p.analysis?.metrics || p.analysis || {};
+
+    // Resolved property — prefer the explicit `property` arg; fall back to `p` itself (same object)
+    const prop: any = property || p;
+
+    // Log what we're working with so we can diagnose any remaining field-name mismatches
+    console.log('[mapToDealApiData] analysis keys:', Object.keys(p));
+    console.log('[mapToDealApiData] metrics keys:', Object.keys(m));
+    console.log('[mapToDealApiData] arv candidates:', { 'm.arv': m.arv, 'p.arv': p.arv, 'p.validated_arv': p.validated_arv });
+    console.log('[mapToDealApiData] rent candidates:', { 'm.monthly_rent': m.monthly_rent, 'p.monthly_rent': p.monthly_rent, 'p.rent_zestimate': p.rent_zestimate });
+    console.log('[mapToDealApiData] grade candidates:', { 'p.grade': p.grade, 'p.analysis?.grade': p.analysis?.grade });
+
     return {
       // Property basics
-      arv: analysis.metrics?.arv ?? null,
-      purchasePrice: analysis.asking_price ?? null,
-      rent: analysis.metrics?.monthly_rent ?? null,
-      rehabCost: analysis.metrics?.rehab_cost ?? null,
-      propertyTax: analysis.metrics?.monthly_property_taxes ?? null,
-      insurance: analysis.metrics?.monthly_insurance ?? null,
-      bedrooms: analysis.bedrooms ?? null,
-      bathrooms: analysis.bathrooms ?? null,
-      sqft: analysis.living_area ?? null,
-      yearBuilt: property?.year_built ?? null,
-      propertyType: mapPropertyType(property?.property_type),
+      arv: m.arv ?? p.arv ?? p.validated_arv ?? null,
+      purchasePrice: analysis.asking_price ?? p.asking_price ?? p.price ?? prop?.asking_price ?? prop?.price ?? null,
+      rent: m.monthly_rent ?? p.monthly_rent ?? p.rent_zestimate ?? prop?.rent_zestimate ?? null,
+      rehabCost: m.rehab_cost ?? p.rehab_cost ?? null,
+      propertyTax: m.monthly_property_taxes ?? p.monthly_property_taxes ?? p.propertyTaxRate ?? null,
+      insurance: m.monthly_insurance ?? p.monthly_insurance ?? p.annual_homeowners_insurance ? Math.round((p.annual_homeowners_insurance || 0) / 12) : null,
+      bedrooms: analysis.bedrooms ?? p.bedrooms ?? prop?.bedrooms ?? null,
+      bathrooms: analysis.bathrooms ?? p.bathrooms ?? prop?.bathrooms ?? null,
+      sqft: analysis.living_area ?? p.living_area ?? p.sqft ?? prop?.living_area ?? prop?.sqft ?? null,
+      yearBuilt: prop?.year_built ?? p.year_built ?? null,
+      propertyType: mapPropertyType(prop?.property_type ?? p.property_type),
       lotSize: coerceLotSizeSqft(
-        property?.lot_area ?? null,
-        analysis.living_area ?? property?.living_area ?? property?.sqft ?? null
+        prop?.lot_area ?? p.lot_area ?? null,
+        analysis.living_area ?? p.living_area ?? prop?.living_area ?? prop?.sqft ?? null
       ).sqft,
-      
+
       // Location & Listing
-      latitude: analysis.latitude ?? property?.latitude ?? null,
-      longitude: analysis.longitude ?? property?.longitude ?? null,
-      daysOnMarket: property?.days_on_zillow ?? null,
+      latitude: analysis.latitude ?? p.latitude ?? prop?.latitude ?? null,
+      longitude: analysis.longitude ?? p.longitude ?? prop?.longitude ?? null,
+      daysOnMarket: prop?.days_on_zillow ?? p.days_on_zillow ?? null,
       daysOnMarketFetchedAt: new Date().toISOString(),
-      county: property?.county ?? null,
-      detailUrl: analysis.detail_url ?? property?.detail_url ?? null,
-      imgSrc: analysis.img_src ?? property?.img_src ?? null,
-      
+      county: prop?.county ?? p.county ?? null,
+      detailUrl: analysis.detail_url ?? p.detail_url ?? prop?.detail_url ?? null,
+      imgSrc: analysis.img_src ?? p.img_src ?? prop?.img_src ?? null,
+
       // Location scores
       crimeScore: null,
       schoolScore: null,
       medianIncome: null,
       neighborhoodRating: null,
-      
+
       // AI Analysis values
-      grade: analysis.grade ?? null,
-      aiSummary: analysis.ai_summary ?? null,
-      monthlyCashFlow: analysis.metrics?.monthly_cash_flow ?? null,
-      cashOnCashRoi: analysis.metrics?.cash_on_cash_roi ?? null,
-      capRate: analysis.metrics?.cap_rate ?? null,
-      monthlyExpenses: analysis.metrics?.monthly_expenses ?? null,
-      monthlyPiti: analysis.metrics?.monthly_piti ?? null,
-      monthlyMortgage: analysis.metrics?.monthly_mortgage_payment ?? null,
-      downPayment: analysis.metrics?.down_payment ?? null,
-      loanAmount: analysis.metrics?.loan_amount ?? null,
-      wholesalePrice: analysis.metrics?.wholesale_price ?? null,
-      arvMargin: analysis.metrics?.arv_margin ?? null,
-      
+      grade: analysis.grade ?? p.grade ?? p.analysis?.grade ?? null,
+      aiSummary: analysis.ai_summary ?? p.ai_summary ?? p.aiSummary ?? p.analysis?.ai_summary ?? null,
+      monthlyCashFlow: m.monthly_cash_flow ?? p.monthly_cash_flow ?? null,
+      cashOnCashRoi: m.cash_on_cash_roi ?? p.cash_on_cash_roi ?? null,
+      capRate: m.cap_rate ?? p.cap_rate ?? null,
+      monthlyExpenses: m.monthly_expenses ?? p.monthly_expenses ?? null,
+      monthlyPiti: m.monthly_piti ?? p.monthly_piti ?? null,
+      monthlyMortgage: m.monthly_mortgage_payment ?? p.monthly_mortgage_payment ?? null,
+      downPayment: m.down_payment ?? p.down_payment ?? null,
+      loanAmount: m.loan_amount ?? p.loan_amount ?? null,
+      wholesalePrice: m.wholesale_price ?? p.wholesale_price ?? null,
+      arvMargin: m.arv_margin ?? p.arv_margin ?? null,
+
       // Agent / Broker info
-      agentName: property?.attributionInfo?.agentName ?? null,
-      agentEmail: property?.attributionInfo?.agentEmail ?? null,
-      agentPhone: property?.attributionInfo?.agentPhoneNumber ?? null,
-      agentLicense: property?.attributionInfo?.agentLicenseNumber ?? null,
-      brokerName: property?.attributionInfo?.brokerName ?? null,
-      brokerPhone: property?.attributionInfo?.brokerPhoneNumber ?? null,
-      mlsId: property?.attributionInfo?.mlsId ?? null,
-      mlsName: property?.attributionInfo?.mlsName ?? null,
-      
+      agentName: prop?.attributionInfo?.agentName ?? p.attributionInfo?.agentName ?? null,
+      agentEmail: prop?.attributionInfo?.agentEmail ?? p.attributionInfo?.agentEmail ?? null,
+      agentPhone: prop?.attributionInfo?.agentPhoneNumber ?? p.attributionInfo?.agentPhoneNumber ?? null,
+      agentLicense: prop?.attributionInfo?.agentLicenseNumber ?? p.attributionInfo?.agentLicenseNumber ?? null,
+      brokerName: prop?.attributionInfo?.brokerName ?? p.attributionInfo?.brokerName ?? null,
+      brokerPhone: prop?.attributionInfo?.brokerPhoneNumber ?? p.attributionInfo?.brokerPhoneNumber ?? null,
+      mlsId: prop?.attributionInfo?.mlsId ?? p.attributionInfo?.mlsId ?? null,
+      mlsName: prop?.attributionInfo?.mlsName ?? p.attributionInfo?.mlsName ?? null,
+
       // Additional data
-      priceHistory: property?.priceHistory?.map(p => ({
-        date: p.date || '',
-        price: p.price || 0,
-        event: p.event || '',
-      })) || [],
-      taxHistory: property?.tax_history?.map(t => ({
+      priceHistory: (prop?.priceHistory ?? p.priceHistory ?? []).map((ph: any) => ({
+        date: ph.date || '',
+        price: ph.price || 0,
+        event: ph.event || '',
+      })),
+      taxHistory: (prop?.tax_history ?? p.tax_history ?? []).map((t: any) => ({
         time: t.time || 0,
         taxPaid: t.taxPaid ?? null,
         value: t.value ?? null,
         taxIncreaseRate: t.taxIncreaseRate,
         valueIncreaseRate: t.valueIncreaseRate,
-      })) || [],
-      section8: analysis.metrics?.section8 ? {
-        areaName: analysis.metrics.section8.areaName || '',
-        minRent: analysis.metrics.section8.minRent || 0,
-        maxRent: analysis.metrics.section8.maxRent || 0,
-        bedrooms: analysis.metrics.section8.bedrooms || 0,
-      } : null,
-      saleComps: analysis.metrics?.comps?.map(c => ({
+      })),
+      section8: (() => {
+        const s8 = m.section8 ?? p.section8 ?? null;
+        return s8 ? {
+          areaName: s8.areaName || '',
+          minRent: s8.minRent || 0,
+          maxRent: s8.maxRent || 0,
+          bedrooms: s8.bedrooms || 0,
+        } : null;
+      })(),
+      saleComps: (m.comps ?? p.comps ?? p.saleComps ?? []).map((c: any) => ({
         address: c.address || '',
-        salePrice: c.sale_price || 0,
-        saleDate: c.sale_date || '',
+        salePrice: c.sale_price || c.salePrice || 0,
+        saleDate: c.sale_date || c.saleDate || '',
         bedrooms: c.bedrooms || 0,
         bathrooms: c.bathrooms || 0,
         sqft: c.sqft || 0,
         distance: c.distance || 0,
-        similarityScore: c.similarity?.overall_score || 0,
-      })) || [],
-      rentComps: analysis.metrics?.rent_comps?.map(c => ({
+        similarityScore: c.similarity?.overall_score ?? c.similarityScore ?? 0,
+        daysOnMarket: c.days_on_market ?? c.daysOnMarket ?? null,
+      })),
+      rentComps: (m.rent_comps ?? p.rent_comps ?? p.rentComps ?? []).map((c: any) => ({
         address: c.address || '',
         originalRent: c.originalRent || c.adjustedRent || 0,
         adjustedRent: c.adjustedRent || 0,
@@ -497,8 +549,8 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
         sqft: c.sqft || 0,
         adjustment: c.adjustment || 0,
         adjustmentReason: c.adjustmentReason || '',
-      })) || [],
-      
+      })),
+
       // Store raw response for debugging
       rawResponse: { analysis, property },
     };
@@ -560,10 +612,20 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
   // Save deal to database - returns the deal id
   const saveDealToDb = async (analysisData: PropertyAnalysis, propertyData?: PropertyData): Promise<string | null> => {
     try {
-      // Parse address components
-      const addressParts = analysisData.address?.split(',').map(s => s.trim()) || [];
+      const anyData = analysisData as any;
+      // User-typed address is the ground truth — never let the API override it with
+      // a generic "Unknown Address" when it can't geocode the property.
+      // Only fall back to the API response address if the user didn't type one.
+      const apiAddress = (analysisData.address && !String(analysisData.address).toLowerCase().includes('unknown'))
+        ? analysisData.address
+        : anyData.streetAddress || null;
+      const resolvedAddress = address  // user input is primary
+        || apiAddress
+        || (anyData.address_street ? `${anyData.address_street}, ${anyData.address_city || ''}, ${anyData.address_state || ''} ${anyData.address_zip || ''}`.trim() : null);
+      const addressParts = resolvedAddress?.split(',').map((s: string) => s.trim()) || [];
       const street = addressParts[0] || address;
-      const city = analysisData.city || addressParts[1] || '';
+      console.log('[saveDealToDb] resolved address:', resolvedAddress, '| parts:', addressParts);
+      const city = anyData.address_city || analysisData.city || (analysisData as any).city || addressParts[1] || '';
       const stateZip = addressParts[2] || '';
       const [state, zip] = stateZip.split(' ').filter(Boolean);
       
@@ -574,7 +636,7 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       
       const dealInsert: any = {
-        address_full: analysisData.address || address,
+        address_full: resolvedAddress || address,
         address_street: street,
         address_city: city,
         address_state: state || '',
@@ -606,64 +668,6 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
 
   return (
     <div className="w-full space-y-6">
-      {/* Existing Deal Dialog */}
-      <Dialog 
-        open={existingDealDialog?.open || false} 
-        onOpenChange={(open) => !open && setExistingDealDialog(null)}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-xl">
-              <MapPin className="h-5 w-5 text-primary" />
-              Property Already Analyzed
-            </DialogTitle>
-            <DialogDescription className="pt-2">
-              This property was previously analyzed and saved in your deals.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="bg-muted/50 rounded-lg p-4 space-y-3">
-              <div>
-                <p className="text-sm text-muted-foreground">Address</p>
-                <p className="font-medium text-foreground">{existingDealDialog?.addressFull}</p>
-              </div>
-              
-              {existingDealDialog?.updatedAt && (
-                <div className="flex items-center gap-2 text-sm">
-                  <Calendar className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-muted-foreground">Last updated:</span>
-                  <span className="font-medium">
-                    {format(new Date(existingDealDialog.updatedAt), 'MMM d, yyyy \'at\' h:mm a')}
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <DialogFooter className="flex-col sm:flex-row gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setExistingDealDialog(null)}
-              className="w-full sm:w-auto"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                if (existingDealDialog?.dealId) {
-                  navigate(`/deals/${existingDealDialog.dealId}`);
-                }
-              }}
-              className="w-full sm:w-auto"
-            >
-              <ExternalLink className="mr-2 h-4 w-4" />
-              View Deal
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Input Form */}
       <Card className="w-full mx-0 border-border/50 bg-card/50 backdrop-blur">
         <CardContent className="pt-6">

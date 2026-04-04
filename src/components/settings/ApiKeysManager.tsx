@@ -146,10 +146,10 @@ export function ApiKeysManager() {
       <CardHeader>
         <CardTitle className="text-lg flex items-center gap-2">
           <Key className="w-5 h-5" />
-          API Keys
+          Your API Keys
         </CardTitle>
         <CardDescription>
-          Manage API keys for external access to the deal analysis endpoint
+          Keys you generate to give external apps or scripts access to this site's deal analysis API
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

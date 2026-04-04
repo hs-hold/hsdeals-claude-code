@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useDeals } from '@/context/DealsContext';
 import { useSettings } from '@/context/SettingsContext';
 import { isDealAnalyzed } from '@/utils/dealHelpers';
@@ -107,6 +107,9 @@ import { ZipMarketCard } from '@/components/deals/ZipMarketCard';
 export default function DealDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const analysisState = location.state as { analysisResult?: 'new' | 'duplicate'; apiCharged?: boolean; analyzedAt?: string; originalAddress?: string } | null;
+  const [bannerDismissed, setBannerDismissed] = useState(false);
   const { settings } = useSettings();
   const loanDefaults = settings.loanDefaults;
   const { getDeal, updateDealStatus, updateDealOverrides, updateDealNotes, refreshDealFromApi, refetch, isLoading, toggleDealLock } = useDeals();
@@ -154,12 +157,15 @@ export default function DealDetailPage() {
     maintenanceVacancyPercent: deal?.overrides?.maintenanceVacancyPercent?.toString() || '',
     closingCostsPercent: deal?.overrides?.closingCostsPercent?.toString() || '',
     closingCostsDollar: deal?.overrides?.closingCostsDollar?.toString() || '',
+    closingCostsSalePercent: (deal?.overrides as any)?.closingCostsSalePercent?.toString() || '',
+    closingCostsSaleDollar: (deal?.overrides as any)?.closingCostsSaleDollar?.toString() || '',
     contingencyPercent: deal?.overrides?.contingencyPercent?.toString() || '',
     agentCommissionPercent: deal?.overrides?.agentCommissionPercent?.toString() || '',
     notaryFees: deal?.overrides?.notaryFees?.toString() || '',
     cashNotaryFee: (deal?.overrides as any)?.cashNotaryFee?.toString() || '',
     titleFees: deal?.overrides?.titleFees?.toString() || '',
     hmlLoanType: deal?.overrides?.hmlLoanType || 'ltc',
+    brrrrPhase1Type: deal?.overrides?.brrrrPhase1Type || 'hml',
     hmlLtvPurchasePercent: deal?.overrides?.hmlLtvPurchasePercent?.toString() || '',
     hmlLtvRehabPercent: deal?.overrides?.hmlLtvRehabPercent?.toString() || '',
     hmlPointsPercent: deal?.overrides?.hmlPointsPercent?.toString() || '',
@@ -258,12 +264,15 @@ export default function DealDetailPage() {
       maintenanceVacancyPercent: deal.overrides?.maintenanceVacancyPercent?.toString() || '',
       closingCostsPercent: deal.overrides?.closingCostsPercent?.toString() || '',
       closingCostsDollar: deal.overrides?.closingCostsDollar?.toString() || '',
+      closingCostsSalePercent: (deal.overrides as any)?.closingCostsSalePercent?.toString() || '',
+      closingCostsSaleDollar: (deal.overrides as any)?.closingCostsSaleDollar?.toString() || '',
       contingencyPercent: deal.overrides?.contingencyPercent?.toString() || '',
       agentCommissionPercent: deal.overrides?.agentCommissionPercent?.toString() || '',
       notaryFees: deal.overrides?.notaryFees?.toString() || '',
       cashNotaryFee: (deal.overrides as any)?.cashNotaryFee?.toString() || '',
       titleFees: deal.overrides?.titleFees?.toString() || '',
       hmlLoanType: deal.overrides?.hmlLoanType || 'ltc',
+      brrrrPhase1Type: deal.overrides?.brrrrPhase1Type || 'hml',
       hmlLtvPurchasePercent: deal.overrides?.hmlLtvPurchasePercent?.toString() || '',
       hmlLtvRehabPercent: deal.overrides?.hmlLtvRehabPercent?.toString() || '',
       hmlPointsPercent: deal.overrides?.hmlPointsPercent?.toString() || '',
@@ -312,12 +321,15 @@ export default function DealDetailPage() {
       maintenanceVacancyPercent: deal.overrides?.maintenanceVacancyPercent?.toString() || '',
       closingCostsPercent: deal.overrides?.closingCostsPercent?.toString() || '',
       closingCostsDollar: deal.overrides?.closingCostsDollar?.toString() || '',
+      closingCostsSalePercent: (deal.overrides as any)?.closingCostsSalePercent?.toString() || '',
+      closingCostsSaleDollar: (deal.overrides as any)?.closingCostsSaleDollar?.toString() || '',
       contingencyPercent: deal.overrides?.contingencyPercent?.toString() || '',
       agentCommissionPercent: deal.overrides?.agentCommissionPercent?.toString() || '',
       notaryFees: deal.overrides?.notaryFees?.toString() || '',
       cashNotaryFee: (deal.overrides as any)?.cashNotaryFee?.toString() || '',
       titleFees: deal.overrides?.titleFees?.toString() || '',
       hmlLoanType: deal.overrides?.hmlLoanType || 'ltc',
+      brrrrPhase1Type: deal.overrides?.brrrrPhase1Type || 'hml',
       hmlLtvPurchasePercent: deal.overrides?.hmlLtvPurchasePercent?.toString() || '',
       hmlLtvRehabPercent: deal.overrides?.hmlLtvRehabPercent?.toString() || '',
       hmlPointsPercent: deal.overrides?.hmlPointsPercent?.toString() || '',
@@ -381,12 +393,15 @@ export default function DealDetailPage() {
         maintenanceVacancyPercent: deal.overrides?.maintenanceVacancyPercent?.toString() || '',
         closingCostsPercent: deal.overrides?.closingCostsPercent?.toString() || '',
         closingCostsDollar: deal.overrides?.closingCostsDollar?.toString() || '',
+        closingCostsSalePercent: (deal.overrides as any)?.closingCostsSalePercent?.toString() || '',
+        closingCostsSaleDollar: (deal.overrides as any)?.closingCostsSaleDollar?.toString() || '',
         contingencyPercent: deal.overrides?.contingencyPercent?.toString() || '',
         agentCommissionPercent: deal.overrides?.agentCommissionPercent?.toString() || '',
         notaryFees: deal.overrides?.notaryFees?.toString() || '',
         cashNotaryFee: (deal.overrides as any)?.cashNotaryFee?.toString() || '',
         titleFees: deal.overrides?.titleFees?.toString() || '',
         hmlLoanType: deal.overrides?.hmlLoanType || 'ltc',
+        brrrrPhase1Type: deal.overrides?.brrrrPhase1Type || 'hml',
         hmlLtvPurchasePercent: deal.overrides?.hmlLtvPurchasePercent?.toString() || '',
         hmlLtvRehabPercent: deal.overrides?.hmlLtvRehabPercent?.toString() || '',
         hmlPointsPercent: deal.overrides?.hmlPointsPercent?.toString() || '',
@@ -454,12 +469,15 @@ export default function DealDetailPage() {
       maintenanceVacancyPercent: localOverrides.maintenanceVacancyPercent ? parseFloat(localOverrides.maintenanceVacancyPercent) : null,
       closingCostsPercent: localOverrides.closingCostsPercent ? parseFloat(localOverrides.closingCostsPercent) : null,
       closingCostsDollar: localOverrides.closingCostsDollar ? parseFloat(localOverrides.closingCostsDollar) : null,
+      closingCostsSalePercent: (localOverrides as any).closingCostsSalePercent ? parseFloat((localOverrides as any).closingCostsSalePercent) : null,
+      closingCostsSaleDollar: (localOverrides as any).closingCostsSaleDollar ? parseFloat((localOverrides as any).closingCostsSaleDollar) : null,
       contingencyPercent: localOverrides.contingencyPercent ? parseFloat(localOverrides.contingencyPercent) : null,
       agentCommissionPercent: localOverrides.agentCommissionPercent ? parseFloat(localOverrides.agentCommissionPercent) : null,
       notaryFees: localOverrides.notaryFees ? parseFloat(localOverrides.notaryFees) : null,
       cashNotaryFee: localOverrides.cashNotaryFee ? parseFloat(localOverrides.cashNotaryFee) : null,
       titleFees: localOverrides.titleFees ? parseFloat(localOverrides.titleFees) : null,
       hmlLoanType: localOverrides.hmlLoanType !== 'ltc' ? localOverrides.hmlLoanType : null,
+      brrrrPhase1Type: localOverrides.brrrrPhase1Type !== 'hml' ? localOverrides.brrrrPhase1Type : null,
       hmlLtvPurchasePercent: localOverrides.hmlLtvPurchasePercent ? parseFloat(localOverrides.hmlLtvPurchasePercent) : null,
       hmlLtvRehabPercent: localOverrides.hmlLtvRehabPercent ? parseFloat(localOverrides.hmlLtvRehabPercent) : null,
       hmlPointsPercent: localOverrides.hmlPointsPercent ? parseFloat(localOverrides.hmlPointsPercent) : null,
@@ -584,12 +602,15 @@ export default function DealDetailPage() {
       maintenanceVacancyPercent: localOverrides.maintenanceVacancyPercent ? parseFloat(localOverrides.maintenanceVacancyPercent) : null,
       closingCostsPercent: localOverrides.closingCostsPercent ? parseFloat(localOverrides.closingCostsPercent) : null,
       closingCostsDollar: localOverrides.closingCostsDollar ? parseFloat(localOverrides.closingCostsDollar) : null,
+      closingCostsSalePercent: (localOverrides as any).closingCostsSalePercent ? parseFloat((localOverrides as any).closingCostsSalePercent) : null,
+      closingCostsSaleDollar: (localOverrides as any).closingCostsSaleDollar ? parseFloat((localOverrides as any).closingCostsSaleDollar) : null,
       contingencyPercent: localOverrides.contingencyPercent ? parseFloat(localOverrides.contingencyPercent) : null,
       agentCommissionPercent: localOverrides.agentCommissionPercent ? parseFloat(localOverrides.agentCommissionPercent) : null,
       notaryFees: localOverrides.notaryFees ? parseFloat(localOverrides.notaryFees) : null,
       cashNotaryFee: localOverrides.cashNotaryFee ? parseFloat(localOverrides.cashNotaryFee) : null,
       titleFees: localOverrides.titleFees ? parseFloat(localOverrides.titleFees) : null,
       hmlLoanType: localOverrides.hmlLoanType !== 'ltc' ? localOverrides.hmlLoanType : null,
+      brrrrPhase1Type: localOverrides.brrrrPhase1Type !== 'hml' ? localOverrides.brrrrPhase1Type : null,
       hmlLtvPurchasePercent: localOverrides.hmlLtvPurchasePercent ? parseFloat(localOverrides.hmlLtvPurchasePercent) : null,
       hmlLtvRehabPercent: localOverrides.hmlLtvRehabPercent ? parseFloat(localOverrides.hmlLtvRehabPercent) : null,
       hmlPointsPercent: localOverrides.hmlPointsPercent ? parseFloat(localOverrides.hmlPointsPercent) : null,
@@ -847,6 +868,7 @@ export default function DealDetailPage() {
       cashNotaryFee: '400',
       titleFees: FINANCIAL_CONFIG.titleFees.toString(),
       hmlLoanType: 'ltc',
+      brrrrPhase1Type: 'hml',
     };
   }, [apiData, loanDefaults]);
 
@@ -1014,6 +1036,7 @@ export default function DealDetailPage() {
       cashNotaryFee: (saved as any).cashNotaryFee?.toString() || '',
       titleFees: (saved as any).titleFees?.toString() || '',
       hmlLoanType: (saved as any).hmlLoanType || 'ltc',
+      brrrrPhase1Type: (saved as any).brrrrPhase1Type || 'hml',
       hmlLtvPurchasePercent: (saved as any).hmlLtvPurchasePercent?.toString() || '',
       hmlLtvRehabPercent: (saved as any).hmlLtvRehabPercent?.toString() || '',
       hmlPointsPercent: (saved as any).hmlPointsPercent?.toString() || '',
@@ -1068,6 +1091,7 @@ export default function DealDetailPage() {
       cashNotaryFee: (saved as any).cashNotaryFee?.toString() || '',
       titleFees: (saved as any).titleFees?.toString() || '',
       hmlLoanType: (saved as any).hmlLoanType || 'ltc',
+      brrrrPhase1Type: (saved as any).brrrrPhase1Type || 'hml',
       hmlLtvPurchasePercent: (saved as any).hmlLtvPurchasePercent?.toString() || '',
       hmlLtvRehabPercent: (saved as any).hmlLtvRehabPercent?.toString() || '',
       hmlPointsPercent: (saved as any).hmlPointsPercent?.toString() || '',
@@ -1130,6 +1154,7 @@ export default function DealDetailPage() {
       cashNotaryFee: '',
       titleFees: '',
       hmlLoanType: 'ltc',
+      brrrrPhase1Type: 'hml',
       hmlLtvPurchasePercent: '',
       hmlLtvRehabPercent: '',
       hmlPointsPercent: '',
@@ -1217,7 +1242,7 @@ export default function DealDetailPage() {
       return;
     }
     // Boolean toggle fields - skip numeric sanitization
-    const booleanFields = ['rentalInterestOnly', 'brrrrInterestOnly', 'hmlLoanType'];
+    const booleanFields = ['rentalInterestOnly', 'brrrrInterestOnly', 'hmlLoanType', 'brrrrPhase1Type'];
     if (booleanFields.includes(field)) {
       setLocalOverrides(prev => ({ ...prev, [field]: value }));
       setIsOverridesDirty(true);
@@ -1319,6 +1344,7 @@ export default function DealDetailPage() {
         
         // HML parameters
         hmlLoanType: localOverrides.hmlLoanType !== 'ltc' ? localOverrides.hmlLoanType : null,
+        brrrrPhase1Type: localOverrides.brrrrPhase1Type !== 'hml' ? localOverrides.brrrrPhase1Type : null,
         hmlLtvPurchasePercent: getOverrideIfDifferent(localOverrides.hmlLtvPurchasePercent, loanDefaults.hmlLtvPurchasePercent, deal.overrides.hmlLtvPurchasePercent, 'hmlLtvPurchasePercent'),
         hmlLtvRehabPercent: getOverrideIfDifferent(localOverrides.hmlLtvRehabPercent, loanDefaults.hmlLtvRehabPercent, deal.overrides.hmlLtvRehabPercent, 'hmlLtvRehabPercent'),
         hmlPointsPercent: getOverrideIfDifferent(localOverrides.hmlPointsPercent, loanDefaults.hmlPointsPercent, deal.overrides.hmlPointsPercent, 'hmlPointsPercent'),
@@ -1555,6 +1581,52 @@ export default function DealDetailPage() {
           >
             <RotateCcw className="w-4 h-4" />
             Restore Deal
+          </Button>
+        </div>
+      )}
+
+      {/* Analysis result banner */}
+      {analysisState?.analysisResult && !bannerDismissed && (
+        <div className={cn(
+          "flex items-center justify-between gap-3 rounded-lg border px-4 py-3 text-sm",
+          analysisState.analysisResult === 'new'
+            ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+            : "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400"
+        )}>
+          <div className="flex items-center gap-2">
+            {analysisState.analysisResult === 'new' ? (
+              <>
+                <span className="font-semibold">✅ New analysis complete</span>
+                <span className="text-muted-foreground">•</span>
+                <span className="text-muted-foreground">API call was charged</span>
+                {analysisState.analyzedAt && (
+                  <>
+                    <span className="text-muted-foreground">•</span>
+                    <span className="text-muted-foreground">
+                      {new Date(analysisState.analyzedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <span className="font-semibold">♻️ Already analyzed</span>
+                <span className="text-muted-foreground">•</span>
+                <span className="text-muted-foreground">No API call was made — showing existing record</span>
+                {analysisState.analyzedAt && (
+                  <>
+                    <span className="text-muted-foreground">•</span>
+                    <span className="text-muted-foreground">
+                      Originally analyzed {new Date(analysisState.analyzedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </span>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 opacity-60 hover:opacity-100"
+            onClick={() => setBannerDismissed(true)}>
+            <XCircle className="h-4 w-4" />
           </Button>
         </div>
       )}
@@ -2243,7 +2315,7 @@ BRRRR STRATEGY:
 
             return null;
           })()}
-          {apiData.daysOnMarket != null && (() => {
+          {apiData.daysOnMarket != null && apiData.daysOnMarket > 0 && (() => {
             // Calculate current days on market dynamically.
             // For older deals that don't have a fetched timestamp yet, fall back to deal.createdAt.
             let currentDaysOnMarket = apiData.daysOnMarket;
@@ -5480,12 +5552,16 @@ BRRRR STRATEGY:
                    const brrrrHmlMonthlyHolding = propertyTaxMonthly + stateTaxMonthly + hoaMonthly + utilitiesMonthly + holdingOtherMonthlyBrrrr;
                    const brrrrHmlTotalHoldingCosts = brrrrHmlMonthlyHolding * rehabMonths;
                    
+                   const isBrrrrCashPurchase = localOverrides.brrrrPhase1Type === 'cash';
+
                    // Cash to Close = down payments + closing + contingency + holding + HML fees + insurance (annual) + HML interest
                    const hmlCashToClose = (purchasePrice - hmlLoanPurchase) + (rehabCost - hmlLoanRehab) + closingCostsBuyCalc + rehabContingencyCalc + brrrrHmlTotalHoldingCosts + hmlPoints + hmlAllFees + brrrrHmlAnnualInsuranceVal + hmlTotalInterest;
-                   const totalCashOutOfPocket = hmlCashToClose;
-                   
+                   // Cash purchase: full purchase + rehab + costs (no loan)
+                   const cashPurchaseCashToClose = purchasePrice + rehabCost + closingCostsBuyCalc + rehabContingencyCalc + brrrrHmlTotalHoldingCosts + brrrrHmlAnnualInsuranceVal;
+                   const totalCashOutOfPocket = isBrrrrCashPurchase ? cashPurchaseCashToClose : hmlCashToClose;
+
                    // HML Payoff = principal only (interest already included in Cash to Close)
-                   const hmlTotalPayoff = hmlTotalLoan;
+                   const hmlTotalPayoff = isBrrrrCashPurchase ? 0 : hmlTotalLoan;
                   
                   // Phase 2: Refinance
                   const refiLtvPercentVal = localOverrides.refiLtvPercent 
@@ -5552,39 +5628,137 @@ BRRRR STRATEGY:
                   const brrrrCashflowMonthly = grossMonthlyRent - totalOperatingExpenses - refiMortgage;
                   const brrrrCashflowAnnual = brrrrCashflowMonthly * 12;
                   const brrrrCoCReturn = moneyInDeal > 0 ? (brrrrCashflowAnnual / moneyInDeal) * 100 : (brrrrCashflowAnnual > 0 ? Infinity : 0);
-                  
+
+                  // === Target Money in Deal Slider ===
+                  const sliderStep = 5000;
+                  const sliderMax = 30000;
+                  // Fixed refi costs (not dependent on loan amount)
+                  const refiFixedCostsFull = refiAppraisal + refiUnderwriting + refiOtherFeesVal + refiTitleCost + refiNotary;
+                  const refiPointsRate = refiPointsPct / 100;
+
+                  // Reverse: given target moneyInDeal → required refi LTV%
+                  const ltvForMoneyTarget = (target: number): number => {
+                    const loan = (totalCashOutOfPocket + refiFixedCostsFull + hmlTotalPayoff - target) / (1 - refiPointsRate);
+                    return Math.max(0, (loan / arv) * 100);
+                  };
+
+                  // Cashflow at a hypothetical loan amount
+                  const cashflowAtLoan = (loan: number): number => {
+                    const r = refiMonthlyInterestRate;
+                    const n = refiNumberOfPayments;
+                    const mortgage = isBrrrrInterestOnly
+                      ? loan * r
+                      : r > 0 ? loan * (r * Math.pow(1+r,n)) / (Math.pow(1+r,n)-1) : loan/n;
+                    return grossMonthlyRent - totalOperatingExpenses - mortgage;
+                  };
+
+                  // Slider min: most cash you can pull while keeping cashflow ≥ 0 (or 80% LTV hard cap)
+                  const breakEvenMortgageAmt = grossMonthlyRent - totalOperatingExpenses;
+                  const hardMaxLoan = arv * 0.80;
+                  const beLoan = breakEvenMortgageAmt > 0 && refiMonthlyInterestRate > 0
+                    ? (isBrrrrInterestOnly
+                        ? breakEvenMortgageAmt / refiMonthlyInterestRate
+                        : breakEvenMortgageAmt * (Math.pow(1+refiMonthlyInterestRate, refiNumberOfPayments)-1) / (refiMonthlyInterestRate * Math.pow(1+refiMonthlyInterestRate, refiNumberOfPayments)))
+                    : 0;
+                  const effectiveMinLoan = Math.min(Math.max(beLoan, 0), hardMaxLoan);
+                  const moneyAtMinLoan = totalCashOutOfPocket - Math.max(0, effectiveMinLoan*(1-refiPointsRate) - refiFixedCostsFull - hmlTotalPayoff);
+                  const sliderMin = breakEvenMortgageAmt > 0
+                    ? Math.floor(moneyAtMinLoan / sliderStep) * sliderStep
+                    : 0;
+
+                  // Current slider position (derived from current LTV/moneyInDeal)
+                  const actualMoneyForSlider = totalCashOutOfPocket - Math.max(0, cashToBorrowerAfterHml);
+                  const sliderValue = Math.max(sliderMin, Math.min(sliderMax, Math.round(actualMoneyForSlider / sliderStep) * sliderStep));
+
+                  // Preview cashflow at slider position
+                  const previewLoan = arv * ltvForMoneyTarget(sliderValue) / 100;
+                  const previewCashflow = cashflowAtLoan(previewLoan);
+
                   return (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 text-xs">
-                      {/* Phase 1: Acquisition & Rehab (HML) */}
+                      {/* Phase 1: Acquisition & Rehab */}
                       <div className="space-y-1.5">
-                        <h4 className="text-xs font-semibold text-orange-400 uppercase tracking-wider border-b border-orange-500/30 pb-1">
-                          Phase 1: Acquisition & Rehab (HML)
+                        <h4 className="text-xs font-semibold text-orange-400 uppercase tracking-wider border-b border-orange-500/30 pb-1 flex items-center justify-between">
+                          <span>Phase 1: Acquisition & Rehab</span>
+                          <div className="flex items-center rounded overflow-hidden border border-orange-500/30 normal-case">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleOverrideChange('brrrrPhase1Type', 'hml'); }}
+                              className={cn("text-[10px] px-2 py-0.5 font-normal tracking-normal transition-colors", !isBrrrrCashPurchase ? "bg-orange-500/30 text-orange-300" : "text-muted-foreground hover:text-orange-300")}
+                            >HML</button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleOverrideChange('brrrrPhase1Type', 'cash'); }}
+                              className={cn("text-[10px] px-2 py-0.5 font-normal tracking-normal border-l border-orange-500/30 transition-colors", isBrrrrCashPurchase ? "bg-cyan-500/30 text-cyan-300" : "text-muted-foreground hover:text-cyan-300")}
+                            >Cash</button>
+                          </div>
                         </h4>
                         <div className="space-y-1">
-                          {/* Total HML - collapsible */}
-                          <Collapsible>
-                            <CollapsibleTrigger asChild>
-                              <div className="flex justify-between items-center cursor-pointer group">
-                                <span className="font-semibold text-orange-300 flex items-center gap-1">
-                                  Total HML
-                                  <ChevronDown className="w-3 h-3 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-                                </span>
-                                <span className="font-bold text-orange-300">{formatCurrency(hmlTotalLoan)}</span>
-                              </div>
-                            </CollapsibleTrigger>
-                            <CollapsibleContent>
-                              <div className="ml-2 mt-1 space-y-0.5 text-[11px] border-l-2 border-orange-500/20 pl-2">
-                                <div className="flex justify-between">
-                                  <span className="text-muted-foreground">Loan on Purchase ({(hmlLtvPurchase * 100).toFixed(0)}%)</span>
-                                  <span>{formatCurrency(hmlLoanPurchase)}</span>
+                          {!isBrrrrCashPurchase ? (
+                            /* HML mode - collapsible */
+                            <Collapsible>
+                              <CollapsibleTrigger asChild>
+                                <div className="flex justify-between items-center cursor-pointer group">
+                                  <span className="font-semibold text-orange-300 flex items-center gap-1">
+                                    Total HML
+                                    <ChevronDown className="w-3 h-3 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                                  </span>
+                                  <span className="font-bold text-orange-300">{formatCurrency(hmlTotalLoan)}</span>
                                 </div>
-                                <div className="flex justify-between">
-                                  <span className="text-muted-foreground">Loan on Rehab ({(brrrrCardEffectiveRehabLtv * 100).toFixed(0)}%)</span>
-                                  <span>{formatCurrency(hmlLoanRehab)}</span>
+                              </CollapsibleTrigger>
+                              <CollapsibleContent>
+                                <div className="ml-2 mt-1 space-y-0.5 text-[11px] border-l-2 border-orange-500/20 pl-2">
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Loan on Purchase ({(hmlLtvPurchase * 100).toFixed(0)}%)</span>
+                                    <span>{formatCurrency(hmlLoanPurchase)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Loan on Rehab ({(brrrrCardEffectiveRehabLtv * 100).toFixed(0)}%)</span>
+                                    <span>{formatCurrency(hmlLoanRehab)}</span>
+                                  </div>
                                 </div>
-                              </div>
-                            </CollapsibleContent>
-                          </Collapsible>
+                              </CollapsibleContent>
+                            </Collapsible>
+                          ) : (
+                            /* Cash purchase mode - collapsible breakdown */
+                            <Collapsible>
+                              <CollapsibleTrigger asChild>
+                                <div className="flex justify-between items-center cursor-pointer group">
+                                  <span className="font-semibold text-cyan-300 flex items-center gap-1">
+                                    Total Investment
+                                    <ChevronDown className="w-3 h-3 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+                                  </span>
+                                  <span className="font-bold text-cyan-300">{formatCurrency(cashPurchaseCashToClose)}</span>
+                                </div>
+                              </CollapsibleTrigger>
+                              <CollapsibleContent>
+                                <div className="ml-2 mt-1 space-y-0.5 text-[11px] border-l-2 border-cyan-500/20 pl-2">
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Purchase Price</span>
+                                    <span>{formatCurrency(purchasePrice)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Rehab Cost</span>
+                                    <span>{formatCurrency(rehabCost)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Closing Costs</span>
+                                    <span>{formatCurrency(closingCostsBuyCalc)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Contingency</span>
+                                    <span>{formatCurrency(rehabContingencyCalc)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Holding Costs</span>
+                                    <span>{formatCurrency(brrrrHmlTotalHoldingCosts)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Insurance (Annual)</span>
+                                    <span>{formatCurrency(brrrrHmlAnnualInsuranceVal)}</span>
+                                  </div>
+                                </div>
+                              </CollapsibleContent>
+                            </Collapsible>
+                          )}
 
                           {/* Total Cash Out of Pocket */}
                           <div className="flex justify-between items-center pt-1 border-t border-orange-500/20">
@@ -5683,12 +5857,14 @@ BRRRR STRATEGY:
                               {formatCurrency(cashToBorrower)}
                             </span>
                           </div>
+                          {!isBrrrrCashPurchase && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground">Pay Off to HML</span>
+                              <span className="font-medium text-red-400">-{formatCurrency(hmlTotalPayoff)}</span>
+                            </div>
+                          )}
                           <div className="flex justify-between items-center">
-                            <span className="text-muted-foreground">Pay Off to HML</span>
-                            <span className="font-medium text-red-400">-{formatCurrency(hmlTotalPayoff)}</span>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className="text-muted-foreground">Cash After Paying HML</span>
+                            <span className="text-muted-foreground">{isBrrrrCashPurchase ? 'Net Cash from Refi' : 'Cash After Paying HML'}</span>
                             <span className={cn("font-medium", cashToBorrowerAfterHml >= 0 ? "text-emerald-400" : "text-red-400")}>
                               {formatCurrency(cashToBorrowerAfterHml)}
                             </span>
@@ -5700,7 +5876,7 @@ BRRRR STRATEGY:
                               <span>{formatCurrency(totalCashOutOfPocket)}</span>
                             </div>
                             <div className="flex justify-between items-center text-[10px] text-muted-foreground">
-                              <span>Cash After Paying HML</span>
+                              <span>{isBrrrrCashPurchase ? 'Net Cash from Refi' : 'Cash After Paying HML'}</span>
                               <span className={cashToBorrowerAfterHml >= 0 ? "text-emerald-400" : "text-red-400"}>-{formatCurrency(Math.max(0, cashToBorrowerAfterHml))}</span>
                             </div>
                             <div className="flex justify-between items-center pt-0.5">
@@ -6114,7 +6290,15 @@ Best regards`;
                 )}
 
                 {/* Sold Comps - Combined Card */}
-                {(recentSoldComps.length > 0 || olderSoldComps.length > 0) && (
+                {(recentSoldComps.length > 0 || olderSoldComps.length > 0) && (() => {
+                  // Calculate avg DOM from recent comps that have it
+                  const domValues = recentSoldComps
+                    .map(c => (c as any).daysOnMarket)
+                    .filter((d): d is number => d != null && d > 0);
+                  const avgDom = domValues.length > 0
+                    ? Math.round(domValues.reduce((s, d) => s + d, 0) / domValues.length)
+                    : null;
+                  return (
                   <Collapsible open={saleCompsOpen} onOpenChange={setSaleCompsOpen}>
                     <Card className="border-success/30">
                       <CollapsibleTrigger asChild>
@@ -6125,6 +6309,11 @@ Best regards`;
                             {calculatedArv && (
                               <span className="text-success font-bold ml-2">
                                 ARV: {formatCurrency(finalCalculatedArv)}
+                              </span>
+                            )}
+                            {avgDom != null && (
+                              <span className="text-xs text-muted-foreground font-normal">
+                                🕐 Avg {avgDom}d to sell
                               </span>
                             )}
                             <Badge variant="outline" className="text-muted-foreground text-xs">{recentSoldComps.length} comps</Badge>
@@ -6209,6 +6398,7 @@ Best regards`;
                                 <span>{comp.sqft?.toLocaleString()} sqft</span>
                                 <span>{comp.distance?.toFixed(2)} mi away</span>
                                 <span className={isExactMatch ? "text-success font-medium" : ""}>Sold {new Date(comp.saleDate).toLocaleDateString()}</span>
+                                {(comp as any).daysOnMarket != null && <span>🕐 {(comp as any).daysOnMarket}d on market</span>}
                                 {comp.similarityScore > 0 && <span className="text-primary">Score: {comp.similarityScore.toFixed(0)}%</span>}
                                 {comp.notes && comp.notes.length > 0 && (
                                   <HoverCard>
@@ -6278,6 +6468,7 @@ Best regards`;
                                     <span>{comp.sqft?.toLocaleString()} sqft</span>
                                     <span>{comp.distance?.toFixed(2)} mi away</span>
                                     <span>Sold {new Date(comp.saleDate).toLocaleDateString()}</span>
+                                    {(comp as any).daysOnMarket != null && <span>🕐 {(comp as any).daysOnMarket}d on market</span>}
                                     {comp.similarityScore > 0 && <span className="text-primary">Score: {comp.similarityScore.toFixed(0)}%</span>}
                                     {comp.notes && comp.notes.length > 0 && (
                                       <HoverCard>
@@ -6304,7 +6495,8 @@ Best regards`;
                       </CollapsibleContent>
                     </Card>
                   </Collapsible>
-                )}
+                  );
+                })()}
 
 
                 {/* Still on Market - NOT for ARV */}
@@ -6331,6 +6523,7 @@ Best regards`;
                               <span>{comp.sqft?.toLocaleString()} sqft</span>
                               <span>{comp.distance?.toFixed(2)} mi away</span>
                               <span className="text-warning">Currently Listed</span>
+                              {(comp as any).daysOnMarket != null && <span className="text-warning">🕐 {(comp as any).daysOnMarket}d listed</span>}
                               {comp.notes && comp.notes.length > 0 && (
                                 <HoverCard>
                                   <HoverCardTrigger asChild>

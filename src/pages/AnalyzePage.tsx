@@ -8,8 +8,7 @@ export default function AnalyzePage() {
   const [searchParams] = useSearchParams();
   const prefilledAddress = searchParams.get('address') || '';
   
-  // If we have an address from URL, default to address tab
-  const defaultTab = prefilledAddress ? 'address' : 'address';
+  const defaultTab = 'address';
 
   return (
     <div className="p-6 space-y-6 animate-fade-in">

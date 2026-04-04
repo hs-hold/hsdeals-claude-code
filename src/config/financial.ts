@@ -41,7 +41,7 @@ export const FINANCIAL_CONFIG = {
     utilitiesMonthly: 300,
     // Sale costs
     saleCosts: {
-      agentCommissionPercent: 0.06, // 6%
+      agentCommissionPercent: 0.05, // 5%
     },
   },
   
