@@ -32,6 +32,7 @@ import ScoutPage from "./pages/ScoutPage";
 import ScoutAiDealsPage from "./pages/ScoutAiDealsPage";
 import ScoutFavoritesPage from "./pages/ScoutFavoritesPage";
 import ScoutNotRelevantPage from "./pages/ScoutNotRelevantPage";
+import DealScannerPage from "./pages/DealScannerPage";
 import { ScoutLayout } from "./layouts/ScoutLayout";
 import SyncProgressPage from "./pages/SyncProgressPage";
 import ApiDealsPage from "./pages/ApiDealsPage";
@@ -78,6 +79,7 @@ const App = () => (
                   <Route path="/scout/ai-analyzed" element={<ProtectedRoute><ScoutLayout><ScoutAiDealsPage /></ScoutLayout></ProtectedRoute>} />
                   <Route path="/scout/favorites" element={<ProtectedRoute><ScoutLayout><ScoutFavoritesPage /></ScoutLayout></ProtectedRoute>} />
                   <Route path="/scout/not-relevant" element={<ProtectedRoute><ScoutLayout><ScoutNotRelevantPage /></ScoutLayout></ProtectedRoute>} />
+                  <Route path="/scout/deal-scanner" element={<ProtectedRoute><ScoutLayout><DealScannerPage /></ScoutLayout></ProtectedRoute>} />
                   <Route path="/api-deals" element={<ProtectedRoute><AppLayout><ApiDealsPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/agent-deals" element={<ProtectedRoute><AppLayout><AgentDealsPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/agent-management" element={<ProtectedRoute><AppLayout><AgentManagementPage /></AppLayout></ProtectedRoute>} />

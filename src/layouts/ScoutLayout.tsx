@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { Telescope, ArrowLeft, LogOut, Sparkles, Search, Star, XCircle } from 'lucide-react';
+import { Telescope, ArrowLeft, LogOut, Sparkles, Search, Star, XCircle, ScanLine } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -59,6 +59,14 @@ export function ScoutLayout({ children }: { children: ReactNode }) {
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
             )}>
               <XCircle className="w-3.5 h-3.5" /> Not Relevant
+            </Link>
+            <Link to="/scout/deal-scanner" className={cn(
+              'flex items-center gap-1.5 text-xs px-2.5 py-1 rounded transition-colors',
+              location.pathname === '/scout/deal-scanner'
+                ? 'bg-emerald-500/15 text-emerald-400'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+            )}>
+              <ScanLine className="w-3.5 h-3.5" /> Deal Scanner
             </Link>
           </nav>
         </div>
