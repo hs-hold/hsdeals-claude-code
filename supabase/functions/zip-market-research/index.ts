@@ -13,7 +13,7 @@ interface ZipMarketData {
   city: string;
   state: string;
   marketTemperature: 'hot' | 'warm' | 'neutral' | 'cool' | 'cold';
-  marketTemperatureScore: number; // 1-10
+  marketTemperatureScore: number;
   medianHomePrice: number | null;
   medianHomePriceTrend: string | null;
   avgDaysOnMarket: number | null;
@@ -24,36 +24,23 @@ interface ZipMarketData {
   medianHouseholdIncome: number | null;
   unemploymentRate: string | null;
   populationTrend: string | null;
-  schoolRating: number | null; // 1-10
+  schoolRating: number | null;
   crimeLevel: 'low' | 'below average' | 'average' | 'above average' | 'high' | null;
   economicStrength: 'strong' | 'moderate' | 'weak' | null;
-  investorScore: number; // 1-10
+  investorScore: number;
   priceToRentRatio: number | null;
   appreciation5yr: string | null;
   keyInsights: string[];
   risks: string[];
   sources: string[];
   researchedAt: string;
+  dataSource?: 'web_search' | 'ai_knowledge';
 }
 
-async function researchZipMarket(zipCode: string): Promise<ZipMarketData | null> {
-  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
-  if (!apiKey) {
-    console.error('ANTHROPIC_API_KEY not configured');
-    return null;
-  }
-
-  const prompt = `You are a real estate investment analyst. Use web search to research the real estate market for ZIP code ${zipCode} in the United States.
-
-Search Zillow, Redfin, Realtor.com, Census Bureau, GreatSchools, NeighborhoodScout, and other authoritative sources for REAL, CURRENT data.
-
-Return ONLY verified data from your searches. Use null for anything you cannot confirm from a real source.
-
-After researching, return a JSON object with this exact structure:
-{
+const JSON_TEMPLATE = (zipCode: string) => `{
   "zipCode": "${zipCode}",
   "city": "city name",
-  "state": "state abbreviation",
+  "state": "state abbreviation (e.g. GA)",
   "marketTemperature": "hot|warm|neutral|cool|cold",
   "marketTemperatureScore": 7.5,
   "medianHomePrice": 285000,
@@ -65,29 +52,55 @@ After researching, return a JSON object with this exact structure:
   "vacancyRate": "4.2%",
   "medianHouseholdIncome": 68000,
   "unemploymentRate": "3.8%",
-  "populationTrend": "growing|stable|declining",
+  "populationTrend": "growing",
   "schoolRating": 7,
-  "crimeLevel": "low|below average|average|above average|high",
-  "economicStrength": "strong|moderate|weak",
+  "crimeLevel": "average",
+  "economicStrength": "moderate",
   "investorScore": 7.5,
   "priceToRentRatio": 15.8,
   "appreciation5yr": "+28% over 5 years",
-  "keyInsights": [
-    "Strong rental demand with low vacancy rates",
-    "Below-median purchase prices with above-median rents",
-    "Growing job market — healthcare and logistics sector"
-  ],
-  "risks": [
-    "Rising insurance costs",
-    "Property taxes increasing ~8% annually"
-  ],
-  "sources": ["Zillow March 2026", "Census ACS 2023"]
+  "keyInsights": ["Strong rental demand", "Growing job market"],
+  "risks": ["Rising insurance costs"],
+  "sources": ["Zillow 2025", "Census ACS 2023"]
+}`;
+
+// Try with web search first; fall back to AI knowledge if web search fails
+async function researchZipMarket(zipCode: string): Promise<ZipMarketData | null> {
+  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+  if (!apiKey) {
+    console.error('[zip-research] ANTHROPIC_API_KEY not configured');
+    return null;
+  }
+
+  // Attempt 1: Claude Sonnet with web search (faster + cheaper than Opus)
+  const resultWithSearch = await callAnthropicWithSearch(apiKey, zipCode);
+  if (resultWithSearch) {
+    return { ...resultWithSearch, dataSource: 'web_search', researchedAt: new Date().toISOString() };
+  }
+
+  // Attempt 2: Claude Sonnet using training knowledge (no web search)
+  console.log('[zip-research] Web search failed, falling back to AI knowledge');
+  const resultNoSearch = await callAnthropicNoSearch(apiKey, zipCode);
+  if (resultNoSearch) {
+    return { ...resultNoSearch, dataSource: 'ai_knowledge', researchedAt: new Date().toISOString() };
+  }
+
+  return null;
 }
 
-Return ONLY the JSON object, no other text.`;
+async function callAnthropicWithSearch(apiKey: string, zipCode: string): Promise<Partial<ZipMarketData> | null> {
+  const prompt = `You are a real estate investment analyst. Research the real estate market for ZIP code ${zipCode} using web search.
+
+Search for current data from Zillow, Redfin, Realtor.com, Census Bureau, GreatSchools, and similar sources.
+
+Return ONLY this JSON object with real data (null for anything you can't find):
+${JSON_TEMPLATE(zipCode)}
+
+Return ONLY the JSON, nothing else.`;
 
   try {
-    const response = await fetch(ANTHROPIC_API_URL, {
+    console.log('[zip-research] Trying with web search...');
+    const resp = await fetch(ANTHROPIC_API_URL, {
       method: 'POST',
       headers: {
         'x-api-key': apiKey,
@@ -96,55 +109,109 @@ Return ONLY the JSON object, no other text.`;
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-opus-4-6',
-        max_tokens: 2000,
-        tools: [
-          {
-            type: 'web_search_20250305',
-            name: 'web_search',
-            max_uses: 5,
-          },
-        ],
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4096,
+        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
         messages: [{ role: 'user', content: prompt }],
       }),
     });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error('Anthropic API error:', response.status, errText);
+    if (!resp.ok) {
+      const err = await resp.text();
+      console.error('[zip-research] Web search API error:', resp.status, err.substring(0, 300));
       return null;
     }
 
-    const data = await response.json();
+    const data = await resp.json();
+    console.log('[zip-research] Web search stop_reason:', data.stop_reason, 'content blocks:', data.content?.length);
+    return extractJsonFromContent(data.content, zipCode);
+  } catch (e) {
+    console.error('[zip-research] Web search exception:', e);
+    return null;
+  }
+}
 
-    // Extract the final text response (after tool use)
-    const textBlock = data.content?.find((b: any) => b.type === 'text');
-    const responseText = textBlock?.text?.trim();
+async function callAnthropicNoSearch(apiKey: string, zipCode: string): Promise<Partial<ZipMarketData> | null> {
+  const prompt = `You are a real estate investment analyst with deep knowledge of US real estate markets.
 
-    console.log('Claude response:', responseText?.substring(0, 500));
+Provide your best analysis for ZIP code ${zipCode} based on your training data. Be specific and realistic for this area. Use null only if you truly have no data for a field.
 
-    if (!responseText) {
-      console.error('No text in response');
+Return ONLY this JSON object:
+${JSON_TEMPLATE(zipCode)}
+
+Return ONLY the JSON, nothing else.`;
+
+  try {
+    console.log('[zip-research] Trying without web search (AI knowledge)...');
+    const resp = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2048,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.text();
+      console.error('[zip-research] No-search API error:', resp.status, err.substring(0, 300));
       return null;
     }
 
-    let jsonStr = responseText;
-    if (jsonStr.includes('```')) {
-      jsonStr = jsonStr.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
-    }
-    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error('No JSON found in response');
-      return null;
-    }
+    const data = await resp.json();
+    return extractJsonFromContent(data.content, zipCode);
+  } catch (e) {
+    console.error('[zip-research] No-search exception:', e);
+    return null;
+  }
+}
 
+function extractJsonFromContent(content: any[], zipCode: string): Partial<ZipMarketData> | null {
+  if (!Array.isArray(content)) return null;
+
+  // Find the last text block (final response after any tool use)
+  const textBlocks = content.filter((b: any) => b.type === 'text' && b.text?.trim());
+  const responseText = textBlocks[textBlocks.length - 1]?.text?.trim();
+
+  if (!responseText) {
+    console.error('[zip-research] No text block found. Content types:', content.map((b: any) => b.type));
+    return null;
+  }
+
+  console.log('[zip-research] Response text (first 400):', responseText.substring(0, 400));
+
+  // Strip markdown fences
+  let jsonStr = responseText.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+
+  // Extract JSON from anywhere in the string
+  const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    console.error('[zip-research] No JSON object found in response');
+    return null;
+  }
+
+  try {
     const parsed = JSON.parse(jsonMatch[0]);
+    // Ensure required fields have defaults
     return {
+      zipCode: parsed.zipCode || zipCode,
+      city: parsed.city || '',
+      state: parsed.state || '',
+      marketTemperature: parsed.marketTemperature || 'neutral',
+      marketTemperatureScore: parsed.marketTemperatureScore || 5,
+      investorScore: parsed.investorScore || 5,
+      keyInsights: Array.isArray(parsed.keyInsights) ? parsed.keyInsights : [],
+      risks: Array.isArray(parsed.risks) ? parsed.risks : [],
+      sources: Array.isArray(parsed.sources) ? parsed.sources : [],
       ...parsed,
-      researchedAt: new Date().toISOString(),
-    } as ZipMarketData;
-  } catch (error) {
-    console.error('Error researching ZIP market:', error);
+    };
+  } catch (e) {
+    console.error('[zip-research] JSON parse error:', e);
     return null;
   }
 }
@@ -179,7 +246,7 @@ serve(async (req) => {
         .single();
 
       if (cached) {
-        console.log(`Returning cached market data for ZIP ${cleanZip}`);
+        console.log(`[zip-research] Returning cached data for ZIP ${cleanZip}`);
         return new Response(
           JSON.stringify({ success: true, data: cached.market_data, cached: true }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -187,8 +254,7 @@ serve(async (req) => {
       }
     }
 
-    // Research the market
-    console.log(`Researching market for ZIP ${cleanZip} with Claude Opus + web search...`);
+    console.log(`[zip-research] Researching ZIP ${cleanZip}...`);
     const marketData = await researchZipMarket(cleanZip);
 
     if (!marketData) {
@@ -198,7 +264,7 @@ serve(async (req) => {
       );
     }
 
-    // Store in DB (upsert)
+    // Upsert to DB
     const { error: upsertError } = await supabase
       .from('zip_market_data')
       .upsert({
@@ -210,7 +276,7 @@ serve(async (req) => {
       }, { onConflict: 'zip_code' });
 
     if (upsertError) {
-      console.error('Error saving market data:', upsertError);
+      console.error('[zip-research] Upsert error:', upsertError);
     }
 
     return new Response(
@@ -219,7 +285,7 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('Error in zip-market-research:', error);
+    console.error('[zip-research] Fatal error:', error);
     return new Response(
       JSON.stringify({ success: false, error: error instanceof Error ? error.message : 'Unknown error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

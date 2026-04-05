@@ -92,9 +92,19 @@ export default function EmailSearchPage() {
   } = useSyncAnalyze();
 
   const [scanCount, setScanCount] = useState<ScanCount>(20);
-  const [results, setResults] = useState<EmailResultItem[]>([]);
+  const [results, setResults] = useState<EmailResultItem[]>(() => {
+    try {
+      const saved = sessionStorage.getItem('email_scan_results');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<'all' | 'new' | 'skipped'>('all');
+
+  // Persist results to sessionStorage whenever they change
+  useEffect(() => {
+    try { sessionStorage.setItem('email_scan_results', JSON.stringify(results)); } catch {}
+  }, [results]);
   // Per-row inline address editor state
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editAddr, setEditAddr] = useState('');
@@ -456,7 +466,7 @@ export default function EmailSearchPage() {
                   )}
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button size="sm" variant="ghost" onClick={() => { setResults([]); setSelected(new Set()); }} className="text-muted-foreground">
+                      <Button size="sm" variant="ghost" onClick={() => { setResults([]); setSelected(new Set()); try { sessionStorage.removeItem('email_scan_results'); } catch {} }} className="text-muted-foreground">
                         <Trash2 className="w-3.5 h-3.5" />
                       </Button>
                     </TooltipTrigger>
