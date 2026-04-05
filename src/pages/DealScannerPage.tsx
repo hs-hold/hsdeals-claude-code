@@ -10,6 +10,7 @@ import {
   Loader2, ChevronDown, ChevronUp, Calendar,
   TrendingUp, Home, DollarSign, Zap, Download,
 } from 'lucide-react';
+
 import { cn } from '@/lib/utils';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -249,8 +250,7 @@ export default function DealScannerPage() {
   const [history, setHistory]       = useState<ScanSession[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  // Analyze Top 25 state
-  const [analyzeProgress, setAnalyzeProgress] = useState<{ done: number; total: number } | null>(null);
+  // (queue is opened in a new tab – no local progress state needed)
 
   useEffect(() => { loadScanHistory().then(setHistory); }, []);
 
@@ -304,46 +304,16 @@ export default function DealScannerPage() {
     setIsScanning(false);
   }, [zipInput]);
 
-  // ── Analyze Top 25 ───────────────────────────────────────────────────────
+  // ── Analyze Top 25 — open queue in new tab ───────────────────────────────
 
-  const analyzeTop25 = useCallback(async () => {
+  const analyzeTop25 = useCallback(() => {
     if (!session) return;
     const top = session.results.slice(0, TOP_N);
-    setAnalyzeProgress({ done: 0, total: top.length });
-    let done = 0;
-    let errors = 0;
-
-    for (const r of top) {
-      try {
-        const fullAddress = [r.address, r.city, r.state, r.zipcode].filter(Boolean).join(', ');
-        await supabase.functions.invoke('scout-ai-analyze', {
-          body: {
-            deal: {
-              address:        fullAddress,
-              zip:            r.zipcode,
-              price:          r.price,
-              arv:            r.zestimate,
-              rent:           r.rentZestimate,
-              beds:           r.bedrooms,
-              baths:          r.bathrooms,
-              sqft:           r.sqft,
-              zpid:           r.zpid,
-              days_on_market: r.daysOnZillow,
-              score:          r.dealScore,
-              grade:          r.dealScore >= 70 ? 'A' : r.dealScore >= 50 ? 'B' : 'C',
-            }
-          }
-        });
-      } catch { errors++; }
-      done++;
-      setAnalyzeProgress({ done, total: top.length });
-    }
-
-    setAnalyzeProgress(null);
-    if (errors === 0) {
-      toast.success(`Analyzed top ${top.length} deals — check Scout → AI Analyzed`);
-    } else {
-      toast.warning(`Analyzed ${top.length - errors}/${top.length} deals (${errors} errors)`);
+    try {
+      localStorage.setItem('deal_scanner_queue', JSON.stringify(top));
+      window.open('/scout/deal-scanner/queue', '_blank');
+    } catch {
+      toast.error('Failed to open analysis queue');
     }
   }, [session]);
 
@@ -357,7 +327,6 @@ export default function DealScannerPage() {
 
   const currentResults = session?.results ?? [];
   const top25Count     = Math.min(currentResults.length, TOP_N);
-  const isAnalyzing    = analyzeProgress !== null;
 
   return (
     <div className="h-full flex flex-col bg-background overflow-hidden">
@@ -450,22 +419,8 @@ export default function DealScannerPage() {
         </div>
       )}
 
-      {/* ── Analyze progress ──────────────────────────────────────────── */}
-      {isAnalyzing && analyzeProgress && (
-        <div className="shrink-0 px-4 py-2 bg-violet-950/30 border-b border-violet-500/20 space-y-1">
-          <div className="flex items-center justify-between text-xs text-violet-300">
-            <span className="flex items-center gap-1.5">
-              <Zap className="w-3 h-3 animate-pulse" />
-              Analyzing top {analyzeProgress.total} deals with AI…
-            </span>
-            <span>{analyzeProgress.done} / {analyzeProgress.total}</span>
-          </div>
-          <Progress value={(analyzeProgress.done / analyzeProgress.total) * 100}
-            className="h-1 [&>div]:bg-violet-500" />
-        </div>
-      )}
 
-      {/* ── Stats + action bar ────────────────────────────────────────── */}
+{/* ── Stats + action bar ────────────────────────────────────────── */}
       {session && (
         <div className="shrink-0 px-4 py-2 bg-card/30 border-b border-border/50 flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
           <span className="flex items-center gap-1">
@@ -504,10 +459,8 @@ export default function DealScannerPage() {
             <Button size="sm"
               className="h-7 text-xs gap-1.5 bg-violet-600 hover:bg-violet-500"
               onClick={analyzeTop25}
-              disabled={isAnalyzing || currentResults.length === 0}>
-              {isAnalyzing
-                ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Analyzing…</>
-                : <><Zap className="w-3.5 h-3.5" />Analyze Top {top25Count}</>}
+              disabled={currentResults.length === 0}>
+              <Zap className="w-3.5 h-3.5" />Analyze Top {top25Count}
             </Button>
           </div>
         </div>
