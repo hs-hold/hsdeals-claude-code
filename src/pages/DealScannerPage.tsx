@@ -1,14 +1,14 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { toast } from 'sonner';
 import {
   ScanLine, ExternalLink, Clock, CheckCircle2, XCircle,
-  Loader2, Trash2, ChevronDown, ChevronUp, Calendar,
-  TrendingUp, Home, DollarSign, RotateCcw,
+  Loader2, ChevronDown, ChevronUp, Calendar,
+  TrendingUp, Home, DollarSign, Zap, Download,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -33,8 +33,9 @@ interface RawListing {
 }
 
 interface PassedListing extends RawListing {
-  margin: number; // 1 - price/zestimate
-  grossYield: number; // rentZestimate*12 / price
+  margin: number;      // 1 - price/zestimate
+  grossYield: number;  // rentZestimate*12 / price
+  dealScore: number;   // 0–100 composite score
 }
 
 interface ScanSession {
@@ -48,45 +49,55 @@ interface ScanSession {
 
 // ─── Filter constants ───────────────────────────────────────────────────────
 
-const MAX_PRICE        = 250_000;
-const MAX_PRICE_RATIO  = 0.85;   // price/zestimate must be ≤ this
-const MIN_DAYS         = 30;     // daysOnZillow must be > this
+const MAX_PRICE       = 250_000;
+const MAX_PRICE_RATIO = 0.85;
+const MIN_DAYS        = 30;
+const TOP_N           = 25;
+
+// ─── Deal Score ─────────────────────────────────────────────────────────────
+//
+//  40 pts  price discount  : (1 - price/zestimate) * 40
+//  40 pts  rent yield      : (rentZestimate*12/price) * 400  [capped at 40]
+//  20 pts  days on market  : >60d → 20, >30d → 10, else 0
+//
+function calcDealScore(l: RawListing): number {
+  const discountPts = l.zestimate
+    ? Math.max(0, (1 - l.price / l.zestimate) * 40)
+    : 0;
+
+  const yieldPts = l.rentZestimate
+    ? Math.min(40, (l.rentZestimate * 12 / l.price) * 400)
+    : 0;
+
+  const daysPts =
+    (l.daysOnZillow ?? 0) > 60 ? 20 :
+    (l.daysOnZillow ?? 0) > 30 ? 10 : 0;
+
+  return Math.round(discountPts + yieldPts + daysPts);
+}
 
 // ─── Filter logic ───────────────────────────────────────────────────────────
 
-function filterListings(listings: RawListing[]): { passed: PassedListing[]; reasons: Record<string, string> } {
-  const reasons: Record<string, string> = {};
+function filterListings(listings: RawListing[]): PassedListing[] {
   const passed: PassedListing[] = [];
 
   for (const l of listings) {
-    if (l.price > MAX_PRICE) {
-      reasons[l.zpid] = `Price $${l.price.toLocaleString()} > $${MAX_PRICE.toLocaleString()}`;
-      continue;
-    }
-    if (l.propertyType && l.propertyType !== 'SINGLE_FAMILY') {
-      reasons[l.zpid] = `homeType ${l.propertyType} ≠ SINGLE_FAMILY`;
-      continue;
-    }
-    if (!l.rentZestimate) {
-      reasons[l.zpid] = 'No rentZestimate';
-      continue;
-    }
-    if (l.zestimate && l.price / l.zestimate > MAX_PRICE_RATIO) {
-      reasons[l.zpid] = `Price/Zestimate = ${(l.price / l.zestimate).toFixed(2)} > ${MAX_PRICE_RATIO}`;
-      continue;
-    }
-    if ((l.daysOnZillow ?? 0) <= MIN_DAYS) {
-      reasons[l.zpid] = `Only ${l.daysOnZillow ?? 0} days on market (need > ${MIN_DAYS})`;
-      continue;
-    }
+    if (l.price > MAX_PRICE) continue;
+    if (l.propertyType && l.propertyType !== 'SINGLE_FAMILY') continue;
+    if (!l.rentZestimate) continue;
+    if (l.zestimate && l.price / l.zestimate > MAX_PRICE_RATIO) continue;
+    if ((l.daysOnZillow ?? 0) <= MIN_DAYS) continue;
+
     passed.push({
       ...l,
-      margin: l.zestimate ? 1 - l.price / l.zestimate : 0,
-      grossYield: (l.rentZestimate * 12) / l.price,
+      margin:     l.zestimate ? 1 - l.price / l.zestimate : 0,
+      grossYield: (l.rentZestimate! * 12) / l.price,
+      dealScore:  calcDealScore(l),
     });
   }
 
-  return { passed, reasons };
+  // Sort by dealScore descending immediately
+  return passed.sort((a, b) => b.dealScore - a.dealScore);
 }
 
 // ─── DB helpers ─────────────────────────────────────────────────────────────
@@ -94,44 +105,36 @@ function filterListings(listings: RawListing[]): { passed: PassedListing[]; reas
 async function saveScanSession(
   zips: string[],
   results: PassedListing[],
-  totalScanned: number
 ): Promise<string | null> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  // Save one search record per session (use joined ZIPs as the "zip" field)
   const { data: search, error } = await supabase
     .from('scout_searches')
-    .insert({
-      zip: zips.join(','),
-      max_price: MAX_PRICE,
-      result_count: results.length,
-      user_id: user.id,
-    })
-    .select('id')
-    .single();
+    .insert({ zip: zips.join(','), max_price: MAX_PRICE, result_count: results.length, user_id: user.id })
+    .select('id').single();
 
   if (error || !search) { console.error('Save search error:', error); return null; }
 
   if (results.length > 0) {
     const rows = results.map(r => ({
-      search_id: search.id,
-      zpid: r.zpid,
-      address: [r.address, r.city, r.state, r.zipcode].filter(Boolean).join(', '),
-      price: r.price,
-      arv: r.zestimate ?? null,        // store zestimate in arv column
-      rent: r.rentZestimate ?? null,
+      search_id:      search.id,
+      zpid:           r.zpid,
+      address:        [r.address, r.city, r.state, r.zipcode].filter(Boolean).join(', '),
+      price:          r.price,
+      arv:            r.zestimate ?? null,
+      rent:           r.rentZestimate ?? null,
       days_on_market: r.daysOnZillow ?? null,
-      beds: r.bedrooms ?? null,
-      baths: r.bathrooms ?? null,
-      sqft: r.sqft ?? null,
-      img_src: r.imgSrc ?? null,
-      detail_url: r.detailUrl ?? null,
-      score: Math.round(r.margin * 100 + r.grossYield * 100),
-      grade: r.margin >= 0.2 ? 'A' : r.margin >= 0.1 ? 'B' : 'C',
-      rehab: 0,
-      spread: r.zestimate ? r.zestimate - r.price : null,
-      cap_rate: r.grossYield ? parseFloat((r.grossYield * 100).toFixed(2)) : null,
+      beds:           r.bedrooms ?? null,
+      baths:          r.bathrooms ?? null,
+      sqft:           r.sqft ?? null,
+      img_src:        r.imgSrc ?? null,
+      detail_url:     r.detailUrl ?? null,
+      score:          r.dealScore,
+      grade:          r.dealScore >= 70 ? 'A' : r.dealScore >= 50 ? 'B' : 'C',
+      rehab:          0,
+      spread:         r.zestimate ? r.zestimate - r.price : null,
+      cap_rate:       parseFloat((r.grossYield * 100).toFixed(2)),
     }));
     await supabase.from('scout_results').insert(rows);
   }
@@ -151,40 +154,70 @@ async function loadScanHistory(): Promise<ScanSession[]> {
   const sessions: ScanSession[] = [];
   for (const s of searches) {
     const { data: results } = await supabase
-      .from('scout_results')
-      .select('*')
-      .eq('search_id', s.id);
+      .from('scout_results').select('*').eq('search_id', s.id);
 
-    const listings: PassedListing[] = (results || []).map((r: any) => ({
-      zpid: r.zpid,
-      address: r.address?.split(',')[0] ?? '',
-      city: r.address?.split(',')[1]?.trim() ?? '',
-      state: r.address?.split(',')[2]?.trim() ?? '',
-      zipcode: r.address?.split(',')[3]?.trim() ?? '',
-      price: r.price ?? 0,
-      zestimate: r.arv ?? null,
-      rentZestimate: r.rent ?? null,
-      daysOnZillow: r.days_on_market ?? null,
-      bedrooms: r.beds ?? null,
-      bathrooms: r.baths ?? null,
-      sqft: r.sqft ?? null,
-      propertyType: 'SINGLE_FAMILY',
-      imgSrc: r.img_src ?? null,
-      detailUrl: r.detail_url ?? null,
-      margin: r.arv && r.price ? 1 - r.price / r.arv : 0,
-      grossYield: r.rent && r.price ? (r.rent * 12) / r.price : 0,
-    }));
+    const listings: PassedListing[] = (results || []).map((r: any) => {
+      const price       = r.price ?? 0;
+      const zestimate   = r.arv ?? null;
+      const rent        = r.rent ?? null;
+      const margin      = zestimate && price ? 1 - price / zestimate : 0;
+      const grossYield  = rent && price ? (rent * 12) / price : 0;
+      const raw: RawListing = {
+        zpid: r.zpid, address: r.address?.split(',')[0] ?? '',
+        city: r.address?.split(',')[1]?.trim() ?? '',
+        state: r.address?.split(',')[2]?.trim() ?? '',
+        zipcode: r.address?.split(',')[3]?.trim() ?? '',
+        price, zestimate, rentZestimate: rent,
+        daysOnZillow: r.days_on_market ?? null,
+        bedrooms: r.beds ?? null, bathrooms: r.baths ?? null,
+        sqft: r.sqft ?? null, propertyType: 'SINGLE_FAMILY',
+        imgSrc: r.img_src ?? null, detailUrl: r.detail_url ?? null,
+      };
+      return { ...raw, margin, grossYield, dealScore: r.score ?? calcDealScore(raw) };
+    }).sort((a: PassedListing, b: PassedListing) => b.dealScore - a.dealScore);
 
     sessions.push({
-      id: s.id,
-      zips: s.zip.split(','),
-      scannedAt: s.created_at,
-      totalScanned: 0, // not stored
-      totalPassed: s.result_count,
-      results: listings,
+      id: s.id, zips: s.zip.split(','), scannedAt: s.created_at,
+      totalScanned: 0, totalPassed: s.result_count, results: listings,
     });
   }
   return sessions;
+}
+
+// ─── CSV export ─────────────────────────────────────────────────────────────
+
+function exportCSV(results: PassedListing[]) {
+  const headers = [
+    'Rank','Score','Address','City','State','ZIP','Price','Zestimate',
+    'Margin%','Rent/mo','GrossYield%','DaysOnMarket','Beds','Baths','Sqft','ZillowURL',
+  ];
+  const rows = results.map((r, i) => [
+    i + 1,
+    r.dealScore,
+    `"${r.address}"`,
+    `"${r.city}"`,
+    r.state,
+    r.zipcode,
+    r.price,
+    r.zestimate ?? '',
+    (r.margin * 100).toFixed(1),
+    r.rentZestimate ?? '',
+    (r.grossYield * 100).toFixed(1),
+    r.daysOnZillow ?? '',
+    r.bedrooms ?? '',
+    r.bathrooms ?? '',
+    r.sqft ?? '',
+    `"${r.detailUrl ?? ''}"`,
+  ]);
+
+  const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `deal-scanner-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ─── Formatters ─────────────────────────────────────────────────────────────
@@ -192,32 +225,43 @@ async function loadScanHistory(): Promise<ScanSession[]> {
 function fmt$(n: number) { return '$' + n.toLocaleString(); }
 function fmtPct(n: number) { return (n * 100).toFixed(1) + '%'; }
 
+// ─── Score badge ─────────────────────────────────────────────────────────────
+
+function ScoreBadge({ score }: { score: number }) {
+  const color =
+    score >= 70 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' :
+    score >= 50 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' :
+                  'bg-muted/40 text-muted-foreground border-border/30';
+  return (
+    <span className={cn('text-xs font-bold px-1.5 py-0.5 rounded border', color)}>
+      {score}
+    </span>
+  );
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function DealScannerPage() {
-  const [zipInput, setZipInput] = useState('30310, 30311, 30315, 30316, 30318, 30331, 30336, 30344, 30349, 30354');
+  const [zipInput, setZipInput]     = useState('30310, 30311, 30315, 30316, 30318, 30331, 30336, 30344, 30349, 30354');
   const [isScanning, setIsScanning] = useState(false);
-  const [progress, setProgress] = useState<{ current: number; total: number; zip: string } | null>(null);
-  const [session, setSession] = useState<ScanSession | null>(null);
-  const [history, setHistory] = useState<ScanSession[]>([]);
+  const [progress, setProgress]     = useState<{ current: number; total: number; zip: string } | null>(null);
+  const [session, setSession]       = useState<ScanSession | null>(null);
+  const [history, setHistory]       = useState<ScanSession[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadScanHistory().then(setHistory);
-  }, []);
+  // Analyze Top 25 state
+  const [analyzeProgress, setAnalyzeProgress] = useState<{ done: number; total: number } | null>(null);
+
+  useEffect(() => { loadScanHistory().then(setHistory); }, []);
+
+  // ── Scan ────────────────────────────────────────────────────────────────
 
   const startScan = useCallback(async () => {
-    const zips = zipInput
-      .split(/[\s,;]+/)
-      .map(z => z.trim())
-      .filter(z => /^\d{5}$/.test(z));
-
+    const zips = zipInput.split(/[\s,;]+/).map(z => z.trim()).filter(z => /^\d{5}$/.test(z));
     if (zips.length === 0) return;
 
     setIsScanning(true);
     setSession(null);
-
     const allRaw: RawListing[] = [];
 
     for (let i = 0; i < zips.length; i++) {
@@ -228,68 +272,92 @@ export default function DealScannerPage() {
         const { data, error } = await supabase.functions.invoke('zillow-search', {
           body: { location: zip, homeType: 'SingleFamily', maxPrice: MAX_PRICE, page: 1 },
         });
-
         if (!error && data?.properties) {
-          const listings: RawListing[] = data.properties.map((p: any) => ({
-            zpid: p.zpid ?? '',
-            address: p.address ?? '',
-            city: p.city ?? '',
-            state: p.state ?? '',
-            zipcode: p.zipcode ?? zip,
-            price: p.price ?? 0,
-            zestimate: p.zestimate ?? null,
-            rentZestimate: p.rentZestimate ?? null,
-            daysOnZillow: p.daysOnZillow ?? null,
-            bedrooms: p.bedrooms ?? null,
-            bathrooms: p.bathrooms ?? null,
-            sqft: p.sqft ?? null,
-            propertyType: p.propertyType ?? null,
-            imgSrc: p.imgSrc ?? null,
-            detailUrl: p.detailUrl ?? null,
-          }));
-          allRaw.push(...listings);
+          allRaw.push(...data.properties.map((p: any) => ({
+            zpid: p.zpid ?? '', address: p.address ?? '',
+            city: p.city ?? '', state: p.state ?? '', zipcode: p.zipcode ?? zip,
+            price: p.price ?? 0, zestimate: p.zestimate ?? null,
+            rentZestimate: p.rentZestimate ?? null, daysOnZillow: p.daysOnZillow ?? null,
+            bedrooms: p.bedrooms ?? null, bathrooms: p.bathrooms ?? null,
+            sqft: p.sqft ?? null, propertyType: p.propertyType ?? null,
+            imgSrc: p.imgSrc ?? null, detailUrl: p.detailUrl ?? null,
+          })));
         }
-      } catch (e) {
-        console.error(`Error scanning ZIP ${zip}:`, e);
-      }
+      } catch (e) { console.error(`ZIP ${zip}:`, e); }
 
-      // Small delay between ZIPs to avoid rate limiting
       if (i < zips.length - 1) await new Promise(r => setTimeout(r, 300));
     }
 
-    const { passed } = filterListings(allRaw);
-
+    const passed = filterListings(allRaw);
     const newSession: ScanSession = {
-      id: 'pending',
-      zips,
-      scannedAt: new Date().toISOString(),
-      totalScanned: allRaw.length,
-      totalPassed: passed.length,
-      results: passed,
+      id: 'pending', zips, scannedAt: new Date().toISOString(),
+      totalScanned: allRaw.length, totalPassed: passed.length, results: passed,
     };
     setSession(newSession);
 
-    // Save to DB
-    const savedId = await saveScanSession(zips, passed, allRaw.length);
-    if (savedId) {
-      newSession.id = savedId;
-      setSession({ ...newSession });
-    }
+    const savedId = await saveScanSession(zips, passed);
+    if (savedId) { newSession.id = savedId; setSession({ ...newSession }); }
 
-    // Reload history
     const updated = await loadScanHistory();
     setHistory(updated);
-
     setProgress(null);
     setIsScanning(false);
   }, [zipInput]);
 
-  const loadHistorySession = useCallback((s: ScanSession) => {
-    setSession(s);
-    setHistoryOpen(false);
-  }, []);
+  // ── Analyze Top 25 ───────────────────────────────────────────────────────
+
+  const analyzeTop25 = useCallback(async () => {
+    if (!session) return;
+    const top = session.results.slice(0, TOP_N);
+    setAnalyzeProgress({ done: 0, total: top.length });
+    let done = 0;
+    let errors = 0;
+
+    for (const r of top) {
+      try {
+        const fullAddress = [r.address, r.city, r.state, r.zipcode].filter(Boolean).join(', ');
+        await supabase.functions.invoke('scout-ai-analyze', {
+          body: {
+            deal: {
+              address:        fullAddress,
+              zip:            r.zipcode,
+              price:          r.price,
+              arv:            r.zestimate,
+              rent:           r.rentZestimate,
+              beds:           r.bedrooms,
+              baths:          r.bathrooms,
+              sqft:           r.sqft,
+              zpid:           r.zpid,
+              days_on_market: r.daysOnZillow,
+              score:          r.dealScore,
+              grade:          r.dealScore >= 70 ? 'A' : r.dealScore >= 50 ? 'B' : 'C',
+            }
+          }
+        });
+      } catch { errors++; }
+      done++;
+      setAnalyzeProgress({ done, total: top.length });
+    }
+
+    setAnalyzeProgress(null);
+    if (errors === 0) {
+      toast.success(`Analyzed top ${top.length} deals — check Scout → AI Analyzed`);
+    } else {
+      toast.warning(`Analyzed ${top.length - errors}/${top.length} deals (${errors} errors)`);
+    }
+  }, [session]);
+
+  // ── CSV export ────────────────────────────────────────────────────────────
+
+  const handleExportCSV = useCallback(() => {
+    if (!session?.results.length) return;
+    exportCSV(session.results);
+    toast.success(`Exported ${session.results.length} listings to CSV`);
+  }, [session]);
 
   const currentResults = session?.results ?? [];
+  const top25Count     = Math.min(currentResults.length, TOP_N);
+  const isAnalyzing    = analyzeProgress !== null;
 
   return (
     <div className="h-full flex flex-col bg-background overflow-hidden">
@@ -301,71 +369,54 @@ export default function DealScannerPage() {
             <ScanLine className="w-5 h-5 text-emerald-400" />
             <h1 className="font-semibold text-base">Deal Scanner</h1>
             <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-400/30 text-[10px]">
-              Auto-Filter
+              Auto-Filter + Scoring
             </Badge>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs gap-1.5"
-              onClick={() => setHistoryOpen(v => !v)}
-            >
-              <Clock className="w-3.5 h-3.5" />
-              History ({history.length})
-              {historyOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-            </Button>
-          </div>
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5"
+            onClick={() => setHistoryOpen(v => !v)}>
+            <Clock className="w-3.5 h-3.5" />
+            History ({history.length})
+            {historyOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </Button>
         </div>
 
         <div className="flex gap-2 items-start">
           <div className="flex-1">
-            <Textarea
-              value={zipInput}
-              onChange={e => setZipInput(e.target.value)}
+            <Textarea value={zipInput} onChange={e => setZipInput(e.target.value)}
               placeholder="30310, 30311, 30315 ..."
-              className="h-16 text-sm font-mono resize-none"
-              disabled={isScanning}
-            />
+              className="h-16 text-sm font-mono resize-none" disabled={isScanning} />
           </div>
-          <Button
-            onClick={startScan}
-            disabled={isScanning}
-            className="h-16 px-6 text-sm gap-2 bg-emerald-600 hover:bg-emerald-500"
-          >
+          <Button onClick={startScan} disabled={isScanning}
+            className="h-16 px-6 text-sm gap-2 bg-emerald-600 hover:bg-emerald-500">
             {isScanning
               ? <><Loader2 className="w-4 h-4 animate-spin" />Scanning...</>
-              : <><ScanLine className="w-4 h-4" />Scan ZIPs</>
-            }
+              : <><ScanLine className="w-4 h-4" />Scan ZIPs</>}
           </Button>
         </div>
 
-        {/* Filter rules summary */}
-        <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-          <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" />Price ≤ $250K</span>
-          <span className="text-border">·</span>
-          <span className="flex items-center gap-1"><Home className="w-3 h-3" />Single Family only</span>
-          <span className="text-border">·</span>
+        {/* Filter + score legend */}
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+          <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" />≤ $250K</span>
+          <span>·</span>
+          <span className="flex items-center gap-1"><Home className="w-3 h-3" />Single Family</span>
+          <span>·</span>
           <span className="flex items-center gap-1"><TrendingUp className="w-3 h-3" />Price/Zestimate ≤ 85%</span>
-          <span className="text-border">·</span>
-          <span>Rent estimate required</span>
-          <span className="text-border">·</span>
-          <span>Days on market &gt; 30</span>
+          <span>·</span>
+          <span>Rent required · 30+ days</span>
+          <span className="ml-2 pl-2 border-l border-border/50 text-[10px] font-medium">
+            Score: 40pts discount + 40pts yield + 20pts days
+          </span>
         </div>
       </div>
 
       {/* ── History dropdown ──────────────────────────────────────────── */}
       {historyOpen && (
         <div className="shrink-0 border-b border-border/50 bg-card/60 max-h-48 overflow-y-auto">
-          {history.length === 0 ? (
-            <p className="text-xs text-muted-foreground p-4">No past scans yet</p>
-          ) : (
-            history.map(s => (
-              <button
-                key={s.id}
-                onClick={() => loadHistorySession(s)}
-                className="w-full flex items-center justify-between px-4 py-2 hover:bg-muted/30 transition-colors text-left"
-              >
+          {history.length === 0
+            ? <p className="text-xs text-muted-foreground p-4">No past scans yet</p>
+            : history.map(s => (
+              <button key={s.id} onClick={() => { setSession(s); setHistoryOpen(false); }}
+                className="w-full flex items-center justify-between px-4 py-2 hover:bg-muted/30 transition-colors text-left">
                 <div className="flex items-center gap-2">
                   <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
                   <span className="text-xs font-mono">
@@ -375,25 +426,23 @@ export default function DealScannerPage() {
                     })}
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    {s.zips.slice(0, 5).join(', ')}{s.zips.length > 5 ? ` +${s.zips.length - 5} more` : ''}
+                    {s.zips.slice(0, 5).join(', ')}{s.zips.length > 5 ? ` +${s.zips.length - 5}` : ''}
                   </span>
                 </div>
                 <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-400/40">
                   {s.totalPassed} passed
                 </Badge>
               </button>
-            ))
-          )}
+            ))}
         </div>
       )}
 
-      {/* ── Progress bar ──────────────────────────────────────────────── */}
+      {/* ── Scan progress ─────────────────────────────────────────────── */}
       {isScanning && progress && (
         <div className="shrink-0 px-4 py-2 bg-card/40 border-b border-border/50 space-y-1">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5">
-              <Loader2 className="w-3 h-3 animate-spin" />
-              Scanning ZIP {progress.zip}…
+              <Loader2 className="w-3 h-3 animate-spin" /> Scanning ZIP {progress.zip}…
             </span>
             <span>{progress.current} / {progress.total}</span>
           </div>
@@ -401,34 +450,66 @@ export default function DealScannerPage() {
         </div>
       )}
 
-      {/* ── Stats bar ────────────────────────────────────────────────── */}
+      {/* ── Analyze progress ──────────────────────────────────────────── */}
+      {isAnalyzing && analyzeProgress && (
+        <div className="shrink-0 px-4 py-2 bg-violet-950/30 border-b border-violet-500/20 space-y-1">
+          <div className="flex items-center justify-between text-xs text-violet-300">
+            <span className="flex items-center gap-1.5">
+              <Zap className="w-3 h-3 animate-pulse" />
+              Analyzing top {analyzeProgress.total} deals with AI…
+            </span>
+            <span>{analyzeProgress.done} / {analyzeProgress.total}</span>
+          </div>
+          <Progress value={(analyzeProgress.done / analyzeProgress.total) * 100}
+            className="h-1 [&>div]:bg-violet-500" />
+        </div>
+      )}
+
+      {/* ── Stats + action bar ────────────────────────────────────────── */}
       {session && (
-        <div className="shrink-0 px-4 py-2 bg-card/30 border-b border-border/50 flex items-center gap-4 text-xs text-muted-foreground">
+        <div className="shrink-0 px-4 py-2 bg-card/30 border-b border-border/50 flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
           <span className="flex items-center gap-1">
             <ScanLine className="w-3.5 h-3.5" />
-            {session.totalScanned > 0 ? `${session.totalScanned} scanned` : `${session.zips.length} ZIP${session.zips.length !== 1 ? 's' : ''} scanned`}
+            {session.totalScanned > 0 ? `${session.totalScanned} scanned` : `${session.zips.length} ZIPs`}
           </span>
-          <span className="text-border">·</span>
+          <span>·</span>
           <span className="flex items-center gap-1 text-emerald-400 font-medium">
             <CheckCircle2 className="w-3.5 h-3.5" />
-            {session.totalPassed} passed filters
+            {session.totalPassed} passed
           </span>
           {session.totalScanned > 0 && (
             <>
-              <span className="text-border">·</span>
-              <span className="flex items-center gap-1 text-red-400/70">
+              <span>·</span>
+              <span className="text-red-400/70 flex items-center gap-1">
                 <XCircle className="w-3.5 h-3.5" />
                 {session.totalScanned - session.totalPassed} filtered out
               </span>
             </>
           )}
-          <span className="text-border">·</span>
+          <span>·</span>
           <span className="flex items-center gap-1">
             <Calendar className="w-3.5 h-3.5" />
             {new Date(session.scannedAt).toLocaleDateString('en-US', {
               month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
             })}
           </span>
+
+          {/* Action buttons */}
+          <div className="ml-auto flex items-center gap-2">
+            <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5"
+              onClick={handleExportCSV} disabled={currentResults.length === 0}>
+              <Download className="w-3.5 h-3.5" />
+              Save CSV ({currentResults.length})
+            </Button>
+            <Button size="sm"
+              className="h-7 text-xs gap-1.5 bg-violet-600 hover:bg-violet-500"
+              onClick={analyzeTop25}
+              disabled={isAnalyzing || currentResults.length === 0}>
+              {isAnalyzing
+                ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Analyzing…</>
+                : <><Zap className="w-3.5 h-3.5" />Analyze Top {top25Count}</>}
+            </Button>
+          </div>
         </div>
       )}
 
@@ -438,10 +519,10 @@ export default function DealScannerPage() {
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
             <ScanLine className="w-12 h-12 text-muted-foreground/20 mb-4" />
             <p className="text-muted-foreground text-sm">
-              Enter ZIP codes above and click <strong>Scan ZIPs</strong> to find deals
+              Enter ZIP codes above and click <strong>Scan ZIPs</strong>
             </p>
             <p className="text-xs text-muted-foreground/60 mt-1">
-              Filters: price ≤ $250K · single family · price/zestimate ≤ 85% · rent required · 30+ days on market
+              Listings are scored 0–100 and ranked automatically
             </p>
           </div>
         )}
@@ -450,7 +531,6 @@ export default function DealScannerPage() {
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
             <XCircle className="w-10 h-10 text-muted-foreground/20 mb-3" />
             <p className="text-muted-foreground text-sm">No listings passed all filters</p>
-            <p className="text-xs text-muted-foreground/60 mt-1">Try adding more ZIP codes or loosening filters</p>
           </div>
         )}
 
@@ -458,6 +538,8 @@ export default function DealScannerPage() {
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-card/90 backdrop-blur-sm border-b border-border/50 z-10">
               <tr className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                <th className="text-center px-3 py-2.5 w-12">#</th>
+                <th className="text-center px-3 py-2.5 w-14">Score</th>
                 <th className="text-left px-4 py-2.5">Address</th>
                 <th className="text-right px-3 py-2.5">Price</th>
                 <th className="text-right px-3 py-2.5">Zestimate</th>
@@ -470,93 +552,99 @@ export default function DealScannerPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border/20">
-              {currentResults
-                .sort((a, b) => b.margin - a.margin)
-                .map(r => {
-                  const fullAddress = [r.address, r.city, r.state, r.zipcode].filter(Boolean).join(', ');
-                  return (
-                    <tr
-                      key={r.zpid}
-                      className="hover:bg-muted/20 transition-colors"
-                    >
-                      {/* Address */}
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-foreground leading-tight">{r.address || fullAddress}</div>
-                        <div className="text-[11px] text-muted-foreground">{r.city}, {r.state} {r.zipcode}</div>
-                      </td>
+              {currentResults.map((r, idx) => (
+                <tr key={r.zpid}
+                  className={cn(
+                    'hover:bg-muted/20 transition-colors',
+                    idx < TOP_N && 'border-l-2 border-l-violet-500/40',
+                  )}>
+                  {/* Rank */}
+                  <td className="px-3 py-2.5 text-center text-xs text-muted-foreground/60 font-mono">
+                    {idx === TOP_N - 1
+                      ? <span className="text-[10px] text-violet-400/60">─ top {TOP_N} ─</span>
+                      : idx + 1}
+                  </td>
 
-                      {/* Price */}
-                      <td className="px-3 py-3 text-right font-mono text-sm font-semibold">
-                        {fmt$(r.price)}
-                      </td>
+                  {/* Score */}
+                  <td className="px-3 py-2.5 text-center">
+                    <ScoreBadge score={r.dealScore} />
+                  </td>
 
-                      {/* Zestimate */}
-                      <td className="px-3 py-3 text-right font-mono text-sm text-muted-foreground">
-                        {r.zestimate ? fmt$(r.zestimate) : '—'}
-                      </td>
+                  {/* Address */}
+                  <td className="px-4 py-2.5">
+                    <div className="font-medium text-foreground leading-tight">
+                      {r.address || [r.address, r.city, r.state].filter(Boolean).join(', ')}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground">{r.city}, {r.state} {r.zipcode}</div>
+                  </td>
 
-                      {/* Margin */}
-                      <td className="px-3 py-3 text-right">
-                        <span className={cn(
-                          'text-xs font-semibold px-1.5 py-0.5 rounded',
-                          r.margin >= 0.20 ? 'bg-emerald-500/15 text-emerald-400' :
-                          r.margin >= 0.10 ? 'bg-amber-500/15 text-amber-400' :
-                          'bg-muted/40 text-muted-foreground'
-                        )}>
-                          {fmtPct(r.margin)}
-                        </span>
-                      </td>
+                  {/* Price */}
+                  <td className="px-3 py-2.5 text-right font-mono text-sm font-semibold">
+                    {fmt$(r.price)}
+                  </td>
 
-                      {/* Rent */}
-                      <td className="px-3 py-3 text-right font-mono text-sm text-cyan-400">
-                        {r.rentZestimate ? fmt$(r.rentZestimate) : '—'}
-                      </td>
+                  {/* Zestimate */}
+                  <td className="px-3 py-2.5 text-right font-mono text-sm text-muted-foreground">
+                    {r.zestimate ? fmt$(r.zestimate) : '—'}
+                  </td>
 
-                      {/* Gross yield */}
-                      <td className="px-3 py-3 text-right">
-                        <span className={cn(
-                          'text-xs font-semibold',
-                          r.grossYield >= 0.09 ? 'text-emerald-400' :
-                          r.grossYield >= 0.07 ? 'text-amber-400' :
-                          'text-muted-foreground'
-                        )}>
-                          {fmtPct(r.grossYield)}
-                        </span>
-                      </td>
+                  {/* Margin */}
+                  <td className="px-3 py-2.5 text-right">
+                    <span className={cn(
+                      'text-xs font-semibold px-1.5 py-0.5 rounded',
+                      r.margin >= 0.20 ? 'bg-emerald-500/15 text-emerald-400' :
+                      r.margin >= 0.10 ? 'bg-amber-500/15 text-amber-400' :
+                      'bg-muted/40 text-muted-foreground'
+                    )}>
+                      {fmtPct(r.margin)}
+                    </span>
+                  </td>
 
-                      {/* Days on market */}
-                      <td className="px-3 py-3 text-right">
-                        <span className={cn(
-                          'text-xs',
-                          (r.daysOnZillow ?? 0) > 90 ? 'text-emerald-400 font-semibold' :
-                          (r.daysOnZillow ?? 0) > 60 ? 'text-amber-400' :
-                          'text-muted-foreground'
-                        )}>
-                          {r.daysOnZillow ?? '?'}d
-                        </span>
-                      </td>
+                  {/* Rent */}
+                  <td className="px-3 py-2.5 text-right font-mono text-sm text-cyan-400">
+                    {r.rentZestimate ? fmt$(r.rentZestimate) : '—'}
+                  </td>
 
-                      {/* Beds/Baths */}
-                      <td className="px-3 py-3 text-right text-xs text-muted-foreground">
-                        {r.bedrooms ?? '?'}/{r.bathrooms ?? '?'}
-                      </td>
+                  {/* Gross yield */}
+                  <td className="px-3 py-2.5 text-right">
+                    <span className={cn(
+                      'text-xs font-semibold',
+                      r.grossYield >= 0.09 ? 'text-emerald-400' :
+                      r.grossYield >= 0.07 ? 'text-amber-400' :
+                      'text-muted-foreground'
+                    )}>
+                      {fmtPct(r.grossYield)}
+                    </span>
+                  </td>
 
-                      {/* Zillow link */}
-                      <td className="px-3 py-3 text-center">
-                        {r.detailUrl ? (
-                          <a
-                            href={r.detailUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center justify-center w-7 h-7 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
-                        ) : '—'}
-                      </td>
-                    </tr>
-                  );
-                })}
+                  {/* Days on market */}
+                  <td className="px-3 py-2.5 text-right">
+                    <span className={cn(
+                      'text-xs',
+                      (r.daysOnZillow ?? 0) > 90 ? 'text-emerald-400 font-semibold' :
+                      (r.daysOnZillow ?? 0) > 60 ? 'text-amber-400' :
+                      'text-muted-foreground'
+                    )}>
+                      {r.daysOnZillow ?? '?'}d
+                    </span>
+                  </td>
+
+                  {/* Beds/Baths */}
+                  <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">
+                    {r.bedrooms ?? '?'}/{r.bathrooms ?? '?'}
+                  </td>
+
+                  {/* Zillow link */}
+                  <td className="px-3 py-2.5 text-center">
+                    {r.detailUrl
+                      ? <a href={r.detailUrl} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center justify-center w-7 h-7 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors">
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      : '—'}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         )}
