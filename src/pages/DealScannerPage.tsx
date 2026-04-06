@@ -272,7 +272,8 @@ export default function DealScannerPage() {
   const [history, setHistory]       = useState<ScanSession[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  // (queue is opened in a new tab – no local progress state needed)
+  // How many top deals to send to DealBeast (user-controlled)
+  const [topNInput, setTopNInput] = useState(10);
 
   useEffect(() => { loadScanHistory().then(setHistory); }, []);
 
@@ -351,18 +352,19 @@ export default function DealScannerPage() {
     setIsScanning(false);
   }, [activeZips]);
 
-  // ── Analyze Top 25 — open queue in new tab ───────────────────────────────
+  // ── Send top N to DealBeast — open queue in new tab ──────────────────────
 
-  const analyzeTop25 = useCallback(() => {
+  const sendToDealBeast = useCallback(() => {
     if (!session) return;
-    const top = session.results.slice(0, TOP_N);
+    const n = Math.max(1, Math.min(topNInput, session.results.length));
+    const top = session.results.slice(0, n);
     try {
       localStorage.setItem('deal_scanner_queue', JSON.stringify(top));
       window.open('/scout/deal-scanner/queue', '_blank');
     } catch {
       toast.error('Failed to open analysis queue');
     }
-  }, [session]);
+  }, [session, topNInput]);
 
   // ── CSV export ────────────────────────────────────────────────────────────
 
@@ -373,7 +375,7 @@ export default function DealScannerPage() {
   }, [session]);
 
   const currentResults = session?.results ?? [];
-  const top25Count     = Math.min(currentResults.length, TOP_N);
+  const effectiveTopN  = Math.min(topNInput, currentResults.length);
 
   return (
     <div className="h-full flex flex-col bg-background overflow-hidden">
@@ -560,14 +562,32 @@ export default function DealScannerPage() {
             <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5"
               onClick={handleExportCSV} disabled={currentResults.length === 0}>
               <Download className="w-3.5 h-3.5" />
-              Save CSV ({currentResults.length})
+              CSV ({currentResults.length})
             </Button>
-            <Button size="sm"
-              className="h-7 text-xs gap-1.5 bg-violet-600 hover:bg-violet-500"
-              onClick={analyzeTop25}
-              disabled={currentResults.length === 0}>
-              <Zap className="w-3.5 h-3.5" />Analyze Top {top25Count}
-            </Button>
+
+            {/* DealBeast send control */}
+            <div className="flex items-center gap-1.5 pl-2 border-l border-border/40">
+              <span className="text-[11px] text-muted-foreground">Top</span>
+              <input
+                type="number"
+                min={1}
+                max={currentResults.length || 1}
+                value={topNInput}
+                onChange={e => {
+                  const v = parseInt(e.target.value) || 1;
+                  setTopNInput(Math.max(1, Math.min(currentResults.length || 1, v)));
+                }}
+                disabled={currentResults.length === 0}
+                className="w-12 h-7 text-center text-xs font-mono rounded border border-border/60 bg-background focus:outline-none focus:ring-1 focus:ring-violet-500/50 disabled:opacity-40"
+              />
+              <span className="text-[11px] text-muted-foreground">of {currentResults.length}</span>
+              <Button size="sm"
+                className="h-7 text-xs gap-1.5 bg-violet-600 hover:bg-violet-500"
+                onClick={sendToDealBeast}
+                disabled={currentResults.length === 0}>
+                <Zap className="w-3.5 h-3.5" />Send to DealBeast ({effectiveTopN})
+              </Button>
+            </div>
           </div>
         </div>
       )}

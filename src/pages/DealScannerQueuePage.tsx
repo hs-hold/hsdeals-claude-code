@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import {
   ScanLine, Zap, CheckCircle2, XCircle, Loader2,
-  ExternalLink, Clock, AlertTriangle,
+  ExternalLink, Clock, AlertTriangle, SkipForward,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -33,7 +33,8 @@ interface PassedListing {
   dealScore: number;
 }
 
-type QueueStatus = 'pending' | 'analyzing' | 'done' | 'error';
+// 'skipped' = already exists in deals table, won't re-analyze
+type QueueStatus = 'pending' | 'analyzing' | 'done' | 'skipped' | 'error';
 
 interface QueueItem {
   listing: PassedListing;
@@ -57,6 +58,21 @@ function ScoreBadge({ score }: { score: number }) {
       {score}
     </span>
   );
+}
+
+// Check if a deal with this address already exists in the DB.
+// Returns the existing deal id, or null if not found.
+async function findExistingDeal(streetAddress: string): Promise<string | null> {
+  // Strip any unit info and use just the main street address for matching
+  const normalized = streetAddress.trim().replace(/\s+/g, ' ');
+  const { data, error } = await supabase
+    .from('deals')
+    .select('id')
+    .ilike('address_full', `%${normalized}%`)
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data.id;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -106,10 +122,18 @@ export default function DealScannerQueuePage() {
       updateItem(i, { status: 'analyzing' });
 
       try {
+        // ── Step 1: check for existing deal (skip duplicates) ──────────────
+        const existingId = await findExistingDeal(listing.address);
+        if (existingId) {
+          updateItem(i, { status: 'skipped', dealId: existingId });
+          continue;
+        }
+
+        // ── Step 2: send to DealBeast (analyze-property) ───────────────────
         const { dealId, error } = await analyzeAndCreateDeal(fullAddress);
 
         if (dealId) {
-          // Override source to 'deal-scanner'
+          // Tag as deal-scanner so it's distinguishable in the main deals list
           await supabase
             .from('deals')
             .update({ source: 'deal-scanner' })
@@ -117,7 +141,7 @@ export default function DealScannerQueuePage() {
 
           updateItem(i, { status: 'done', dealId });
         } else {
-          updateItem(i, { status: 'error', error: error || 'Analysis failed' });
+          updateItem(i, { status: 'error', error: error || 'DealBeast analysis failed' });
         }
       } catch (e: any) {
         updateItem(i, { status: 'error', error: e?.message || 'Unknown error' });
@@ -127,12 +151,14 @@ export default function DealScannerQueuePage() {
     setIsRunning(false);
   };
 
-  // Derived stats
+  // ── Derived stats ──────────────────────────────────────────────────────────
   const total    = items.length;
   const done     = items.filter(i => i.status === 'done').length;
+  const skipped  = items.filter(i => i.status === 'skipped').length;
   const errors   = items.filter(i => i.status === 'error').length;
   const pending  = items.filter(i => i.status === 'pending').length;
-  const progress = total > 0 ? ((done + errors) / total) * 100 : 0;
+  const processed = done + skipped + errors;
+  const progress = total > 0 ? (processed / total) * 100 : 0;
 
   // ── Empty state ────────────────────────────────────────────────────────────
   if (noData || (!started && items.length === 0)) {
@@ -141,7 +167,7 @@ export default function DealScannerQueuePage() {
         <AlertTriangle className="w-12 h-12 text-amber-400/50" />
         <h2 className="text-lg font-semibold">No Queue Data Found</h2>
         <p className="text-sm text-muted-foreground max-w-sm">
-          Go to Deal Scanner, run a scan, then click <strong>Analyze Top&nbsp;25</strong> to open this page with data.
+          Go to Deal Scanner, run a scan, then click <strong>Send to DealBeast</strong> to open this page with data.
         </p>
         <Button variant="outline" size="sm" onClick={() => window.close()}>
           Close Tab
@@ -154,21 +180,21 @@ export default function DealScannerQueuePage() {
   return (
     <div className="h-screen flex flex-col bg-background text-foreground overflow-hidden">
 
-      {/* Header */}
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="shrink-0 px-5 py-3 border-b border-border/50 bg-card/60 flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <ScanLine className="w-4 h-4 text-emerald-400" />
-          <span className="font-semibold text-sm">Deal Scanner Queue</span>
+          <span className="font-semibold text-sm">DealBeast Analysis Queue</span>
           <Badge className="bg-violet-500/15 text-violet-400 border-violet-400/30 text-[10px]">
             {total} deals
           </Badge>
         </div>
 
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+        <div className="flex items-center gap-4 text-xs">
           {isRunning && (
             <span className="flex items-center gap-1.5 text-violet-300">
               <Loader2 className="w-3 h-3 animate-spin" />
-              Analyzing…
+              Sending to DealBeast…
             </span>
           )}
           {!isRunning && started && (
@@ -177,22 +203,27 @@ export default function DealScannerQueuePage() {
               Complete
             </span>
           )}
-          <span className="text-emerald-400">{done} done</span>
+          <span className="text-emerald-400 font-medium">{done} new</span>
+          {skipped > 0 && (
+            <span className="text-muted-foreground flex items-center gap-1">
+              <SkipForward className="w-3 h-3" />{skipped} skipped
+            </span>
+          )}
           {errors > 0 && <span className="text-red-400">{errors} errors</span>}
-          <span>{pending} pending</span>
+          {pending > 0 && <span className="text-muted-foreground">{pending} pending</span>}
         </div>
       </div>
 
-      {/* Progress bar */}
+      {/* ── Progress bar ────────────────────────────────────────────────────── */}
       <div className="shrink-0 px-5 py-2 bg-card/30 border-b border-border/30">
         <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
-          <span>{done + errors} / {total} processed</span>
+          <span>{processed} / {total} processed</span>
           <span>{Math.round(progress)}%</span>
         </div>
         <Progress value={progress} className="h-1.5 [&>div]:bg-violet-500" />
       </div>
 
-      {/* Queue list */}
+      {/* ── Queue table ─────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-auto">
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-card/90 backdrop-blur-sm border-b border-border/50 z-10">
@@ -204,7 +235,7 @@ export default function DealScannerQueuePage() {
               <th className="text-right px-3 py-2.5">Margin</th>
               <th className="text-right px-3 py-2.5">Yield</th>
               <th className="text-right px-3 py-2.5">Days</th>
-              <th className="text-center px-4 py-2.5 w-36">Status</th>
+              <th className="text-center px-4 py-2.5 w-40">Status</th>
               <th className="text-center px-3 py-2.5 w-28">Action</th>
             </tr>
           </thead>
@@ -217,6 +248,7 @@ export default function DealScannerQueuePage() {
                     'hover:bg-muted/20 transition-colors',
                     status === 'analyzing' && 'bg-violet-950/20',
                     status === 'done'      && 'bg-emerald-950/10',
+                    status === 'skipped'   && 'bg-muted/10 opacity-60',
                     status === 'error'     && 'bg-red-950/10',
                   )}>
 
@@ -295,7 +327,12 @@ export default function DealScannerQueuePage() {
                     )}
                     {status === 'done' && (
                       <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400">
-                        <CheckCircle2 className="w-3 h-3" /> Done
+                        <CheckCircle2 className="w-3 h-3" /> Saved to Deals
+                      </span>
+                    )}
+                    {status === 'skipped' && (
+                      <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/70">
+                        <SkipForward className="w-3 h-3" /> Already Analyzed
                       </span>
                     )}
                     {status === 'error' && (
@@ -310,11 +347,16 @@ export default function DealScannerQueuePage() {
 
                   {/* Action */}
                   <td className="px-3 py-3 text-center">
-                    {status === 'done' && dealId ? (
+                    {(status === 'done' || status === 'skipped') && dealId ? (
                       <Button
                         size="sm"
                         variant="outline"
-                        className="h-6 px-2 text-[11px] gap-1 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+                        className={cn(
+                          'h-6 px-2 text-[11px] gap-1',
+                          status === 'done'
+                            ? 'border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10'
+                            : 'border-border/50 text-muted-foreground hover:bg-muted/20'
+                        )}
                         onClick={() => window.open(`/deals/${dealId}`, '_blank')}
                       >
                         <ExternalLink className="w-3 h-3" />
@@ -339,17 +381,35 @@ export default function DealScannerQueuePage() {
         </table>
       </div>
 
-      {/* Footer */}
+      {/* ── Footer ──────────────────────────────────────────────────────────── */}
       {!isRunning && started && (
         <div className="shrink-0 px-5 py-3 border-t border-border/50 bg-card/40 flex items-center justify-between text-xs text-muted-foreground">
           <span>
-            {done > 0 && `${done} deal${done !== 1 ? 's' : ''} saved to Deal History with source: deal-scanner`}
-            {errors > 0 && ` · ${errors} failed`}
+            {done > 0 && (
+              <span className="text-emerald-400 font-medium mr-2">
+                {done} new deal{done !== 1 ? 's' : ''} added to Analyzed Deals
+              </span>
+            )}
+            {skipped > 0 && <span>{skipped} already existed · </span>}
+            {errors > 0 && <span className="text-red-400">{errors} failed</span>}
           </span>
-          <Button variant="outline" size="sm" className="h-7 text-xs"
-            onClick={() => window.close()}>
-            Close Tab
-          </Button>
+          <div className="flex items-center gap-2">
+            {done > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs gap-1.5 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+                onClick={() => window.open('/deals', '_blank')}
+              >
+                <ExternalLink className="w-3 h-3" />
+                Open Analyzed Deals
+              </Button>
+            )}
+            <Button variant="outline" size="sm" className="h-7 text-xs"
+              onClick={() => window.close()}>
+              Close Tab
+            </Button>
+          </div>
         </div>
       )}
     </div>
