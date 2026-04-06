@@ -1,0 +1,344 @@
+[
+  {
+    "zip": "30354",
+    "city": "Atlanta",
+    "lat": 33.660361,
+    "lng": -84.386502,
+    "medianHomeValue": 229600,
+    "crimeIndex": 58,
+    "distanceMiles": 6.1
+  },
+  {
+    "zip": "30344",
+    "city": "Atlanta",
+    "lat": 33.676636,
+    "lng": -84.461601,
+    "medianHomeValue": 240700,
+    "crimeIndex": 52,
+    "distanceMiles": 6.5
+  },
+  {
+    "zip": "30032",
+    "city": "Decatur",
+    "lat": 33.740668,
+    "lng": -84.264466,
+    "medianHomeValue": 245000,
+    "crimeIndex": 55,
+    "distanceMiles": 7.1
+  },
+  {
+    "zip": "30288",
+    "city": "Conley",
+    "lat": 33.652831,
+    "lng": -84.327109,
+    "medianHomeValue": 225100,
+    "crimeIndex": 55,
+    "distanceMiles": 7.5
+  },
+  {
+    "zip": "30079",
+    "city": "Scottdale",
+    "lat": 33.791739,
+    "lng": -84.260747,
+    "medianHomeValue": 280000,
+    "crimeIndex": 48,
+    "distanceMiles": 7.9
+  },
+  {
+    "zip": "30331",
+    "city": "Atlanta",
+    "lat": 33.705434,
+    "lng": -84.544076,
+    "medianHomeValue": 277900,
+    "crimeIndex": 55,
+    "distanceMiles": 9.5
+  },
+  {
+    "zip": "30021",
+    "city": "Clarkston",
+    "lat": 33.807995,
+    "lng": -84.238975,
+    "medianHomeValue": 256000,
+    "crimeIndex": 52,
+    "distanceMiles": 9.5
+  },
+  {
+    "zip": "30035",
+    "city": "Decatur",
+    "lat": 33.724452,
+    "lng": -84.204244,
+    "medianHomeValue": 217100,
+    "crimeIndex": 58,
+    "distanceMiles": 10.7
+  },
+  {
+    "zip": "30072",
+    "city": "Pine Lake",
+    "lat": 33.791410,
+    "lng": -84.204844,
+    "medianHomeValue": 286000,
+    "crimeIndex": 42,
+    "distanceMiles": 10.9
+  },
+  {
+    "zip": "30260",
+    "city": "Morrow",
+    "lat": 33.587165,
+    "lng": -84.334307,
+    "medianHomeValue": 189800,
+    "crimeIndex": 55,
+    "distanceMiles": 11.6
+  },
+  {
+    "zip": "30349",
+    "city": "Atlanta",
+    "lat": 33.622488,
+    "lng": -84.523908,
+    "medianHomeValue": 236800,
+    "crimeIndex": 50,
+    "distanceMiles": 11.7
+  },
+  {
+    "zip": "30168",
+    "city": "Austell",
+    "lat": 33.783542,
+    "lng": -84.588106,
+    "medianHomeValue": 229400,
+    "crimeIndex": 48,
+    "distanceMiles": 11.7
+  },
+  {
+    "zip": "30088",
+    "city": "Stone Mountain",
+    "lat": 33.756052,
+    "lng": -84.182363,
+    "medianHomeValue": 208200,
+    "crimeIndex": 58,
+    "distanceMiles": 11.8
+  },
+  {
+    "zip": "30273",
+    "city": "Rex",
+    "lat": 33.583798,
+    "lng": -84.271027,
+    "medianHomeValue": 184500,
+    "crimeIndex": 52,
+    "distanceMiles": 13.2
+  },
+  {
+    "zip": "30060",
+    "city": "Marietta",
+    "lat": 33.920062,
+    "lng": -84.543100,
+    "medianHomeValue": 282200,
+    "crimeIndex": 56,
+    "distanceMiles": 14.8
+  },
+  {
+    "zip": "30291",
+    "city": "Union City",
+    "lat": 33.575884,
+    "lng": -84.543771,
+    "medianHomeValue": 190100,
+    "crimeIndex": 58,
+    "distanceMiles": 14.9
+  },
+  {
+    "zip": "30106",
+    "city": "Austell",
+    "lat": 33.832878,
+    "lng": -84.628061,
+    "medianHomeValue": 254600,
+    "crimeIndex": 45,
+    "distanceMiles": 15.0
+  },
+  {
+    "zip": "30038",
+    "city": "Lithonia",
+    "lat": 33.666460,
+    "lng": -84.139855,
+    "medianHomeValue": 234900,
+    "crimeIndex": 55,
+    "distanceMiles": 15.4
+  },
+  {
+    "zip": "30008",
+    "city": "Marietta",
+    "lat": 33.900567,
+    "lng": -84.590924,
+    "medianHomeValue": 269600,
+    "crimeIndex": 55,
+    "distanceMiles": 15.7
+  },
+  {
+    "zip": "30058",
+    "city": "Lithonia",
+    "lat": 33.738350,
+    "lng": -84.107376,
+    "medianHomeValue": 221200,
+    "crimeIndex": 52,
+    "distanceMiles": 16.1
+  },
+  {
+    "zip": "30236",
+    "city": "Jonesboro",
+    "lat": 33.519927,
+    "lng": -84.325187,
+    "medianHomeValue": 219700,
+    "crimeIndex": 48,
+    "distanceMiles": 16.2
+  },
+  {
+    "zip": "30093",
+    "city": "Norcross",
+    "lat": 33.908911,
+    "lng": -84.179240,
+    "medianHomeValue": 245900,
+    "crimeIndex": 45,
+    "distanceMiles": 16.3
+  },
+  {
+    "zip": "30238",
+    "city": "Jonesboro",
+    "lat": 33.501846,
+    "lng": -84.382236,
+    "medianHomeValue": 208200,
+    "crimeIndex": 50,
+    "distanceMiles": 17.1
+  },
+  {
+    "zip": "30281",
+    "city": "Stockbridge",
+    "lat": 33.556897,
+    "lng": -84.195159,
+    "medianHomeValue": 235700,
+    "crimeIndex": 40,
+    "distanceMiles": 17.3
+  },
+  {
+    "zip": "30213",
+    "city": "Fairburn",
+    "lat": 33.586742,
+    "lng": -84.624426,
+    "medianHomeValue": 281300,
+    "crimeIndex": 42,
+    "distanceMiles": 17.6
+  },
+  {
+    "zip": "30039",
+    "city": "Snellville",
+    "lat": 33.799244,
+    "lng": -84.034408,
+    "medianHomeValue": 274900,
+    "crimeIndex": 35,
+    "distanceMiles": 20.6
+  },
+  {
+    "zip": "30094",
+    "city": "Conyers",
+    "lat": 33.612505,
+    "lng": -84.051523,
+    "medianHomeValue": 266600,
+    "crimeIndex": 40,
+    "distanceMiles": 21.5
+  },
+  {
+    "zip": "30044",
+    "city": "Lawrenceville",
+    "lat": 33.921502,
+    "lng": -84.068873,
+    "medianHomeValue": 295300,
+    "crimeIndex": 42,
+    "distanceMiles": 21.9
+  },
+  {
+    "zip": "30012",
+    "city": "Conyers",
+    "lat": 33.717806,
+    "lng": -84.002515,
+    "medianHomeValue": 199900,
+    "crimeIndex": 45,
+    "distanceMiles": 22.3
+  },
+  {
+    "zip": "30253",
+    "city": "McDonough",
+    "lat": 33.453601,
+    "lng": -84.187167,
+    "medianHomeValue": 281000,
+    "crimeIndex": 35,
+    "distanceMiles": 23.5
+  },
+  {
+    "zip": "30268",
+    "city": "Palmetto",
+    "lat": 33.546430,
+    "lng": -84.722632,
+    "medianHomeValue": 252300,
+    "crimeIndex": 38,
+    "distanceMiles": 23.8
+  },
+  {
+    "zip": "30228",
+    "city": "Hampton",
+    "lat": 33.400608,
+    "lng": -84.307728,
+    "medianHomeValue": 263300,
+    "crimeIndex": 32,
+    "distanceMiles": 24.5
+  },
+  {
+    "zip": "30013",
+    "city": "Conyers",
+    "lat": 33.642603,
+    "lng": -83.971853,
+    "medianHomeValue": 274300,
+    "crimeIndex": 38,
+    "distanceMiles": 25.0
+  },
+  {
+    "zip": "30102",
+    "city": "Acworth",
+    "lat": 34.101625,
+    "lng": -84.645168,
+    "medianHomeValue": 292100,
+    "crimeIndex": 32,
+    "distanceMiles": 28.5
+  },
+  {
+    "zip": "30016",
+    "city": "Covington",
+    "lat": 33.517433,
+    "lng": -83.928703,
+    "medianHomeValue": 218700,
+    "crimeIndex": 38,
+    "distanceMiles": 30.9
+  },
+  {
+    "zip": "30248",
+    "city": "Locust Grove",
+    "lat": 33.350460,
+    "lng": -84.109119,
+    "medianHomeValue": 275000,
+    "crimeIndex": 30,
+    "distanceMiles": 31.9
+  },
+  {
+    "zip": "30014",
+    "city": "Covington",
+    "lat": 33.587193,
+    "lng": -83.822173,
+    "medianHomeValue": 253900,
+    "crimeIndex": 35,
+    "distanceMiles": 34.4
+  },
+  {
+    "zip": "30263",
+    "city": "Newnan",
+    "lat": 33.388415,
+    "lng": -84.858937,
+    "medianHomeValue": 278200,
+    "crimeIndex": 30,
+    "distanceMiles": 36.8
+  }
+]

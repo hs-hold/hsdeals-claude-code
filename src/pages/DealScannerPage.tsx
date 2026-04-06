@@ -1,7 +1,6 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
@@ -9,9 +8,28 @@ import {
   ScanLine, ExternalLink, Clock, CheckCircle2, XCircle,
   Loader2, ChevronDown, ChevronUp, Calendar,
   TrendingUp, Home, DollarSign, Zap, Download,
+  Pencil, X, Plus, MapPin,
 } from 'lucide-react';
+import atlantaZipsRaw from '@/data/atlantaZips.json';
 
 import { cn } from '@/lib/utils';
+
+// ─── Atlanta ZIP data ────────────────────────────────────────────────────────
+
+interface AtlantaZip {
+  zip: string;
+  city: string;
+  lat: number;
+  lng: number;
+  medianHomeValue: number;
+  crimeIndex: number;
+  distanceMiles: number;
+}
+
+const ATLANTA_ZIPS: AtlantaZip[] = atlantaZipsRaw as AtlantaZip[];
+
+// Sort by distance so closest ZIPs are first
+const DEFAULT_ZIPS = [...ATLANTA_ZIPS].sort((a, b) => a.distanceMiles - b.distanceMiles);
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -243,7 +261,11 @@ function ScoreBadge({ score }: { score: number }) {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function DealScannerPage() {
-  const [zipInput, setZipInput]     = useState('30310, 30311, 30315, 30316, 30318, 30331, 30336, 30344, 30349, 30354');
+  // Active ZIP list — starts from the curated Atlanta dataset
+  const [activeZips, setActiveZips]   = useState<AtlantaZip[]>(DEFAULT_ZIPS);
+  const [editMode, setEditMode]       = useState(false);
+  const [addZipInput, setAddZipInput] = useState('');
+
   const [isScanning, setIsScanning] = useState(false);
   const [progress, setProgress]     = useState<{ current: number; total: number; zip: string } | null>(null);
   const [session, setSession]       = useState<ScanSession | null>(null);
@@ -254,10 +276,35 @@ export default function DealScannerPage() {
 
   useEffect(() => { loadScanHistory().then(setHistory); }, []);
 
+  // ── Add/remove ZIP helpers (edit mode) ──────────────────────────────────
+
+  const removeZip = useCallback((zip: string) => {
+    setActiveZips(prev => prev.filter(z => z.zip !== zip));
+  }, []);
+
+  const handleAddZip = useCallback(() => {
+    const code = addZipInput.trim();
+    if (!/^\d{5}$/.test(code)) { toast.error('Enter a valid 5-digit ZIP code'); return; }
+    if (activeZips.some(z => z.zip === code)) { toast.info('ZIP already in list'); return; }
+    // Try to find it in the full Atlanta dataset first
+    const known = ATLANTA_ZIPS.find(z => z.zip === code);
+    const newEntry: AtlantaZip = known ?? {
+      zip: code, city: 'Custom', lat: 0, lng: 0,
+      medianHomeValue: 0, crimeIndex: 0, distanceMiles: 0,
+    };
+    setActiveZips(prev => [...prev, newEntry]);
+    setAddZipInput('');
+  }, [addZipInput, activeZips]);
+
+  const resetToDefault = useCallback(() => {
+    setActiveZips(DEFAULT_ZIPS);
+    toast.success('Reset to default Atlanta ZIP list');
+  }, []);
+
   // ── Scan ────────────────────────────────────────────────────────────────
 
   const startScan = useCallback(async () => {
-    const zips = zipInput.split(/[\s,;]+/).map(z => z.trim()).filter(z => /^\d{5}$/.test(z));
+    const zips = activeZips.map(z => z.zip);
     if (zips.length === 0) return;
 
     setIsScanning(true);
@@ -302,7 +349,7 @@ export default function DealScannerPage() {
     setHistory(updated);
     setProgress(null);
     setIsScanning(false);
-  }, [zipInput]);
+  }, [activeZips]);
 
   // ── Analyze Top 25 — open queue in new tab ───────────────────────────────
 
@@ -333,6 +380,8 @@ export default function DealScannerPage() {
 
       {/* ── Top controls ───────────────────────────────────────────────── */}
       <div className="shrink-0 p-4 border-b border-border/50 bg-card/40 space-y-3">
+
+        {/* Title row */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <ScanLine className="w-5 h-5 text-emerald-400" />
@@ -349,19 +398,76 @@ export default function DealScannerPage() {
           </Button>
         </div>
 
-        <div className="flex gap-2 items-start">
-          <div className="flex-1">
-            <Textarea value={zipInput} onChange={e => setZipInput(e.target.value)}
-              placeholder="30310, 30311, 30315 ..."
-              className="h-16 text-sm font-mono resize-none" disabled={isScanning} />
+        {/* ZIP info + scan row */}
+        <div className="flex items-center gap-3">
+          <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-md bg-muted/30 border border-border/50 min-h-[40px]">
+            <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span className="text-sm font-medium text-foreground">
+              Atlanta Metro —{' '}
+              <span className="text-emerald-400">{activeZips.length} ZIP codes</span>
+              <span className="text-muted-foreground text-xs ml-1.5">
+                (≤40 mi · median &lt;$300K · crime index &lt;60)
+              </span>
+            </span>
+            <button
+              onClick={() => setEditMode(v => !v)}
+              disabled={isScanning}
+              className={cn(
+                'ml-auto flex items-center gap-1 text-[11px] px-2 py-0.5 rounded transition-colors',
+                editMode
+                  ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+              )}>
+              <Pencil className="w-3 h-3" />
+              {editMode ? 'Done Editing' : 'Edit ZIPs'}
+            </button>
           </div>
-          <Button onClick={startScan} disabled={isScanning}
-            className="h-16 px-6 text-sm gap-2 bg-emerald-600 hover:bg-emerald-500">
+
+          <Button onClick={startScan} disabled={isScanning || activeZips.length === 0}
+            className="h-10 px-5 text-sm gap-2 bg-emerald-600 hover:bg-emerald-500">
             {isScanning
               ? <><Loader2 className="w-4 h-4 animate-spin" />Scanning...</>
               : <><ScanLine className="w-4 h-4" />Scan ZIPs</>}
           </Button>
         </div>
+
+        {/* Edit mode — ZIP chip list */}
+        {editMode && (
+          <div className="rounded-md border border-border/50 bg-muted/20 p-3 space-y-2">
+            <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto">
+              {activeZips.map(z => (
+                <span key={z.zip}
+                  className="inline-flex items-center gap-1 text-[11px] font-mono bg-card border border-border/60 rounded px-1.5 py-0.5 group">
+                  <span className="text-foreground">{z.zip}</span>
+                  <span className="text-muted-foreground/60">{z.city}</span>
+                  <button
+                    onClick={() => removeZip(z.zip)}
+                    className="ml-0.5 text-muted-foreground/40 hover:text-red-400 transition-colors">
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 pt-1 border-t border-border/30">
+              <input
+                type="text"
+                value={addZipInput}
+                onChange={e => setAddZipInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAddZip()}
+                placeholder="Add ZIP code..."
+                maxLength={5}
+                className="h-7 w-32 text-xs font-mono px-2 rounded bg-background border border-border/60 focus:outline-none focus:ring-1 focus:ring-primary/50"
+              />
+              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleAddZip}>
+                <Plus className="w-3 h-3" /> Add
+              </Button>
+              <button onClick={resetToDefault}
+                className="text-[11px] text-muted-foreground/60 hover:text-muted-foreground ml-auto transition-colors">
+                Reset to default
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Filter + score legend */}
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
@@ -472,7 +578,7 @@ export default function DealScannerPage() {
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
             <ScanLine className="w-12 h-12 text-muted-foreground/20 mb-4" />
             <p className="text-muted-foreground text-sm">
-              Enter ZIP codes above and click <strong>Scan ZIPs</strong>
+              Click <strong>Scan ZIPs</strong> to scan {activeZips.length} Atlanta Metro ZIP codes
             </p>
             <p className="text-xs text-muted-foreground/60 mt-1">
               Listings are scored 0–100 and ranked automatically
