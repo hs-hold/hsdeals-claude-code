@@ -152,11 +152,20 @@ export function useGmailSync() {
         body: { access_token: accessToken, mark_unread_recent: true, since_days: sinceDays },
       });
       if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Unknown error');
       const count: number = data.marked ?? 0;
-      toast({ title: 'Done', description: count > 0 ? `Marked ${count} recent emails as unread — ready to re-scan` : 'No recent emails found' });
+      toast({
+        title: count > 0 ? `✓ Marked ${count} emails as unread` : 'No emails found',
+        description: count > 0 ? 'Scan now to pick them up.' : 'No inbox emails found for the last 7 days.',
+      });
       return count;
     } catch (err) {
-      toast({ title: 'Failed', description: 'Could not mark emails as unread', variant: 'destructive' });
+      console.error('markUnreadRecent error:', err);
+      toast({
+        title: 'Failed to mark emails as unread',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      });
       return 0;
     } finally {
       setIsMarkingOld(false);
