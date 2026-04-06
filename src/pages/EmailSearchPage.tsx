@@ -7,6 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { useGmailAuth } from '@/hooks/useGmailAuth';
 import { useGmailSync } from '@/hooks/useGmailSync';
 import { useUserState } from '@/hooks/useUserState';
@@ -68,6 +69,7 @@ interface EmailResultItem {
   scannedAt: string;
   messageId?: string;
   extractedData?: ExtractedData;
+  emailSnippet?: string;
 }
 
 const SCAN_COUNTS = [10, 20, 40, 60, 100] as const;
@@ -158,100 +160,148 @@ function PropertyRow({
   const firstPhoto = photoLinks[0] ?? null;
   const ed = item.extractedData;
 
+  // Build the email preview content for the hover card
+  const emailPreview = [
+    item.subject ? `Subject: ${item.subject}` : null,
+    item.emailSnippet || null,
+    ed?.propertyDescription || ed?.dealNotes || null,
+  ].filter(Boolean).join('\n\n');
+
   const rowOpacity = actionable ? '' : 'opacity-60 hover:opacity-80';
+  const displayAddress = item.action === 'no_address'
+    ? (suggestedAddr ?? item.subject ?? '(no subject)')
+    : item.address;
 
   return (
-    <div className={`flex items-start gap-3 px-4 py-3 border-b border-border/20 last:border-0 transition-colors hover:bg-muted/10 ${selected ? 'bg-primary/5' : ''} ${rowOpacity}`}>
+    <div className={`flex items-center gap-3 px-4 py-2.5 border-b border-border/20 last:border-0 transition-colors hover:bg-muted/10 ${selected ? 'bg-primary/5' : ''} ${rowOpacity}`}>
 
       {/* Checkbox */}
-      <div className="w-4 shrink-0 pt-0.5">
+      <div className="w-4 shrink-0">
         {actionable
           ? <Checkbox checked={selected} onCheckedChange={onToggleSelect} className="w-3.5 h-3.5" />
           : <div className="w-3.5" />
         }
       </div>
 
-      {/* Main content */}
-      <div className="flex-1 min-w-0 space-y-0.5">
-
-        {/* Address line */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {item.dealId ? (
-            <Link to={`/deals/${item.dealId}`} className="font-semibold text-sm hover:text-primary transition-colors truncate">
-              {item.action === 'no_address' ? (item.subject || '(no subject)') : item.address}
-            </Link>
-          ) : (
-            <span className={`font-semibold text-sm truncate ${item.action === 'no_address' ? 'text-muted-foreground/70' : ''}`}>
-              {item.action === 'no_address' ? (suggestedAddr ?? item.subject ?? '(no subject)') : item.address}
-            </span>
-          )}
-        </div>
-
-        {/* Details row: price · ARV · specs · sender */}
-        <div className="flex items-center gap-3 flex-wrap text-xs text-muted-foreground">
-          {item.purchasePrice && (
-            <span className="font-semibold text-foreground">{formatCurrency(item.purchasePrice)}</span>
-          )}
-          {ed?.arv && (
-            <span className="text-green-400">ARV {formatCurrency(ed.arv)}</span>
-          )}
-          {ed?.rehabCost && (
-            <span className="text-yellow-400">Rehab {formatCurrency(ed.rehabCost)}</span>
-          )}
-          {(ed?.bedrooms || ed?.bathrooms || ed?.sqft) && (
-            <span className="flex items-center gap-1.5">
-              {ed?.bedrooms && <span className="flex items-center gap-0.5"><Bed className="w-3 h-3" />{ed.bedrooms}</span>}
-              {ed?.bathrooms && <span className="flex items-center gap-0.5"><Bath className="w-3 h-3" />{ed.bathrooms}</span>}
-              {ed?.sqft && <span className="flex items-center gap-0.5"><Square className="w-3 h-3" />{ed.sqft.toLocaleString()}</span>}
-            </span>
-          )}
-          {ed?.yearBuilt && <span>{ed.yearBuilt}</span>}
-          {item.senderName && <span className="text-muted-foreground/50">{item.senderName}</span>}
-          {item.dealType && (
-            <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${dealTypeBadgeColor(item.dealType)}`}>
-              {item.dealType}
-            </span>
-          )}
-          {item.action === 'no_address' && item.reason && (
-            <span className="italic text-muted-foreground/50">{item.reason}</span>
-          )}
-        </div>
-
-        {/* Inline address editor */}
-        {isEditing && (
-          <div className="flex items-center gap-1.5 mt-1.5 max-w-lg">
-            <Input autoFocus value={editAddr} onChange={e => onEditChange(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') onEditSubmit(); if (e.key === 'Escape') onEditCancel(); }}
-              placeholder="123 Main St, Atlanta, GA 30301"
-              className="h-7 text-xs flex-1" />
-            <Button size="sm" className="h-7 px-3 text-xs" onClick={onEditSubmit} disabled={isCreating}>
-              {isCreating ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Zap className="w-3 h-3" /> Analyze</>}
-            </Button>
-            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={onEditCancel}>✕</Button>
-          </div>
+      {/* Address */}
+      <div className="w-56 shrink-0 min-w-0">
+        {item.dealId ? (
+          <Link to={`/deals/${item.dealId}`} className="font-medium text-sm hover:text-primary transition-colors block truncate">
+            {displayAddress}
+          </Link>
+        ) : (
+          <span className={`font-medium text-sm block truncate ${item.action === 'no_address' ? 'text-muted-foreground/60 italic' : ''}`}>
+            {displayAddress}
+          </span>
         )}
       </div>
 
-      {/* Right side: badges + links + action */}
-      <div className="flex items-center gap-1.5 shrink-0">
-        <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${badgeColor}`}>{badgeText}</span>
-
-        {firstPhoto && (
-          <a href={firstPhoto} target="_blank" rel="noopener noreferrer">
-            <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-blue-400 hover:text-blue-300">
-              <Image className="w-3.5 h-3.5" />
-            </Button>
-          </a>
+      {/* Price */}
+      <div className="w-24 shrink-0">
+        {item.purchasePrice ? (
+          <span className="text-sm font-semibold">{formatCurrency(item.purchasePrice)}</span>
+        ) : (
+          <span className="text-xs text-muted-foreground/40">—</span>
         )}
-        {gmailUrl && (
-          <a href={gmailUrl} target="_blank" rel="noopener noreferrer">
-            <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-muted-foreground hover:text-primary">
-              <ExternalLink className="w-3.5 h-3.5" />
-            </Button>
-          </a>
+      </div>
+
+      {/* Specs: beds/baths/sqft */}
+      <div className="flex items-center gap-2 text-xs text-muted-foreground w-32 shrink-0">
+        {ed?.bedrooms && <span className="flex items-center gap-0.5"><Bed className="w-3 h-3" />{ed.bedrooms}</span>}
+        {ed?.bathrooms && <span className="flex items-center gap-0.5"><Bath className="w-3 h-3" />{ed.bathrooms}</span>}
+        {ed?.sqft && <span className="flex items-center gap-0.5"><Square className="w-3 h-3" />{ed.sqft.toLocaleString()}</span>}
+        {!ed?.bedrooms && !ed?.bathrooms && !ed?.sqft && (
+          <span className="text-muted-foreground/30">—</span>
+        )}
+      </div>
+
+      {/* Sender */}
+      <div className="flex-1 min-w-0">
+        <span className="text-xs text-muted-foreground truncate block">
+          {item.senderName || item.senderEmail || '—'}
+        </span>
+      </div>
+
+      {/* Action badge */}
+      <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium shrink-0 ${badgeColor}`}>{badgeText}</span>
+
+      {/* Icon buttons: Photos · Gmail · Email content hover */}
+      <div className="flex items-center gap-0.5 shrink-0">
+        {firstPhoto ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <a href={firstPhoto} target="_blank" rel="noopener noreferrer">
+                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-blue-400 hover:text-blue-300">
+                  <Image className="w-3.5 h-3.5" />
+                </Button>
+              </a>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {photoLinks.length > 1 ? `${photoLinks.length} Photos` : 'View Photo'}
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          <div className="w-6" />
         )}
 
-        {/* Action buttons */}
+        {gmailUrl ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <a href={gmailUrl} target="_blank" rel="noopener noreferrer">
+                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-muted-foreground hover:text-primary">
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </Button>
+              </a>
+            </TooltipTrigger>
+            <TooltipContent side="top">Open in Gmail</TooltipContent>
+          </Tooltip>
+        ) : (
+          <div className="w-6" />
+        )}
+
+        {/* Email content on hover */}
+        {emailPreview ? (
+          <HoverCard openDelay={200} closeDelay={100}>
+            <HoverCardTrigger asChild>
+              <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground">
+                <Mail className="w-3.5 h-3.5" />
+              </Button>
+            </HoverCardTrigger>
+            <HoverCardContent side="left" align="start" className="w-80 text-xs space-y-1.5">
+              {item.subject && (
+                <p className="font-semibold text-foreground truncate">{item.subject}</p>
+              )}
+              {item.senderName && (
+                <p className="text-muted-foreground">From: {item.senderName}{item.senderEmail ? ` <${item.senderEmail}>` : ''}</p>
+              )}
+              {(item.emailSnippet || ed?.propertyDescription || ed?.dealNotes) && (
+                <p className="text-muted-foreground/80 whitespace-pre-wrap line-clamp-10 leading-relaxed border-t border-border/30 pt-1.5">
+                  {item.emailSnippet || ed?.propertyDescription || ed?.dealNotes}
+                </p>
+              )}
+            </HoverCardContent>
+          </HoverCard>
+        ) : (
+          <div className="w-6" />
+        )}
+      </div>
+
+      {/* Inline address editor */}
+      {isEditing && (
+        <div className="absolute left-4 right-4 mt-8 flex items-center gap-1.5 z-10">
+          <Input autoFocus value={editAddr} onChange={e => onEditChange(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') onEditSubmit(); if (e.key === 'Escape') onEditCancel(); }}
+            placeholder="123 Main St, Atlanta, GA 30301"
+            className="h-7 text-xs flex-1" />
+          <Button size="sm" className="h-7 px-3 text-xs" onClick={onEditSubmit} disabled={isCreating}>
+            {isCreating ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Zap className="w-3 h-3" /> Analyze</>}
+          </Button>
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={onEditCancel}>✕</Button>
+        </div>
+      )}
+
+      {/* Right-most action button */}
+      <div className="shrink-0 w-24 flex justify-end">
         {suggestedAddr && !isEditing && (
           <Button size="sm" variant="outline" className="h-7 text-xs px-2 text-amber-400 border-amber-500/30"
             onClick={() => onCreateAndAnalyze(suggestedAddr)} disabled={isCreating}>
@@ -261,16 +311,16 @@ function PropertyRow({
         {item.action === 'no_address' && !suggestedAddr && !isEditing && (
           <Button size="sm" variant="ghost" className="h-7 text-xs px-2 text-muted-foreground"
             onClick={onStartEdit}>
-            <Pencil className="w-3 h-3 mr-1" /> Add Address
+            <Pencil className="w-3 h-3 mr-1" /> Add
           </Button>
         )}
         {isAnalyzingThis && (
           <span className="text-xs text-primary flex items-center gap-1">
-            <Loader2 className="w-3 h-3 animate-spin" /> Analyzing...
+            <Loader2 className="w-3 h-3 animate-spin" />
           </span>
         )}
-        {isError && analyzeError && (
-          <span className="text-[10px] text-red-400">{analyzeError}</span>
+        {isError && (
+          <span className="text-[10px] text-red-400">{analyzeError || 'Error'}</span>
         )}
         {isDone && item.dealId && (
           <Link to={`/deals/${item.dealId}`}>
@@ -356,6 +406,7 @@ export default function EmailSearchPage() {
           scannedAt,
           messageId: d.messageId ?? undefined,
           extractedData: d.extractedData ?? undefined,
+          emailSnippet: d.emailSnippet ?? undefined,
         };
       });
 
@@ -715,6 +766,17 @@ export default function EmailSearchPage() {
             {/* Results list */}
             {filtered.length > 0 ? (
               <Card className="border-border/50 bg-card/50">
+                {/* Column headers */}
+                <div className="flex items-center gap-3 px-4 py-2 border-b border-border text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                  <div className="w-4 shrink-0" />
+                  <div className="w-56 shrink-0">Address</div>
+                  <div className="w-24 shrink-0">Price</div>
+                  <div className="w-32 shrink-0">Specs</div>
+                  <div className="flex-1">Sender</div>
+                  <div className="w-16 shrink-0">Status</div>
+                  <div className="w-18 shrink-0">Links</div>
+                  <div className="w-24 shrink-0" />
+                </div>
                 <div className="divide-y divide-border/20">
                   {filtered.map(item => {
                     const deal = item.dealId ? deals.find(d => d.id === item.dealId) : null;

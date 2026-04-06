@@ -15,6 +15,7 @@ interface SyncDetail {
   purchasePrice?: number | null;
   dealType?: string | null;
   extractedData?: Record<string, any>;
+  emailSnippet?: string;
 }
 
 interface SyncResult {
