@@ -11,6 +11,10 @@ interface SyncDetail {
   subject?: string;
   reason?: string;
   existingDealId?: string;
+  messageId?: string;
+  purchasePrice?: number | null;
+  dealType?: string | null;
+  extractedData?: Record<string, any>;
 }
 
 interface SyncResult {

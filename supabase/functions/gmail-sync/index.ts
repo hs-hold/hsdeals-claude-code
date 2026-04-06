@@ -52,6 +52,10 @@ interface SyncDetails {
   subject?: string;
   reason?: string;
   existingDealId?: string;
+  messageId?: string;
+  purchasePrice?: number | null;
+  dealType?: string | null;
+  extractedData?: Record<string, any>;
 }
 
 // Decode base64url encoded content from Gmail
@@ -611,8 +615,8 @@ serve(async (req) => {
         if (isPortalEmail(senderInfo.email)) {
           portalEmails.push(`${senderInfo.email}: ${subject}`);
           dealsSkippedPortal++;
-          syncDetails.push({ address: '', action: 'skipped_portal', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `Portal: ${senderInfo.email}` });
-          if (!dry_run) await markEmailAsRead(access_token, msg.id);
+          syncDetails.push({ address: '', action: 'skipped_portal', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `Portal: ${senderInfo.email}`, messageId: msg.id });
+          await markEmailAsRead(access_token, msg.id);
           continue;
         }
 
@@ -621,7 +625,7 @@ serve(async (req) => {
 
         if (extractedDeals.length === 0) {
           console.log(`No addresses found in: "${subject}"`);
-          syncDetails.push({ address: '', action: 'no_address', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: 'No property address found (AI + regex both returned nothing)' });
+          syncDetails.push({ address: '', action: 'no_address', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: 'No property address found (AI + regex both returned nothing)', messageId: msg.id });
           // ── KEY FIX: Do NOT mark as read — leave unread so it can be retried ──
           continue;
         }
@@ -637,7 +641,7 @@ serve(async (req) => {
 
           // Skip over-budget
           if (emailPurchasePrice && emailPurchasePrice > MAX_DEAL_PRICE) {
-            syncDetails.push({ address, action: 'skipped_over_budget', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `$${emailPurchasePrice.toLocaleString()} > $${MAX_DEAL_PRICE.toLocaleString()}` });
+            syncDetails.push({ address, action: 'skipped_over_budget', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `$${emailPurchasePrice.toLocaleString()} > $${MAX_DEAL_PRICE.toLocaleString()}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData });
             continue;
           }
 
@@ -655,12 +659,12 @@ serve(async (req) => {
                 email_subject: subject,
                 email_date: date ? new Date(date).toISOString() : null,
               }).eq('id', duplicateMatch.id);
-              syncDetails.push({ address, action: 'updated_existing', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `Better price: $${emailPurchasePrice}` });
+              syncDetails.push({ address, action: 'updated_existing', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `Better price: $${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData });
               dealsFromThisEmail++;
             } else {
               skippedAddresses.push(address);
               dealsSkippedDuplicate++;
-              syncDetails.push({ address, action: 'skipped_duplicate', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject });
+              syncDetails.push({ address, action: 'skipped_duplicate', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData });
             }
             continue;
           }
@@ -677,7 +681,7 @@ serve(async (req) => {
             const normState = state.toUpperCase().trim();
             const normTarget = target_state.toUpperCase().trim();
             if (normState !== normTarget) {
-              syncDetails.push({ address, action: 'skipped_wrong_state', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `State ${normState} != ${normTarget}` });
+              syncDetails.push({ address, action: 'skipped_wrong_state', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `State ${normState} != ${normTarget}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData });
               continue;
             }
           }
@@ -713,7 +717,7 @@ serve(async (req) => {
           if (dry_run) {
             // Don't save — just report
             processedDeals.push({ ...dealData, dry_run: true, extractionSource: dealInfo.source });
-            syncDetails.push({ address, action: 'created', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `[DRY RUN] Would create. Source: ${dealInfo.source}` });
+            syncDetails.push({ address, action: 'created', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `[DRY RUN] Would create. Source: ${dealInfo.source}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData });
             existingAddresses.push({ id: 'dry-run', address, deal: dealData });
             dealsFromThisEmail++;
             continue;
@@ -725,13 +729,13 @@ serve(async (req) => {
           if (insertError) {
             console.error('Error inserting deal:', insertError);
             errors.push(`Failed to save ${address}: ${insertError.message}`);
-            syncDetails.push({ address, action: 'error', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: insertError.message });
+            syncDetails.push({ address, action: 'error', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: insertError.message, messageId: msg.id });
             continue;
           }
 
           existingAddresses.push({ id: newDeal.id, address: newDeal.address_full, deal: newDeal });
           processedDeals.push(newDeal);
-          syncDetails.push({ address, action: 'created', dealId: newDeal.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject });
+          syncDetails.push({ address, action: 'created', dealId: newDeal.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData });
           dealsFromThisEmail++;
           console.log(`  ✓ Created deal: ${address}`);
         }

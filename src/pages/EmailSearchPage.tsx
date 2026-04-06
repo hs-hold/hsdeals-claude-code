@@ -13,13 +13,16 @@ import { useUserState } from '@/hooks/useUserState';
 import { useDeals } from '@/context/DealsContext';
 import { useSyncAnalyze } from '@/context/SyncAnalyzeContext';
 import { isDealAnalyzed } from '@/utils/dealHelpers';
+import { formatCurrency } from '@/utils/financialCalculations';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import {
-  Mail, Loader2, CheckCircle, CheckCircle2, XCircle,
+  Mail, Loader2, CheckCircle, CheckCircle2,
   Zap, MapPin, MailOpen, AlertCircle, Trash2,
-  ExternalLink, Pencil, Plus, RotateCcw,
+  ExternalLink, Pencil, RotateCcw, Bed, Bath,
+  Square, Image, Home, DollarSign,
 } from 'lucide-react';
+import { Deal } from '@/types/deal';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -33,6 +36,24 @@ type EmailAction =
   | 'no_address'
   | 'error';
 
+interface ExtractedData {
+  arv?: number | null;
+  bedrooms?: number | null;
+  bathrooms?: number | null;
+  sqft?: number | null;
+  yearBuilt?: number | null;
+  rehabCost?: number | null;
+  propertyType?: string | null;
+  condition?: string | null;
+  occupancy?: string | null;
+  dealNotes?: string | null;
+  propertyDescription?: string | null;
+  photoLinks?: string[];
+  imageLinks?: string[];
+  lotSize?: string | null;
+  units?: number | null;
+}
+
 interface EmailResultItem {
   key: string;
   dealId: string | null;
@@ -45,6 +66,8 @@ interface EmailResultItem {
   subject?: string;
   reason?: string;
   scannedAt: string;
+  messageId?: string;
+  extractedData?: ExtractedData;
 }
 
 const SCAN_COUNTS = [10, 20, 40, 60, 100] as const;
@@ -52,7 +75,6 @@ type ScanCount = typeof SCAN_COUNTS[number];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Detects if a string looks like a full US street address */
 function looksLikeAddress(s?: string): boolean {
   if (!s) return false;
   return /^\d+\s+\S+.*,\s*[a-zA-Z\s]+,\s*[a-zA-Z]{2}\s+\d{5}/i.test(s.trim());
@@ -62,19 +84,289 @@ function isActionable(action: EmailAction): boolean {
   return action === 'created' || action === 'updated_existing';
 }
 
-function actionBadge(action: EmailAction, subjectIsAddr: boolean) {
-  if (action === 'created')          return { text: 'New Deal', color: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' };
-  if (action === 'updated_existing') return { text: 'Updated', color: 'text-cyan-400 border-cyan-500/30 bg-cyan-500/10' };
-  if (action === 'skipped_portal')   return { text: 'Portal', color: 'text-muted-foreground border-border/30 bg-muted/20' };
-  if (action === 'skipped_duplicate')return { text: 'Duplicate', color: 'text-muted-foreground border-border/30 bg-muted/20' };
-  if (action === 'skipped_over_budget') return { text: 'Over Budget', color: 'text-muted-foreground border-border/30 bg-muted/20' };
-  if (action === 'skipped_wrong_state') return { text: 'Wrong State', color: 'text-muted-foreground border-border/30 bg-muted/20' };
-  if (action === 'no_address') {
-    if (subjectIsAddr) return { text: 'Address in Subject', color: 'text-amber-400 border-amber-500/30 bg-amber-500/10' };
-    return { text: 'No Address', color: 'text-muted-foreground/60 border-border/20 bg-muted/10' };
+function gmailLink(messageId?: string): string | null {
+  if (!messageId) return null;
+  return `https://mail.google.com/mail/u/0/#inbox/${messageId}`;
+}
+
+function getPhotoLink(data?: ExtractedData): string | null {
+  if (!data) return null;
+  const links = [...(data.photoLinks ?? []), ...(data.imageLinks ?? [])];
+  return links[0] ?? null;
+}
+
+function getPhotoLinks(data?: ExtractedData): string[] {
+  if (!data) return [];
+  return [...new Set([...(data.photoLinks ?? []), ...(data.imageLinks ?? [])])];
+}
+
+function dealTypeBadgeColor(dealType?: string | null): string {
+  if (!dealType) return 'bg-muted/30 text-muted-foreground border-border/40';
+  const dt = dealType.toLowerCase();
+  if (dt.includes('flip')) return 'bg-orange-500/10 text-orange-400 border-orange-500/30';
+  if (dt.includes('hold') || dt.includes('brrrr')) return 'bg-blue-500/10 text-blue-400 border-blue-500/30';
+  if (dt.includes('wholesale')) return 'bg-purple-500/10 text-purple-400 border-purple-500/30';
+  if (dt.includes('multi') || dt.includes('duplex') || dt.includes('triplex') || dt.includes('fourplex')) return 'bg-teal-500/10 text-teal-400 border-teal-500/30';
+  return 'bg-muted/30 text-muted-foreground border-border/40';
+}
+
+function actionBadgeConfig(action: EmailAction) {
+  if (action === 'created')          return { text: 'New Deal', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' };
+  if (action === 'updated_existing') return { text: 'Updated', color: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30' };
+  if (action === 'skipped_portal')   return { text: 'Portal', color: 'bg-muted/10 text-muted-foreground border-border/30' };
+  if (action === 'skipped_duplicate')return { text: 'Duplicate', color: 'bg-muted/10 text-muted-foreground border-border/30' };
+  if (action === 'skipped_over_budget') return { text: 'Over Budget', color: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/30' };
+  if (action === 'skipped_wrong_state') return { text: 'Wrong State', color: 'bg-muted/10 text-muted-foreground border-border/30' };
+  if (action === 'no_address') return { text: 'No Address', color: 'bg-muted/10 text-muted-foreground/60 border-border/20' };
+  if (action === 'error')            return { text: 'Error', color: 'bg-red-500/10 text-red-400 border-red-500/30' };
+  return { text: action, color: 'bg-muted/10 text-muted-foreground border-border/30' };
+}
+
+// ── Property Card ─────────────────────────────────────────────────────────────
+
+interface PropertyCardProps {
+  item: EmailResultItem;
+  deal: Deal | null | undefined;
+  isAnalyzingThis: boolean;
+  isDone: boolean;
+  isError: boolean;
+  analyzeError?: string;
+  isCreating: boolean;
+  editingKey: string | null;
+  editAddr: string;
+  selected: boolean;
+  onToggleSelect: () => void;
+  onAnalyze: () => void;
+  onStartEdit: () => void;
+  onEditChange: (val: string) => void;
+  onEditSubmit: () => void;
+  onEditCancel: () => void;
+  onCreateAndAnalyze: (addr?: string) => void;
+}
+
+function PropertyCard({
+  item, deal, isAnalyzingThis, isDone, isError, analyzeError, isCreating,
+  editingKey, editAddr, selected,
+  onToggleSelect, onAnalyze, onStartEdit, onEditChange, onEditSubmit, onEditCancel, onCreateAndAnalyze,
+}: PropertyCardProps) {
+  const actionable = isActionable(item.action);
+  const { text: badgeText, color: badgeColor } = actionBadgeConfig(item.action);
+  const subjectIsAddr = looksLikeAddress(item.subject);
+  const suggestedAddr = item.action === 'no_address' && subjectIsAddr ? item.subject! : undefined;
+  const isEditing = editingKey === item.key;
+  const gmailUrl = gmailLink(item.messageId);
+  const photoLinks = getPhotoLinks(item.extractedData);
+  const firstPhoto = photoLinks[0] ?? null;
+  const ed = item.extractedData;
+
+  // For non-deal rows (no_address, portal — only no_address is shown)
+  if (item.action === 'no_address') {
+    return (
+      <div className={`border border-border/30 rounded-lg p-3 bg-muted/10 opacity-60 hover:opacity-80 transition-opacity`}>
+        <div className="flex items-start gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${badgeColor}`}>{badgeText}</span>
+              {item.senderName && <span className="text-xs text-muted-foreground">{item.senderName}</span>}
+              {gmailUrl && (
+                <a href={gmailUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary/60 hover:text-primary flex items-center gap-0.5">
+                  <ExternalLink className="w-2.5 h-2.5" /> Gmail
+                </a>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground/70 truncate mt-1">
+              {item.subject || '(no subject)'}
+            </p>
+          </div>
+          {/* "Enter Address" option for no_address with address in subject */}
+          {suggestedAddr && (
+            <Button size="sm" variant="outline"
+              className="h-7 text-xs px-2 shrink-0 text-amber-400 border-amber-500/30"
+              onClick={() => onCreateAndAnalyze(suggestedAddr)}>
+              {isCreating ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Zap className="w-3 h-3 mr-1" />Analyze</>}
+            </Button>
+          )}
+          {!suggestedAddr && !isEditing && (
+            <Button size="sm" variant="outline" className="h-7 text-xs px-2 shrink-0 text-muted-foreground"
+              onClick={onStartEdit}>
+              <Pencil className="w-3 h-3 mr-1" /> Enter Address
+            </Button>
+          )}
+        </div>
+        {isEditing && (
+          <div className="flex items-center gap-1.5 mt-2">
+            <Input autoFocus value={editAddr} onChange={e => onEditChange(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') onEditSubmit(); if (e.key === 'Escape') onEditCancel(); }}
+              placeholder="123 Main St, Atlanta, GA 30301"
+              className="h-7 text-xs flex-1" />
+            <Button size="sm" className="h-7 px-3 text-xs" onClick={onEditSubmit} disabled={isCreating}>
+              {isCreating ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Zap className="w-3 h-3" /> Analyze</>}
+            </Button>
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={onEditCancel}>✕</Button>
+          </div>
+        )}
+      </div>
+    );
   }
-  if (action === 'error')            return { text: 'Error', color: 'text-red-400 border-red-500/30 bg-red-500/10' };
-  return { text: action, color: 'text-muted-foreground border-border/30' };
+
+  // Property deal card
+  const addressParts = item.address.split(',').map(s => s.trim());
+  const streetLine = addressParts[0] || item.address;
+  const cityStateLine = addressParts.slice(1).join(', ');
+
+  const cardBorder = actionable
+    ? selected
+      ? 'border-primary/50 bg-primary/5'
+      : 'border-emerald-500/20 hover:border-emerald-500/40'
+    : item.action === 'skipped_duplicate'
+      ? 'border-border/30 bg-muted/10 opacity-70'
+      : 'border-border/30 bg-muted/10 opacity-60';
+
+  return (
+    <Card className={`transition-all duration-200 ${cardBorder}`}>
+      <CardContent className="p-4 space-y-3">
+        {/* Top row: checkbox + action badge + Gmail link */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2">
+            {actionable && (
+              <Checkbox checked={selected} onCheckedChange={onToggleSelect} className="w-3.5 h-3.5 mt-0.5" />
+            )}
+            <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${badgeColor}`}>{badgeText}</span>
+            {item.dealType && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${dealTypeBadgeColor(item.dealType)}`}>
+                {item.dealType}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            {firstPhoto && (
+              <a href={firstPhoto} target="_blank" rel="noopener noreferrer">
+                <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 gap-1 text-blue-400 border-blue-500/30 hover:bg-blue-500/10">
+                  <Image className="w-2.5 h-2.5" />
+                  {photoLinks.length > 1 ? `${photoLinks.length} Photos` : 'Photo'}
+                </Button>
+              </a>
+            )}
+            {gmailUrl && (
+              <a href={gmailUrl} target="_blank" rel="noopener noreferrer">
+                <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 gap-1 text-muted-foreground hover:text-primary border-border/40">
+                  <ExternalLink className="w-2.5 h-2.5" /> Gmail
+                </Button>
+              </a>
+            )}
+          </div>
+        </div>
+
+        {/* Address */}
+        <div>
+          {item.dealId ? (
+            <Link to={`/deals/${item.dealId}`} className="hover:text-primary transition-colors">
+              <p className="font-semibold text-sm leading-snug">{streetLine}</p>
+            </Link>
+          ) : (
+            <p className="font-semibold text-sm leading-snug">{streetLine}</p>
+          )}
+          {cityStateLine && (
+            <p className="text-xs text-muted-foreground">{cityStateLine}</p>
+          )}
+        </div>
+
+        {/* Price / ARV row */}
+        {(item.purchasePrice || ed?.arv) && (
+          <div className="flex items-center gap-4">
+            {item.purchasePrice && (
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Ask Price</p>
+                <p className="text-sm font-bold text-foreground">{formatCurrency(item.purchasePrice)}</p>
+              </div>
+            )}
+            {ed?.arv && (
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">ARV</p>
+                <p className="text-sm font-semibold text-green-400">{formatCurrency(ed.arv)}</p>
+              </div>
+            )}
+            {ed?.rehabCost && (
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Rehab</p>
+                <p className="text-sm font-semibold text-yellow-400">{formatCurrency(ed.rehabCost)}</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Specs row: beds / baths / sqft / year */}
+        {(ed?.bedrooms || ed?.bathrooms || ed?.sqft || ed?.yearBuilt) && (
+          <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+            {ed?.bedrooms && (
+              <span className="flex items-center gap-1">
+                <Bed className="w-3 h-3" />{ed.bedrooms} bd
+              </span>
+            )}
+            {ed?.bathrooms && (
+              <span className="flex items-center gap-1">
+                <Bath className="w-3 h-3" />{ed.bathrooms} ba
+              </span>
+            )}
+            {ed?.sqft && (
+              <span className="flex items-center gap-1">
+                <Square className="w-3 h-3" />{ed.sqft.toLocaleString()} sqft
+              </span>
+            )}
+            {ed?.yearBuilt && (
+              <span className="flex items-center gap-1">
+                <Home className="w-3 h-3" />Built {ed.yearBuilt}
+              </span>
+            )}
+            {ed?.units && ed.units > 1 && (
+              <span className="flex items-center gap-1">
+                <Home className="w-3 h-3" />{ed.units} units
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Notes */}
+        {ed?.dealNotes && (
+          <p className="text-[11px] text-muted-foreground/70 italic line-clamp-2">{ed.dealNotes}</p>
+        )}
+
+        {/* Sender + action buttons */}
+        <div className="flex items-center justify-between pt-1 border-t border-border/30">
+          <p className="text-[10px] text-muted-foreground/60 truncate">
+            {item.senderName || item.senderEmail || ''}
+            {item.reason && item.action !== 'created' && item.action !== 'updated_existing' && (
+              <span className="italic"> · {item.reason}</span>
+            )}
+          </p>
+
+          <div className="flex items-center gap-1 shrink-0">
+            {isAnalyzingThis && (
+              <span className="text-xs text-primary flex items-center gap-1">
+                <Loader2 className="w-3 h-3 animate-spin" /> Analyzing...
+              </span>
+            )}
+            {isError && analyzeError && (
+              <span className="text-[10px] text-red-400">{analyzeError}</span>
+            )}
+            {isDone && item.dealId && (
+              <Link to={`/deals/${item.dealId}`}>
+                <Button size="sm" variant="ghost" className="h-7 text-xs px-2 text-green-500">
+                  <CheckCircle2 className="w-3 h-3 mr-1" /> View
+                </Button>
+              </Link>
+            )}
+            {actionable && !isDone && !isAnalyzingThis && (
+              <Button size="sm" variant="outline" className="h-7 text-xs px-3"
+                onClick={onAnalyze}>
+                <Zap className="w-3 h-3 mr-1" /> Analyze
+              </Button>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -94,21 +386,21 @@ export default function EmailSearchPage() {
   const [scanCount, setScanCount] = useState<ScanCount>(20);
   const [results, setResults] = useState<EmailResultItem[]>(() => {
     try {
-      const saved = sessionStorage.getItem('email_scan_results');
+      const saved = sessionStorage.getItem('email_scan_results_v2');
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [filter, setFilter] = useState<'all' | 'new' | 'skipped'>('all');
+  const [filter, setFilter] = useState<'all' | 'deals' | 'skipped'>('all');
 
-  // Persist results to sessionStorage whenever they change
+  // Persist results to sessionStorage
   useEffect(() => {
-    try { sessionStorage.setItem('email_scan_results', JSON.stringify(results)); } catch {}
+    try { sessionStorage.setItem('email_scan_results_v2', JSON.stringify(results)); } catch {}
   }, [results]);
-  // Per-row inline address editor state
+
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editAddr, setEditAddr] = useState('');
-  const [creatingKey, setCreatingKey] = useState<string | null>(null); // which row is being created+analyzed
+  const [creatingKey, setCreatingKey] = useState<string | null>(null);
 
   // ── Scan ──────────────────────────────────────────────────────────────────
 
@@ -125,22 +417,26 @@ export default function EmailSearchPage() {
     if (!result?.success) return;
 
     const scannedAt = new Date().toISOString();
-    const newItems: EmailResultItem[] = (result.syncDetails ?? []).map((d: any, idx: number) => {
-      const dealId = d.dealId || d.existingDealId || null;
-      return {
-        key: dealId ?? `skip-${scannedAt}-${idx}`,
-        dealId,
-        address: d.address || '(no address)',
-        action: d.action as EmailAction,
-        dealType: d.dealType ?? null,
-        purchasePrice: d.purchasePrice ?? null,
-        senderName: d.senderName ?? '',
-        senderEmail: d.senderEmail ?? '',
-        subject: d.subject ?? '',
-        reason: d.reason ?? '',
-        scannedAt,
-      };
-    });
+    const newItems: EmailResultItem[] = (result.syncDetails ?? [])
+      .filter((d: any) => d.action !== 'skipped_portal') // hide portals
+      .map((d: any, idx: number) => {
+        const dealId = d.dealId || d.existingDealId || null;
+        return {
+          key: dealId ?? `skip-${scannedAt}-${idx}`,
+          dealId,
+          address: d.address || '(no address)',
+          action: d.action as EmailAction,
+          dealType: d.dealType ?? null,
+          purchasePrice: d.purchasePrice ?? null,
+          senderName: d.senderName ?? '',
+          senderEmail: d.senderEmail ?? '',
+          subject: d.subject ?? '',
+          reason: d.reason ?? '',
+          scannedAt,
+          messageId: d.messageId ?? undefined,
+          extractedData: d.extractedData ?? undefined,
+        };
+      });
 
     setResults(prev => {
       const existingKeys = new Set(prev.map(i => i.key));
@@ -218,7 +514,6 @@ export default function EmailSearchPage() {
     if (!item.dealId || isAnalyzing) return;
     await startAnalyzeList([{ id: item.dealId, address: item.address }]);
     await refetch();
-    // Open deal in new tab — stay on email scanner so user can continue analyzing
     window.open(`/deals/${item.dealId}`, '_blank', 'noopener,noreferrer');
   }, [isAnalyzing, startAnalyzeList, refetch]);
 
@@ -263,7 +558,6 @@ export default function EmailSearchPage() {
 
       const dealId = inserted.id;
 
-      // Mark row as created
       setResults(prev => prev.map(r =>
         r.key === item.key
           ? { ...r, key: dealId, dealId, address: addr, action: 'created' as EmailAction }
@@ -273,7 +567,6 @@ export default function EmailSearchPage() {
       setEditAddr('');
       await refetch();
 
-      // Immediately send to DealBeast analysis → open deal in new tab; stay on this page
       toast.success('Deal created — sending to DealBeast...');
       await startAnalyzeList([{ id: dealId, address: addr }]);
       await refetch();
@@ -287,8 +580,11 @@ export default function EmailSearchPage() {
 
   // ── Filtered list ─────────────────────────────────────────────────────────
 
+  const dealItems = useMemo(() => results.filter(r => r.action !== 'no_address'), [results]);
+  const noAddrItems = useMemo(() => results.filter(r => r.action === 'no_address'), [results]);
+
   const filtered = useMemo(() => {
-    if (filter === 'new')     return results.filter(r => isActionable(r.action));
+    if (filter === 'deals') return results.filter(r => isActionable(r.action));
     if (filter === 'skipped') return results.filter(r => !isActionable(r.action));
     return results;
   }, [results, filter]);
@@ -325,6 +621,9 @@ export default function EmailSearchPage() {
   const allActionableSelected = actionableItems.length > 0 &&
     actionableItems.every(r => selected.has(r.key));
 
+  const propertyItems = filtered.filter(r => r.action !== 'no_address');
+  const emailOnlyItems = filter === 'all' ? noAddrItems : [];
+
   return (
     <TooltipProvider>
       <div className="p-6 space-y-4 animate-fade-in">
@@ -359,7 +658,7 @@ export default function EmailSearchPage() {
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="max-w-xs">
-                Marks emails from the last 7 days as unread so they appear in the next scan. Use when emails were scanned but deals weren't extracted.
+                Marks emails from the last 7 days as unread so they appear in the next scan.
               </TooltipContent>
             </Tooltip>
             <Tooltip>
@@ -370,7 +669,7 @@ export default function EmailSearchPage() {
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="max-w-xs">
-                Marks all unread emails older than 7 days as read. Clears inbox clutter before scanning.
+                Marks all unread emails older than 7 days as read.
               </TooltipContent>
             </Tooltip>
             <Button variant="ghost" size="sm" onClick={disconnect} className="text-muted-foreground">Disconnect</Button>
@@ -419,7 +718,7 @@ export default function EmailSearchPage() {
               </div>
             </div>
             <p className="text-xs text-muted-foreground mt-3">
-              Fetches the {scanCount} most recent unread emails · Extracts property addresses with AI · Marks each scanned email as read · Each scan picks up the next batch
+              Uses AI to extract deal info from wholesaler emails · Portal emails (Zillow, Redfin, etc.) are auto-marked as read · Each scan picks up the next batch of unread emails
             </p>
           </CardContent>
         </Card>
@@ -447,236 +746,135 @@ export default function EmailSearchPage() {
 
         {/* ── Results ───────────────────────────────────────────────────── */}
         {results.length > 0 && (
-          <Card className="border-border/50 bg-card/50">
-            <CardHeader className="pb-2 pt-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Mail className="w-4 h-4 text-muted-foreground" />
-                  Email Results
-                  <span className="text-xs font-normal text-muted-foreground">
-                    {results.length} total · {actionableItems.length} new
-                  </span>
-                </CardTitle>
-                <div className="flex items-center gap-2">
+          <>
+            {/* Toolbar */}
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Filter tabs */}
+              <div className="flex gap-1">
+                {(['all', 'deals', 'skipped'] as const).map(f => (
+                  <button key={f} onClick={() => setFilter(f)}
+                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                      filter === f ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'
+                    }`}>
+                    {f === 'all'     ? `All (${results.filter(r => r.action !== 'skipped_portal').length})` :
+                     f === 'deals'   ? `Deals (${actionableItems.length})` :
+                     `Skipped (${results.filter(r => !isActionable(r.action) && r.action !== 'skipped_portal').length})`}
+                  </button>
+                ))}
+              </div>
+
+              {/* Bulk actions */}
+              {actionableItems.length > 0 && (
+                <div className="flex items-center gap-2 sm:ml-auto">
+                  <Checkbox checked={allActionableSelected} onCheckedChange={toggleSelectAll}
+                    disabled={actionableItems.length === 0} className="w-3.5 h-3.5" />
+                  <span className="text-xs text-muted-foreground">Select all</span>
                   {selectedActionable.length > 0 && (
                     <Button size="sm" onClick={handleAnalyzeSelected} disabled={isAnalyzing}>
                       <Zap className="w-3.5 h-3.5 mr-1.5" />
                       Analyze {selectedActionable.length} Selected
                     </Button>
                   )}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button size="sm" variant="ghost" onClick={() => { setResults([]); setSelected(new Set()); try { sessionStorage.removeItem('email_scan_results'); } catch {} }} className="text-muted-foreground">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Clear all results</TooltipContent>
-                  </Tooltip>
+                  {unanalyzedActionable.length > 0 && !isAnalyzing && selectedActionable.length === 0 && (
+                    <Button size="sm" variant="outline"
+                      onClick={() => startAnalyzeList(unanalyzedActionable.map(r => ({ id: r.dealId!, address: r.address })))}>
+                      <Zap className="w-3.5 h-3.5 mr-1.5" />
+                      Analyze All New ({unanalyzedActionable.length})
+                    </Button>
+                  )}
                 </div>
-              </div>
-              {/* Filter tabs */}
-              <div className="flex gap-1 pt-1">
-                {(['all', 'new', 'skipped'] as const).map(f => (
-                  <button key={f} onClick={() => setFilter(f)}
-                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                      filter === f ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'
-                    }`}>
-                    {f === 'all'     ? `All (${results.length})` :
-                     f === 'new'     ? `New (${actionableItems.length})` :
-                     `Skipped (${results.length - actionableItems.length})`}
-                  </button>
-                ))}
-              </div>
-            </CardHeader>
+              )}
 
-            <CardContent className="pt-0 px-0">
-              {/* Column headers */}
-              <div className="grid grid-cols-[28px_1fr_auto] gap-2 px-4 py-2 text-[10px] font-medium text-muted-foreground uppercase tracking-wider border-b border-border">
-                <div className="flex items-center">
-                  <Checkbox checked={allActionableSelected} onCheckedChange={toggleSelectAll}
-                    disabled={actionableItems.length === 0} className="w-3.5 h-3.5" />
-                </div>
-                <span>Address</span>
-                <span className="text-right pr-2">Action</span>
-              </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" variant="ghost"
+                    onClick={() => { setResults([]); setSelected(new Set()); try { sessionStorage.removeItem('email_scan_results_v2'); } catch {} }}
+                    className="text-muted-foreground ml-auto sm:ml-0">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Clear all results</TooltipContent>
+              </Tooltip>
+            </div>
 
-              {/* Rows */}
-              <div className="divide-y divide-border/20">
-                {filtered.map(item => {
-                  const actionable   = isActionable(item.action);
-                  const deal         = item.dealId ? deals.find(d => d.id === item.dealId) : null;
-                  const analyzed     = deal ? isDealAnalyzed(deal) : false;
-                  const qItem        = item.dealId ? analyzeQueue.find(a => a.id === item.dealId) : null;
+            {/* Property cards grid */}
+            {propertyItems.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {propertyItems.map(item => {
+                  const deal = item.dealId ? deals.find(d => d.id === item.dealId) : null;
+                  const analyzed = deal ? isDealAnalyzed(deal) : false;
+                  const qItem = item.dealId ? analyzeQueue.find(a => a.id === item.dealId) : null;
                   const isAnalyzingThis = qItem?.status === 'analyzing' || creatingKey === item.key;
-                  const isDone       = qItem?.status === 'done' || analyzed;
-                  const isError      = qItem?.status === 'error';
-                  const subjectIsAddr = looksLikeAddress(item.subject);
-                  const { text: badgeText, color: badgeColor } = actionBadge(item.action, subjectIsAddr);
-                  const isEditing    = editingKey === item.key;
-
-                  // For no_address with address in subject: use subject as suggested address
-                  const suggestedAddr = (item.action === 'no_address' && subjectIsAddr)
-                    ? item.subject!
-                    : undefined;
-
-                  // Determine what address to display
-                  const displayAddress = actionable
-                    ? item.address
-                    : suggestedAddr ?? item.subject ?? item.address;
+                  const isDone = qItem?.status === 'done' || analyzed;
+                  const isError = qItem?.status === 'error';
 
                   return (
-                    <div key={item.key}
-                      className={`grid grid-cols-[28px_1fr_auto] gap-2 px-4 py-3 items-start transition-colors ${
-                        actionable ? 'hover:bg-muted/20' : 'opacity-60 hover:opacity-80'
-                      } ${selected.has(item.key) ? 'bg-primary/5' : ''}`}
-                    >
-                      {/* Checkbox */}
-                      <div className="flex items-center pt-0.5">
-                        {actionable
-                          ? <Checkbox checked={selected.has(item.key)} onCheckedChange={() => toggleSelect(item.key)} className="w-3.5 h-3.5" />
-                          : <div className="w-3.5" />
-                        }
-                      </div>
-
-                      {/* Main content: address + badges */}
-                      <div className="min-w-0 space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {/* Address */}
-                          {item.dealId ? (
-                            <Link to={`/deals/${item.dealId}`}
-                              className="text-sm font-semibold hover:text-primary transition-colors">
-                              {displayAddress}
-                            </Link>
-                          ) : (
-                            <span className={`text-sm font-semibold ${suggestedAddr ? 'text-amber-300' : 'text-foreground/70'}`}>
-                              {displayAddress}
-                            </span>
-                          )}
-                          {item.dealId && (
-                            <Link to={`/deals/${item.dealId}`} className="shrink-0">
-                              <ExternalLink className="w-3 h-3 text-muted-foreground/40 hover:text-primary" />
-                            </Link>
-                          )}
-                        </div>
-
-                        {/* Badges row */}
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${badgeColor}`}>
-                            {badgeText}
-                          </span>
-                          {item.dealType && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded border border-border/40 bg-muted/20 text-muted-foreground">
-                              {item.dealType}
-                            </span>
-                          )}
-                          {item.purchasePrice && (
-                            <span className="text-[10px] text-muted-foreground font-mono">
-                              ${item.purchasePrice.toLocaleString()}
-                            </span>
-                          )}
-                          {item.senderName && (
-                            <span className="text-[10px] text-muted-foreground/50">
-                              {item.senderName}
-                            </span>
-                          )}
-                          {item.reason && (item.action === 'no_address' || item.action === 'error') && (
-                            <span className="text-[10px] text-muted-foreground/60 italic">{item.reason}</span>
-                          )}
-                          {isError && qItem?.error && (
-                            <span className="text-[10px] text-red-400">{qItem.error}</span>
-                          )}
-                        </div>
-
-                        {/* Inline address editor */}
-                        {isEditing && (
-                          <div className="flex items-center gap-1.5 mt-1.5 max-w-lg">
-                            <Input autoFocus
-                              value={editAddr}
-                              onChange={e => setEditAddr(e.target.value)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') handleCreateAndAnalyze(item);
-                                if (e.key === 'Escape') { setEditingKey(null); setEditAddr(''); }
-                              }}
-                              placeholder="123 Main St, Atlanta, GA 30301"
-                              className="h-7 text-xs flex-1"
-                            />
-                            <Button size="sm" className="h-7 px-3 text-xs gap-1" onClick={() => handleCreateAndAnalyze(item)} disabled={!!creatingKey}>
-                              {creatingKey === item.key ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Zap className="w-3 h-3" /> Analyze</>}
-                            </Button>
-                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs"
-                              onClick={() => { setEditingKey(null); setEditAddr(''); }}>✕</Button>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Action button column */}
-                      <div className="flex items-center justify-end gap-1 pt-0.5">
-                        {/* Subject IS address → one-click Analyze */}
-                        {suggestedAddr && !isEditing && (
-                          <Button size="sm" variant="outline"
-                            className="h-7 text-xs px-3 gap-1 text-amber-400 border-amber-500/30 hover:bg-amber-500/10"
-                            onClick={() => handleCreateAndAnalyze(item, suggestedAddr)}
-                            disabled={!!creatingKey}>
-                            {creatingKey === item.key
-                              ? <Loader2 className="w-3 h-3 animate-spin" />
-                              : <><Zap className="w-3 h-3" /> Analyze</>
-                            }
-                          </Button>
-                        )}
-
-                        {/* No address, no subject address → Enter Address */}
-                        {item.action === 'no_address' && !suggestedAddr && !isEditing && (
-                          <Button size="sm" variant="outline"
-                            className="h-7 text-xs px-2 text-muted-foreground"
-                            onClick={() => { setEditingKey(item.key); setEditAddr(''); }}>
-                            <Pencil className="w-3 h-3 mr-1" /> Enter Address
-                          </Button>
-                        )}
-
-                        {/* Actionable, not yet analyzed */}
-                        {actionable && !isDone && !isAnalyzingThis && (
-                          <Button size="sm" variant="outline" className="h-7 text-xs px-3"
-                            onClick={() => handleAnalyzeOne(item)} disabled={isAnalyzing}>
-                            <Zap className="w-3 h-3 mr-1" /> Analyze
-                          </Button>
-                        )}
-
-                        {/* Analyzing */}
-                        {isAnalyzingThis && (
-                          <span className="text-xs text-primary flex items-center gap-1">
-                            <Loader2 className="w-3 h-3 animate-spin" /> Analyzing...
-                          </span>
-                        )}
-
-                        {/* Done */}
-                        {isDone && item.dealId && (
-                          <Link to={`/deals/${item.dealId}`}>
-                            <Button size="sm" variant="ghost" className="h-7 text-xs px-2 text-green-500">
-                              <CheckCircle2 className="w-3 h-3 mr-1" /> View
-                            </Button>
-                          </Link>
-                        )}
-                      </div>
-                    </div>
+                    <PropertyCard
+                      key={item.key}
+                      item={item}
+                      deal={deal}
+                      isAnalyzingThis={isAnalyzingThis}
+                      isDone={isDone}
+                      isError={isError}
+                      analyzeError={qItem?.error}
+                      isCreating={creatingKey === item.key}
+                      editingKey={editingKey}
+                      editAddr={editAddr}
+                      selected={selected.has(item.key)}
+                      onToggleSelect={() => toggleSelect(item.key)}
+                      onAnalyze={() => handleAnalyzeOne(item)}
+                      onStartEdit={() => { setEditingKey(item.key); setEditAddr(''); }}
+                      onEditChange={setEditAddr}
+                      onEditSubmit={() => handleCreateAndAnalyze(item)}
+                      onEditCancel={() => { setEditingKey(null); setEditAddr(''); }}
+                      onCreateAndAnalyze={(addr) => handleCreateAndAnalyze(item, addr)}
+                    />
                   );
                 })}
               </div>
+            )}
 
-              {/* Bulk analyze bar */}
-              {unanalyzedActionable.length > 0 && !isAnalyzing && (
-                <div className="mx-4 mt-3 pt-3 border-t border-border flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">
-                    {unanalyzedActionable.length} new deal{unanalyzedActionable.length !== 1 ? 's' : ''} waiting for analysis
-                  </span>
-                  <Button size="sm" variant="outline"
-                    onClick={() => startAnalyzeList(unanalyzedActionable.map(r => ({ id: r.dealId!, address: r.address })))}>
-                    <Zap className="w-3.5 h-3.5 mr-1.5" />
-                    Analyze All New ({unanalyzedActionable.length})
-                  </Button>
+            {/* No-address emails section */}
+            {emailOnlyItems.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
+                  Emails without property address ({emailOnlyItems.length})
+                </p>
+                <div className="space-y-1.5">
+                  {emailOnlyItems.map(item => {
+                    const isCreating = creatingKey === item.key;
+                    return (
+                      <PropertyCard
+                        key={item.key}
+                        item={item}
+                        deal={null}
+                        isAnalyzingThis={false}
+                        isDone={false}
+                        isError={false}
+                        isCreating={isCreating}
+                        editingKey={editingKey}
+                        editAddr={editAddr}
+                        selected={false}
+                        onToggleSelect={() => {}}
+                        onAnalyze={() => {}}
+                        onStartEdit={() => { setEditingKey(item.key); setEditAddr(''); }}
+                        onEditChange={setEditAddr}
+                        onEditSubmit={() => handleCreateAndAnalyze(item)}
+                        onEditCancel={() => { setEditingKey(null); setEditAddr(''); }}
+                        onCreateAndAnalyze={(addr) => handleCreateAndAnalyze(item, addr)}
+                      />
+                    );
+                  })}
                 </div>
-              )}
-            </CardContent>
-          </Card>
+              </div>
+            )}
+
+            {propertyItems.length === 0 && emailOnlyItems.length === 0 && (
+              <div className="text-center py-8 text-muted-foreground text-sm">
+                No results match this filter.
+              </div>
+            )}
+          </>
         )}
 
         {/* Empty state */}
@@ -686,6 +884,9 @@ export default function EmailSearchPage() {
               <Mail className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
               <p className="text-muted-foreground text-sm">
                 No results yet — choose how many emails to scan and click <strong>Scan Unread</strong>
+              </p>
+              <p className="text-xs text-muted-foreground/60 mt-1">
+                AI will extract deals from wholesaler emails · Portal emails are auto-marked as read
               </p>
             </CardContent>
           </Card>
