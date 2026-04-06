@@ -503,64 +503,42 @@ serve(async (req) => {
       );
     }
 
-    // ── Mark recent INBOX emails as UNREAD so they can be re-scanned ──────
+    // ── Mark recent emails as UNREAD so they can be re-scanned ──────────
     if (mark_unread_recent) {
       const days = since_days ?? 7;
-      // Only inbox emails from the last N days
-      const query = encodeURIComponent(`in:inbox newer_than:${days}d`);
-      let allIds: string[] = [];
-      let pageToken: string | undefined;
+      const query = encodeURIComponent(`newer_than:${days}d`);
 
-      // Collect all message IDs (paginated)
-      do {
-        const url = `${GMAIL_API_BASE}/users/me/messages?maxResults=500&q=${query}${pageToken ? `&pageToken=${pageToken}` : ''}`;
-        const listResp = await fetch(url, { headers: { 'Authorization': `Bearer ${access_token}` } });
-        if (!listResp.ok) {
-          const errText = await listResp.text();
-          console.error('[mark_unread_recent] List failed:', listResp.status, errText);
-          return new Response(
-            JSON.stringify({ success: false, error: `Failed to list emails: ${listResp.status}` }),
-            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        }
-        const listData = await listResp.json();
-        (listData.messages || []).forEach((m: any) => allIds.push(m.id));
-        pageToken = listData.nextPageToken;
-      } while (pageToken);
+      const listResp = await fetch(
+        `${GMAIL_API_BASE}/users/me/messages?maxResults=500&q=${query}`,
+        { headers: { 'Authorization': `Bearer ${access_token}` } }
+      );
 
-      console.log(`[mark_unread_recent] Found ${allIds.length} inbox messages from last ${days}d`);
-
-      if (allIds.length === 0) {
+      if (!listResp.ok) {
+        const errText = await listResp.text();
+        console.error('[mark_unread_recent] list failed:', listResp.status, errText);
         return new Response(
-          JSON.stringify({ success: true, marked: 0, message: 'No inbox emails found for the last 7 days' }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          JSON.stringify({ success: false, error: `Gmail list failed: ${listResp.status} ${errText}` }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
 
-      // Use batchModify to mark all at once (max 1000 ids per call)
-      const BATCH_SIZE = 1000;
-      let totalMarked = 0;
-      for (let i = 0; i < allIds.length; i += BATCH_SIZE) {
-        const batch = allIds.slice(i, i + BATCH_SIZE);
-        const batchResp = await fetch(`${GMAIL_API_BASE}/users/me/messages/batchModify`, {
+      const listData = await listResp.json();
+      const messages: any[] = listData.messages || [];
+      console.log(`[mark_unread_recent] Marking ${messages.length} messages as unread`);
+
+      let marked = 0;
+      for (const msg of messages) {
+        const r = await fetch(`${GMAIL_API_BASE}/users/me/messages/${msg.id}/modify`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${access_token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids: batch, addLabelIds: ['UNREAD'] }),
+          body: JSON.stringify({ addLabelIds: ['UNREAD'] }),
         });
-        if (!batchResp.ok) {
-          const errText = await batchResp.text();
-          console.error('[mark_unread_recent] batchModify failed:', batchResp.status, errText);
-          return new Response(
-            JSON.stringify({ success: false, error: `batchModify failed: ${batchResp.status} — ${errText}` }),
-            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        }
-        totalMarked += batch.length;
+        if (r.ok) marked++;
+        else console.error(`[mark_unread_recent] failed to mark ${msg.id}: ${r.status}`);
       }
 
-      console.log(`[mark_unread_recent] Marked ${totalMarked} emails as unread`);
       return new Response(
-        JSON.stringify({ success: true, marked: totalMarked, message: `Marked ${totalMarked} inbox emails as unread` }),
+        JSON.stringify({ success: true, marked, message: `Marked ${marked} of ${messages.length} emails as unread` }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
