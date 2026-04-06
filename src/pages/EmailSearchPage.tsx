@@ -20,7 +20,7 @@ import {
   Mail, Loader2, CheckCircle, CheckCircle2,
   Zap, MapPin, MailOpen, AlertCircle, Trash2,
   ExternalLink, Pencil, RotateCcw, Bed, Bath,
-  Square, Image, Home, DollarSign,
+  Square, Image,
 } from 'lucide-react';
 import { Deal } from '@/types/deal';
 
@@ -122,11 +122,10 @@ function actionBadgeConfig(action: EmailAction) {
   return { text: action, color: 'bg-muted/10 text-muted-foreground border-border/30' };
 }
 
-// ── Property Card ─────────────────────────────────────────────────────────────
+// ── Property Row ──────────────────────────────────────────────────────────────
 
-interface PropertyCardProps {
+interface PropertyRowProps {
   item: EmailResultItem;
-  deal: Deal | null | undefined;
   isAnalyzingThis: boolean;
   isDone: boolean;
   isError: boolean;
@@ -144,11 +143,11 @@ interface PropertyCardProps {
   onCreateAndAnalyze: (addr?: string) => void;
 }
 
-function PropertyCard({
-  item, deal, isAnalyzingThis, isDone, isError, analyzeError, isCreating,
+function PropertyRow({
+  item, isAnalyzingThis, isDone, isError, analyzeError, isCreating,
   editingKey, editAddr, selected,
   onToggleSelect, onAnalyze, onStartEdit, onEditChange, onEditSubmit, onEditCancel, onCreateAndAnalyze,
-}: PropertyCardProps) {
+}: PropertyRowProps) {
   const actionable = isActionable(item.action);
   const { text: badgeText, color: badgeColor } = actionBadgeConfig(item.action);
   const subjectIsAddr = looksLikeAddress(item.subject);
@@ -159,42 +158,68 @@ function PropertyCard({
   const firstPhoto = photoLinks[0] ?? null;
   const ed = item.extractedData;
 
-  // For non-deal rows (no_address, portal — only no_address is shown)
-  if (item.action === 'no_address') {
-    return (
-      <div className={`border border-border/30 rounded-lg p-3 bg-muted/10 opacity-60 hover:opacity-80 transition-opacity`}>
-        <div className="flex items-start gap-2">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${badgeColor}`}>{badgeText}</span>
-              {item.senderName && <span className="text-xs text-muted-foreground">{item.senderName}</span>}
-              {gmailUrl && (
-                <a href={gmailUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary/60 hover:text-primary flex items-center gap-0.5">
-                  <ExternalLink className="w-2.5 h-2.5" /> Gmail
-                </a>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground/70 truncate mt-1">
-              {item.subject || '(no subject)'}
-            </p>
-          </div>
-          {/* "Enter Address" option for no_address with address in subject */}
-          {suggestedAddr && (
-            <Button size="sm" variant="outline"
-              className="h-7 text-xs px-2 shrink-0 text-amber-400 border-amber-500/30"
-              onClick={() => onCreateAndAnalyze(suggestedAddr)}>
-              {isCreating ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Zap className="w-3 h-3 mr-1" />Analyze</>}
-            </Button>
-          )}
-          {!suggestedAddr && !isEditing && (
-            <Button size="sm" variant="outline" className="h-7 text-xs px-2 shrink-0 text-muted-foreground"
-              onClick={onStartEdit}>
-              <Pencil className="w-3 h-3 mr-1" /> Enter Address
-            </Button>
+  const rowOpacity = actionable ? '' : 'opacity-60 hover:opacity-80';
+
+  return (
+    <div className={`flex items-start gap-3 px-4 py-3 border-b border-border/20 last:border-0 transition-colors hover:bg-muted/10 ${selected ? 'bg-primary/5' : ''} ${rowOpacity}`}>
+
+      {/* Checkbox */}
+      <div className="w-4 shrink-0 pt-0.5">
+        {actionable
+          ? <Checkbox checked={selected} onCheckedChange={onToggleSelect} className="w-3.5 h-3.5" />
+          : <div className="w-3.5" />
+        }
+      </div>
+
+      {/* Main content */}
+      <div className="flex-1 min-w-0 space-y-0.5">
+
+        {/* Address line */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {item.dealId ? (
+            <Link to={`/deals/${item.dealId}`} className="font-semibold text-sm hover:text-primary transition-colors truncate">
+              {item.action === 'no_address' ? (item.subject || '(no subject)') : item.address}
+            </Link>
+          ) : (
+            <span className={`font-semibold text-sm truncate ${item.action === 'no_address' ? 'text-muted-foreground/70' : ''}`}>
+              {item.action === 'no_address' ? (suggestedAddr ?? item.subject ?? '(no subject)') : item.address}
+            </span>
           )}
         </div>
+
+        {/* Details row: price · ARV · specs · sender */}
+        <div className="flex items-center gap-3 flex-wrap text-xs text-muted-foreground">
+          {item.purchasePrice && (
+            <span className="font-semibold text-foreground">{formatCurrency(item.purchasePrice)}</span>
+          )}
+          {ed?.arv && (
+            <span className="text-green-400">ARV {formatCurrency(ed.arv)}</span>
+          )}
+          {ed?.rehabCost && (
+            <span className="text-yellow-400">Rehab {formatCurrency(ed.rehabCost)}</span>
+          )}
+          {(ed?.bedrooms || ed?.bathrooms || ed?.sqft) && (
+            <span className="flex items-center gap-1.5">
+              {ed?.bedrooms && <span className="flex items-center gap-0.5"><Bed className="w-3 h-3" />{ed.bedrooms}</span>}
+              {ed?.bathrooms && <span className="flex items-center gap-0.5"><Bath className="w-3 h-3" />{ed.bathrooms}</span>}
+              {ed?.sqft && <span className="flex items-center gap-0.5"><Square className="w-3 h-3" />{ed.sqft.toLocaleString()}</span>}
+            </span>
+          )}
+          {ed?.yearBuilt && <span>{ed.yearBuilt}</span>}
+          {item.senderName && <span className="text-muted-foreground/50">{item.senderName}</span>}
+          {item.dealType && (
+            <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${dealTypeBadgeColor(item.dealType)}`}>
+              {item.dealType}
+            </span>
+          )}
+          {item.action === 'no_address' && item.reason && (
+            <span className="italic text-muted-foreground/50">{item.reason}</span>
+          )}
+        </div>
+
+        {/* Inline address editor */}
         {isEditing && (
-          <div className="flex items-center gap-1.5 mt-2">
+          <div className="flex items-center gap-1.5 mt-1.5 max-w-lg">
             <Input autoFocus value={editAddr} onChange={e => onEditChange(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') onEditSubmit(); if (e.key === 'Escape') onEditCancel(); }}
               placeholder="123 Main St, Atlanta, GA 30301"
@@ -206,166 +231,62 @@ function PropertyCard({
           </div>
         )}
       </div>
-    );
-  }
 
-  // Property deal card
-  const addressParts = item.address.split(',').map(s => s.trim());
-  const streetLine = addressParts[0] || item.address;
-  const cityStateLine = addressParts.slice(1).join(', ');
+      {/* Right side: badges + links + action */}
+      <div className="flex items-center gap-1.5 shrink-0">
+        <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${badgeColor}`}>{badgeText}</span>
 
-  const cardBorder = actionable
-    ? selected
-      ? 'border-primary/50 bg-primary/5'
-      : 'border-emerald-500/20 hover:border-emerald-500/40'
-    : item.action === 'skipped_duplicate'
-      ? 'border-border/30 bg-muted/10 opacity-70'
-      : 'border-border/30 bg-muted/10 opacity-60';
-
-  return (
-    <Card className={`transition-all duration-200 ${cardBorder}`}>
-      <CardContent className="p-4 space-y-3">
-        {/* Top row: checkbox + action badge + Gmail link */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2">
-            {actionable && (
-              <Checkbox checked={selected} onCheckedChange={onToggleSelect} className="w-3.5 h-3.5 mt-0.5" />
-            )}
-            <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${badgeColor}`}>{badgeText}</span>
-            {item.dealType && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${dealTypeBadgeColor(item.dealType)}`}>
-                {item.dealType}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-1.5">
-            {firstPhoto && (
-              <a href={firstPhoto} target="_blank" rel="noopener noreferrer">
-                <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 gap-1 text-blue-400 border-blue-500/30 hover:bg-blue-500/10">
-                  <Image className="w-2.5 h-2.5" />
-                  {photoLinks.length > 1 ? `${photoLinks.length} Photos` : 'Photo'}
-                </Button>
-              </a>
-            )}
-            {gmailUrl && (
-              <a href={gmailUrl} target="_blank" rel="noopener noreferrer">
-                <Button size="sm" variant="outline" className="h-6 text-[10px] px-2 gap-1 text-muted-foreground hover:text-primary border-border/40">
-                  <ExternalLink className="w-2.5 h-2.5" /> Gmail
-                </Button>
-              </a>
-            )}
-          </div>
-        </div>
-
-        {/* Address */}
-        <div>
-          {item.dealId ? (
-            <Link to={`/deals/${item.dealId}`} className="hover:text-primary transition-colors">
-              <p className="font-semibold text-sm leading-snug">{streetLine}</p>
-            </Link>
-          ) : (
-            <p className="font-semibold text-sm leading-snug">{streetLine}</p>
-          )}
-          {cityStateLine && (
-            <p className="text-xs text-muted-foreground">{cityStateLine}</p>
-          )}
-        </div>
-
-        {/* Price / ARV row */}
-        {(item.purchasePrice || ed?.arv) && (
-          <div className="flex items-center gap-4">
-            {item.purchasePrice && (
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Ask Price</p>
-                <p className="text-sm font-bold text-foreground">{formatCurrency(item.purchasePrice)}</p>
-              </div>
-            )}
-            {ed?.arv && (
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">ARV</p>
-                <p className="text-sm font-semibold text-green-400">{formatCurrency(ed.arv)}</p>
-              </div>
-            )}
-            {ed?.rehabCost && (
-              <div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Rehab</p>
-                <p className="text-sm font-semibold text-yellow-400">{formatCurrency(ed.rehabCost)}</p>
-              </div>
-            )}
-          </div>
+        {firstPhoto && (
+          <a href={firstPhoto} target="_blank" rel="noopener noreferrer">
+            <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-blue-400 hover:text-blue-300">
+              <Image className="w-3.5 h-3.5" />
+            </Button>
+          </a>
+        )}
+        {gmailUrl && (
+          <a href={gmailUrl} target="_blank" rel="noopener noreferrer">
+            <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-muted-foreground hover:text-primary">
+              <ExternalLink className="w-3.5 h-3.5" />
+            </Button>
+          </a>
         )}
 
-        {/* Specs row: beds / baths / sqft / year */}
-        {(ed?.bedrooms || ed?.bathrooms || ed?.sqft || ed?.yearBuilt) && (
-          <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
-            {ed?.bedrooms && (
-              <span className="flex items-center gap-1">
-                <Bed className="w-3 h-3" />{ed.bedrooms} bd
-              </span>
-            )}
-            {ed?.bathrooms && (
-              <span className="flex items-center gap-1">
-                <Bath className="w-3 h-3" />{ed.bathrooms} ba
-              </span>
-            )}
-            {ed?.sqft && (
-              <span className="flex items-center gap-1">
-                <Square className="w-3 h-3" />{ed.sqft.toLocaleString()} sqft
-              </span>
-            )}
-            {ed?.yearBuilt && (
-              <span className="flex items-center gap-1">
-                <Home className="w-3 h-3" />Built {ed.yearBuilt}
-              </span>
-            )}
-            {ed?.units && ed.units > 1 && (
-              <span className="flex items-center gap-1">
-                <Home className="w-3 h-3" />{ed.units} units
-              </span>
-            )}
-          </div>
+        {/* Action buttons */}
+        {suggestedAddr && !isEditing && (
+          <Button size="sm" variant="outline" className="h-7 text-xs px-2 text-amber-400 border-amber-500/30"
+            onClick={() => onCreateAndAnalyze(suggestedAddr)} disabled={isCreating}>
+            {isCreating ? <Loader2 className="w-3 h-3 animate-spin" /> : <><Zap className="w-3 h-3 mr-1" />Analyze</>}
+          </Button>
         )}
-
-        {/* Notes */}
-        {ed?.dealNotes && (
-          <p className="text-[11px] text-muted-foreground/70 italic line-clamp-2">{ed.dealNotes}</p>
+        {item.action === 'no_address' && !suggestedAddr && !isEditing && (
+          <Button size="sm" variant="ghost" className="h-7 text-xs px-2 text-muted-foreground"
+            onClick={onStartEdit}>
+            <Pencil className="w-3 h-3 mr-1" /> Add Address
+          </Button>
         )}
-
-        {/* Sender + action buttons */}
-        <div className="flex items-center justify-between pt-1 border-t border-border/30">
-          <p className="text-[10px] text-muted-foreground/60 truncate">
-            {item.senderName || item.senderEmail || ''}
-            {item.reason && item.action !== 'created' && item.action !== 'updated_existing' && (
-              <span className="italic"> · {item.reason}</span>
-            )}
-          </p>
-
-          <div className="flex items-center gap-1 shrink-0">
-            {isAnalyzingThis && (
-              <span className="text-xs text-primary flex items-center gap-1">
-                <Loader2 className="w-3 h-3 animate-spin" /> Analyzing...
-              </span>
-            )}
-            {isError && analyzeError && (
-              <span className="text-[10px] text-red-400">{analyzeError}</span>
-            )}
-            {isDone && item.dealId && (
-              <Link to={`/deals/${item.dealId}`}>
-                <Button size="sm" variant="ghost" className="h-7 text-xs px-2 text-green-500">
-                  <CheckCircle2 className="w-3 h-3 mr-1" /> View
-                </Button>
-              </Link>
-            )}
-            {actionable && !isDone && !isAnalyzingThis && (
-              <Button size="sm" variant="outline" className="h-7 text-xs px-3"
-                onClick={onAnalyze}>
-                <Zap className="w-3 h-3 mr-1" /> Analyze
-              </Button>
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+        {isAnalyzingThis && (
+          <span className="text-xs text-primary flex items-center gap-1">
+            <Loader2 className="w-3 h-3 animate-spin" /> Analyzing...
+          </span>
+        )}
+        {isError && analyzeError && (
+          <span className="text-[10px] text-red-400">{analyzeError}</span>
+        )}
+        {isDone && item.dealId && (
+          <Link to={`/deals/${item.dealId}`}>
+            <Button size="sm" variant="ghost" className="h-7 text-xs px-2 text-green-500">
+              <CheckCircle2 className="w-3 h-3 mr-1" /> View
+            </Button>
+          </Link>
+        )}
+        {actionable && !isDone && !isAnalyzingThis && (
+          <Button size="sm" variant="outline" className="h-7 text-xs px-3"
+            onClick={onAnalyze}>
+            <Zap className="w-3 h-3 mr-1" /> Analyze
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -580,9 +501,6 @@ export default function EmailSearchPage() {
 
   // ── Filtered list ─────────────────────────────────────────────────────────
 
-  const dealItems = useMemo(() => results.filter(r => r.action !== 'no_address'), [results]);
-  const noAddrItems = useMemo(() => results.filter(r => r.action === 'no_address'), [results]);
-
   const filtered = useMemo(() => {
     if (filter === 'deals') return results.filter(r => isActionable(r.action));
     if (filter === 'skipped') return results.filter(r => !isActionable(r.action));
@@ -620,9 +538,6 @@ export default function EmailSearchPage() {
 
   const allActionableSelected = actionableItems.length > 0 &&
     actionableItems.every(r => selected.has(r.key));
-
-  const propertyItems = filtered.filter(r => r.action !== 'no_address');
-  const emailOnlyItems = filter === 'all' ? noAddrItems : [];
 
   return (
     <TooltipProvider>
@@ -797,66 +712,32 @@ export default function EmailSearchPage() {
               </Tooltip>
             </div>
 
-            {/* Property cards grid */}
-            {propertyItems.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                {propertyItems.map(item => {
-                  const deal = item.dealId ? deals.find(d => d.id === item.dealId) : null;
-                  const analyzed = deal ? isDealAnalyzed(deal) : false;
-                  const qItem = item.dealId ? analyzeQueue.find(a => a.id === item.dealId) : null;
-                  const isAnalyzingThis = qItem?.status === 'analyzing' || creatingKey === item.key;
-                  const isDone = qItem?.status === 'done' || analyzed;
-                  const isError = qItem?.status === 'error';
+            {/* Results list */}
+            {filtered.length > 0 ? (
+              <Card className="border-border/50 bg-card/50">
+                <div className="divide-y divide-border/20">
+                  {filtered.map(item => {
+                    const deal = item.dealId ? deals.find(d => d.id === item.dealId) : null;
+                    const analyzed = deal ? isDealAnalyzed(deal) : false;
+                    const qItem = item.dealId ? analyzeQueue.find(a => a.id === item.dealId) : null;
+                    const isAnalyzingThis = qItem?.status === 'analyzing' || creatingKey === item.key;
+                    const isDone = qItem?.status === 'done' || analyzed;
+                    const isError = qItem?.status === 'error';
 
-                  return (
-                    <PropertyCard
-                      key={item.key}
-                      item={item}
-                      deal={deal}
-                      isAnalyzingThis={isAnalyzingThis}
-                      isDone={isDone}
-                      isError={isError}
-                      analyzeError={qItem?.error}
-                      isCreating={creatingKey === item.key}
-                      editingKey={editingKey}
-                      editAddr={editAddr}
-                      selected={selected.has(item.key)}
-                      onToggleSelect={() => toggleSelect(item.key)}
-                      onAnalyze={() => handleAnalyzeOne(item)}
-                      onStartEdit={() => { setEditingKey(item.key); setEditAddr(''); }}
-                      onEditChange={setEditAddr}
-                      onEditSubmit={() => handleCreateAndAnalyze(item)}
-                      onEditCancel={() => { setEditingKey(null); setEditAddr(''); }}
-                      onCreateAndAnalyze={(addr) => handleCreateAndAnalyze(item, addr)}
-                    />
-                  );
-                })}
-              </div>
-            )}
-
-            {/* No-address emails section */}
-            {emailOnlyItems.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
-                  Emails without property address ({emailOnlyItems.length})
-                </p>
-                <div className="space-y-1.5">
-                  {emailOnlyItems.map(item => {
-                    const isCreating = creatingKey === item.key;
                     return (
-                      <PropertyCard
+                      <PropertyRow
                         key={item.key}
                         item={item}
-                        deal={null}
-                        isAnalyzingThis={false}
-                        isDone={false}
-                        isError={false}
-                        isCreating={isCreating}
+                        isAnalyzingThis={isAnalyzingThis}
+                        isDone={isDone}
+                        isError={isError}
+                        analyzeError={qItem?.error}
+                        isCreating={creatingKey === item.key}
                         editingKey={editingKey}
                         editAddr={editAddr}
-                        selected={false}
-                        onToggleSelect={() => {}}
-                        onAnalyze={() => {}}
+                        selected={selected.has(item.key)}
+                        onToggleSelect={() => toggleSelect(item.key)}
+                        onAnalyze={() => handleAnalyzeOne(item)}
                         onStartEdit={() => { setEditingKey(item.key); setEditAddr(''); }}
                         onEditChange={setEditAddr}
                         onEditSubmit={() => handleCreateAndAnalyze(item)}
@@ -866,10 +747,8 @@ export default function EmailSearchPage() {
                     );
                   })}
                 </div>
-              </div>
-            )}
-
-            {propertyItems.length === 0 && emailOnlyItems.length === 0 && (
+              </Card>
+            ) : (
               <div className="text-center py-8 text-muted-foreground text-sm">
                 No results match this filter.
               </div>

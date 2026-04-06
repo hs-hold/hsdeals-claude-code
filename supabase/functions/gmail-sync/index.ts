@@ -652,7 +652,6 @@ serve(async (req) => {
             if (!dry_run && isBetterDeal(newDealData, duplicateMatch.deal)) {
               await supabase.from('deals').update({
                 overrides: { ...(duplicateMatch.deal.overrides || {}), purchasePrice: emailPurchasePrice },
-                is_off_market: true,
                 sender_name: senderInfo.name,
                 sender_email: senderInfo.email,
                 email_snippet: snippet,
@@ -701,7 +700,6 @@ serve(async (req) => {
             address_full: address,
             status: 'new',
             source: 'email',
-            is_off_market: true,
             api_data: emailPurchasePrice ? { emailPurchasePrice } : null,
             overrides: emailPurchasePrice ? { arv: null, rent: null, rehabCost: null, purchasePrice: emailPurchasePrice } : undefined,
             email_subject: subject,
