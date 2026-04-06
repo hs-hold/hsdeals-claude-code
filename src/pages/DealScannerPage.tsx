@@ -71,6 +71,7 @@ interface ScanSession {
 const MAX_PRICE       = 250_000;
 const MAX_PRICE_RATIO = 0.85;
 const MIN_DAYS        = 30;
+const MIN_SQFT        = 1_200;
 const TOP_N           = 25;
 
 // ─── Deal Score ─────────────────────────────────────────────────────────────
@@ -318,7 +319,7 @@ export default function DealScannerPage() {
 
       try {
         const { data, error } = await supabase.functions.invoke('zillow-search', {
-          body: { location: zip, homeType: 'SingleFamily', maxPrice: MAX_PRICE, page: 1 },
+          body: { location: zip, homeType: 'SingleFamily', maxPrice: MAX_PRICE, minSqft: MIN_SQFT, page: 1 },
         });
         if (!error && data?.properties) {
           allRaw.push(...data.properties.map((p: any) => ({
@@ -476,6 +477,8 @@ export default function DealScannerPage() {
           <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" />≤ $250K</span>
           <span>·</span>
           <span className="flex items-center gap-1"><Home className="w-3 h-3" />Single Family</span>
+          <span>·</span>
+          <span>≥ 1,200 sqft</span>
           <span>·</span>
           <span className="flex items-center gap-1"><TrendingUp className="w-3 h-3" />Price/Zestimate ≤ 85%</span>
           <span>·</span>
