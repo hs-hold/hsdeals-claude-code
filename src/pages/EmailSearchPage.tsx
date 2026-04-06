@@ -260,30 +260,35 @@ function PropertyRow({
         )}
 
         {/* Email content on hover */}
-        {emailPreview ? (
-          <HoverCard openDelay={200} closeDelay={100}>
-            <HoverCardTrigger asChild>
-              <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground">
-                <Mail className="w-3.5 h-3.5" />
-              </Button>
-            </HoverCardTrigger>
-            <HoverCardContent side="left" align="start" className="w-80 text-xs space-y-1.5">
-              {item.subject && (
-                <p className="font-semibold text-foreground truncate">{item.subject}</p>
-              )}
-              {item.senderName && (
-                <p className="text-muted-foreground">From: {item.senderName}{item.senderEmail ? ` <${item.senderEmail}>` : ''}</p>
-              )}
-              {(item.emailSnippet || ed?.propertyDescription || ed?.dealNotes) && (
-                <p className="text-muted-foreground/80 whitespace-pre-wrap line-clamp-10 leading-relaxed border-t border-border/30 pt-1.5">
-                  {item.emailSnippet || ed?.propertyDescription || ed?.dealNotes}
-                </p>
-              )}
-            </HoverCardContent>
-          </HoverCard>
-        ) : (
-          <div className="w-6" />
-        )}
+        <HoverCard openDelay={150} closeDelay={100}>
+          <HoverCardTrigger asChild>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-1.5 text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 gap-1"
+            >
+              <Mail className="w-3 h-3" />
+              Email
+            </Button>
+          </HoverCardTrigger>
+          <HoverCardContent side="left" align="start" className="w-96 text-xs space-y-2 p-3">
+            {item.subject && (
+              <p className="font-semibold text-foreground leading-snug">{item.subject}</p>
+            )}
+            {item.senderName && (
+              <p className="text-muted-foreground text-[11px]">
+                From: {item.senderName}{item.senderEmail ? ` · ${item.senderEmail}` : ''}
+              </p>
+            )}
+            {emailPreview ? (
+              <p className="text-muted-foreground/80 whitespace-pre-wrap line-clamp-12 leading-relaxed border-t border-border/30 pt-2 text-[11px]">
+                {item.emailSnippet || ed?.propertyDescription || ed?.dealNotes}
+              </p>
+            ) : (
+              <p className="text-muted-foreground/40 italic text-[11px]">No preview available</p>
+            )}
+          </HoverCardContent>
+        </HoverCard>
       </div>
 
       {/* Inline address editor */}
@@ -620,11 +625,11 @@ export default function EmailSearchPage() {
               <TooltipTrigger asChild>
                 <Button variant="outline" size="sm" onClick={handleMarkUnreadRecent} disabled={isMarkingOld || isSyncing}>
                   {isMarkingOld ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
-                  <span className="ml-1.5 hidden sm:inline">Re-scan Last 7 Days</span>
+                  <span className="ml-1.5">Mark Week Unread</span>
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="max-w-xs">
-                Marks emails from the last 7 days as unread so they appear in the next scan.
+                Marks all inbox emails from the last 7 days as unread so they appear in the next scan.
               </TooltipContent>
             </Tooltip>
             <Tooltip>

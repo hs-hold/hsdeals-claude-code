@@ -351,7 +351,7 @@ Return { "deals": [] } if no valid US property addresses with street numbers are
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: 'claude-sonnet-4-5-20251001',
         max_tokens: 4096,
         messages: [{ role: 'user', content: prompt }],
       }),
@@ -503,27 +503,33 @@ serve(async (req) => {
       );
     }
 
-    // ── NEW: Mark recent emails as UNREAD so they can be re-scanned ──────
+    // ── Mark recent INBOX emails as UNREAD so they can be re-scanned ──────
     if (mark_unread_recent) {
       const days = since_days ?? 7;
-      // Fetch recent emails (both read and unread)
-      const query = encodeURIComponent(`newer_than:${days}d`);
-      const listResp = await fetch(
-        `${GMAIL_API_BASE}/users/me/messages?maxResults=200&q=${query}`,
-        { headers: { 'Authorization': `Bearer ${access_token}` } }
-      );
-      if (!listResp.ok) {
-        return new Response(
-          JSON.stringify({ success: false, error: 'Failed to fetch recent emails' }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      const listData = await listResp.json();
-      const recentMessages = listData.messages || [];
-      console.log(`[mark_unread_recent] Marking ${recentMessages.length} emails as unread`);
-      for (const msg of recentMessages) await markEmailAsUnread(access_token, msg.id);
+      // Only inbox, both read and unread, from the last N days
+      const query = encodeURIComponent(`in:inbox newer_than:${days}d`);
+      let allMessages: any[] = [];
+      let pageToken: string | undefined;
+
+      // Paginate through all results
+      do {
+        const url = `${GMAIL_API_BASE}/users/me/messages?maxResults=500&q=${query}${pageToken ? `&pageToken=${pageToken}` : ''}`;
+        const listResp = await fetch(url, { headers: { 'Authorization': `Bearer ${access_token}` } });
+        if (!listResp.ok) {
+          return new Response(
+            JSON.stringify({ success: false, error: 'Failed to fetch recent emails' }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        const listData = await listResp.json();
+        allMessages = allMessages.concat(listData.messages || []);
+        pageToken = listData.nextPageToken;
+      } while (pageToken);
+
+      console.log(`[mark_unread_recent] Marking ${allMessages.length} inbox emails as unread`);
+      for (const msg of allMessages) await markEmailAsUnread(access_token, msg.id);
       return new Response(
-        JSON.stringify({ success: true, marked: recentMessages.length, message: `Marked ${recentMessages.length} recent emails as unread` }),
+        JSON.stringify({ success: true, marked: allMessages.length, message: `Marked ${allMessages.length} inbox emails as unread` }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
