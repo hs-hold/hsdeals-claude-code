@@ -22,8 +22,21 @@ function calculateFlipScore(deal: Deal, loanDefaults: any) {
   const purchasePrice = deal.overrides?.purchasePrice ?? apiData.purchasePrice ?? 0;
   if (purchasePrice > MAX_PRICE || purchasePrice <= 0) return null;
 
-  const arv = deal.overrides?.arv ?? apiData.arv ?? 0;
-  const rehabCost = deal.overrides?.rehabCost ?? apiData.rehabCost ?? 0;
+  // Use validated ARV from financials (cross-checked against comps), then fall back to raw API ARV.
+  // User ARV overrides always take priority.
+  const arv = deal.overrides?.arv ?? financials.arv ?? apiData.arv ?? 0;
+
+  // Include layout rehab (target bedroom/bathroom additions) so this matches the
+  // full rehabCost shown on the deal detail page.
+  const baseRehabCost = deal.overrides?.rehabCost ?? apiData.rehabCost ?? 0;
+  const bedroomsAdded = deal.overrides?.targetBedrooms != null
+    ? Math.max(0, deal.overrides.targetBedrooms - (apiData.bedrooms ?? 0))
+    : 0;
+  const bathroomsAdded = deal.overrides?.targetBathrooms != null
+    ? Math.max(0, deal.overrides.targetBathrooms - (apiData.bathrooms ?? 0))
+    : 0;
+  const layoutRehabCost = (bedroomsAdded * 20_000) + (bathroomsAdded * 15_000);
+  const rehabCost = baseRehabCost + layoutRehabCost;
 
   const flipClosingCosts = purchasePrice * 0.02;
   const holdingMonths = loanDefaults?.holdingMonths ?? 4;
