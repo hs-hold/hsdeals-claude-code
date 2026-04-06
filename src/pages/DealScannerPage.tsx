@@ -276,6 +276,12 @@ export default function DealScannerPage() {
   // How many top deals to send to DealBeast (user-controlled)
   const [topNInput, setTopNInput] = useState(10);
 
+  // Page tracking — each scan advances to the next Zillow results page
+  // so consecutive scans surface different properties.
+  const [scanPage, setScanPage] = useState<number>(() => {
+    try { return parseInt(localStorage.getItem('deal_scanner_page') ?? '1') || 1; } catch { return 1; }
+  });
+
   useEffect(() => { loadScanHistory().then(setHistory); }, []);
 
   // ── Add/remove ZIP helpers (edit mode) ──────────────────────────────────
@@ -305,9 +311,22 @@ export default function DealScannerPage() {
 
   // ── Scan ────────────────────────────────────────────────────────────────
 
+  const resetPage = useCallback(() => {
+    const next = 1;
+    setScanPage(next);
+    try { localStorage.setItem('deal_scanner_page', String(next)); } catch {}
+    toast.success('Reset to page 1 — next scan will start from the beginning');
+  }, []);
+
   const startScan = useCallback(async () => {
     const zips = activeZips.map(z => z.zip);
     if (zips.length === 0) return;
+
+    // Use current page, then advance for next scan
+    const currentPage = scanPage;
+    const nextPage = currentPage + 1;
+    setScanPage(nextPage);
+    try { localStorage.setItem('deal_scanner_page', String(nextPage)); } catch {}
 
     setIsScanning(true);
     setSession(null);
@@ -319,7 +338,7 @@ export default function DealScannerPage() {
 
       try {
         const { data, error } = await supabase.functions.invoke('zillow-search', {
-          body: { location: zip, homeType: 'SingleFamily', maxPrice: MAX_PRICE, minSqft: MIN_SQFT, page: 1 },
+          body: { location: zip, homeType: 'SingleFamily', maxPrice: MAX_PRICE, minSqft: MIN_SQFT, page: currentPage },
         });
         if (!error && data?.properties) {
           allRaw.push(...data.properties.map((p: any) => ({
@@ -351,7 +370,7 @@ export default function DealScannerPage() {
     setHistory(updated);
     setProgress(null);
     setIsScanning(false);
-  }, [activeZips]);
+  }, [activeZips, scanPage]);
 
   // ── Send top N to DealBeast — open queue in new tab ──────────────────────
 
@@ -411,6 +430,24 @@ export default function DealScannerPage() {
               <span className="text-muted-foreground text-xs ml-1.5">
                 (≤40 mi · median &lt;$300K · crime index &lt;60)
               </span>
+            </span>
+            {/* Page indicator */}
+            <span className="ml-auto flex items-center gap-1.5 shrink-0">
+              <span className="text-[11px] text-muted-foreground/70">
+                Batch
+              </span>
+              <span className="text-[11px] font-semibold font-mono text-violet-400 bg-violet-500/10 border border-violet-500/30 px-1.5 py-0.5 rounded">
+                #{scanPage}
+              </span>
+              {scanPage > 1 && (
+                <button
+                  onClick={resetPage}
+                  disabled={isScanning}
+                  className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors disabled:opacity-40"
+                  title="Reset to batch #1">
+                  ↺ reset
+                </button>
+              )}
             </span>
             <button
               onClick={() => setEditMode(v => !v)}
