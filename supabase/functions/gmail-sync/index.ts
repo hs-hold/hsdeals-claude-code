@@ -503,39 +503,35 @@ serve(async (req) => {
       );
     }
 
-    // ── Mark recent READ inbox emails as UNREAD so they can be re-scanned ─
+    // ── Mark recent inbox emails as UNREAD so they can be re-scanned ──────
     if (mark_unread_recent) {
-      const days = since_days ?? 7;
-      // Gmail API after: needs YYYY/MM/DD format
-      const d = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-      const dateStr = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
-      // is:read = only already-read emails; after: = from last N days; in:inbox = inbox only
-      const q = encodeURIComponent(`in:inbox is:read after:${dateStr}`);
-      const url = `${GMAIL_API_BASE}/users/me/messages?maxResults=500&q=${q}`;
-      console.log(`[mark_unread_recent] Fetching read inbox emails after ${dateStr}`);
-
-      const listResp = await fetch(url, { headers: { 'Authorization': `Bearer ${access_token}` } });
+      // Fetch inbox messages directly using labelIds (no query filters that can fail)
+      const listResp = await fetch(
+        `${GMAIL_API_BASE}/users/me/messages?maxResults=200&labelIds=INBOX`,
+        { headers: { 'Authorization': `Bearer ${access_token}` } }
+      );
 
       if (!listResp.ok) {
         const errText = await listResp.text();
         console.error('[mark_unread_recent] list failed:', listResp.status, errText);
         return new Response(
-          JSON.stringify({ success: false, error: `Gmail list failed: ${listResp.status} — ${errText}` }),
+          JSON.stringify({ success: false, error: `Gmail API error ${listResp.status}: ${errText}` }),
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
 
       const listData = await listResp.json();
       const messages: any[] = listData.messages || [];
-      console.log(`[mark_unread_recent] Found ${messages.length} read inbox messages to mark as unread`);
+      console.log(`[mark_unread_recent] Found ${messages.length} inbox messages`);
 
       if (messages.length === 0) {
         return new Response(
-          JSON.stringify({ success: true, marked: 0, message: `No read inbox emails found from the last ${days} days` }),
+          JSON.stringify({ success: true, marked: 0, message: 'Inbox is empty' }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
 
+      // Mark all as UNREAD
       let marked = 0;
       for (const msg of messages) {
         const r = await fetch(`${GMAIL_API_BASE}/users/me/messages/${msg.id}/modify`, {
@@ -544,12 +540,15 @@ serve(async (req) => {
           body: JSON.stringify({ addLabelIds: ['UNREAD'] }),
         });
         if (r.ok) marked++;
-        else console.error(`[mark_unread_recent] failed to mark ${msg.id}: ${r.status}`);
+        else {
+          const e = await r.text();
+          console.error(`[mark_unread_recent] failed ${msg.id}: ${r.status} ${e}`);
+        }
       }
 
       console.log(`[mark_unread_recent] Marked ${marked}/${messages.length} as unread`);
       return new Response(
-        JSON.stringify({ success: true, marked, message: `Marked ${marked} of ${messages.length} inbox emails as unread` }),
+        JSON.stringify({ success: true, marked, total: messages.length }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
