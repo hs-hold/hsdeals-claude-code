@@ -83,6 +83,32 @@ function looksLikeAddress(s?: string): boolean {
   return /^\d+\s+\S+.*,\s*[a-zA-Z\s]+,\s*[a-zA-Z]{2}\s+\d{5}/i.test(s.trim());
 }
 
+/** Extract price/specs from Gmail snippet when AI extraction returns nulls */
+function extractFromSnippet(snippet?: string): { price: number | null; beds: number | null; baths: number | null; sqft: number | null } {
+  const empty = { price: null, beds: null, baths: null, sqft: null };
+  if (!snippet) return empty;
+  const s = snippet.replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&#\d+;/g, '');
+
+  // Price: "PRICE: $320000", "Purchase Price: $162,000", "Asking: $585,000", "price $162000"
+  const priceMatch = s.match(/(?:asking|purchase\s+price|price|offer)[:\s]+\$?([\d,]+)/i)
+    || s.match(/\$([\d,]{4,})/);
+  const price = priceMatch ? parseInt(priceMatch[1].replace(/,/g, ''), 10) || null : null;
+
+  // Beds: "4BD", "4 Bed", "4 Bedrooms", "Bedrooms: 4"
+  const bedsMatch = s.match(/(\d+)\s*(?:bd|bed(?:room)?s?)\b/i) || s.match(/bed(?:room)?s?[:\s]+(\d+)/i);
+  const beds = bedsMatch ? parseInt(bedsMatch[1], 10) || null : null;
+
+  // Baths: "3BA", "3 Bath", "3 Bathrooms", "2.5 Baths"
+  const bathsMatch = s.match(/([\d.]+)\s*(?:ba|bath(?:room)?s?)\b/i) || s.match(/bath(?:room)?s?[:\s]+([\d.]+)/i);
+  const baths = bathsMatch ? parseFloat(bathsMatch[1]) || null : null;
+
+  // Sqft: "3782 Sq Ft", "1500 sqft", "1,500 SF"
+  const sqftMatch = s.match(/([\d,]+)\s*(?:sq\.?\s*ft|sqft|sf)\b/i);
+  const sqft = sqftMatch ? parseInt(sqftMatch[1].replace(/,/g, ''), 10) || null : null;
+
+  return { price, beds, baths, sqft };
+}
+
 function isActionable(action: EmailAction): boolean {
   return action === 'created' || action === 'updated_existing';
 }
@@ -173,6 +199,16 @@ function PropertyRow({
     ? (suggestedAddr ?? item.subject ?? '(no subject)')
     : item.address;
 
+  // Fallback: extract price/specs from Gmail snippet when AI extraction returned nulls
+  const snippetData = extractFromSnippet(item.emailSnippet);
+  const displayPrice = item.purchasePrice ?? snippetData.price;
+  const displayBeds  = ed?.bedrooms  ?? snippetData.beds;
+  const displayBaths = ed?.bathrooms ?? snippetData.baths;
+  const displaySqft  = ed?.sqft      ?? snippetData.sqft;
+  // Show italic when using snippet fallback (not AI-extracted)
+  const priceFromSnippet = !item.purchasePrice && !!snippetData.price;
+  const specsFromSnippet = !ed?.bedrooms && !ed?.bathrooms && !ed?.sqft && (snippetData.beds || snippetData.baths || snippetData.sqft);
+
   return (
     <div className={`flex items-center gap-3 px-4 py-2.5 border-b border-border/20 last:border-0 transition-colors hover:bg-muted/10 ${selected ? 'bg-primary/5' : ''} ${rowOpacity}`}>
 
@@ -199,19 +235,29 @@ function PropertyRow({
 
       {/* Price */}
       <div className="w-24 shrink-0">
-        {item.purchasePrice ? (
-          <span className="text-sm font-semibold">{formatCurrency(item.purchasePrice)}</span>
+        {displayPrice ? (
+          <span className={`text-sm font-semibold ${priceFromSnippet ? 'text-muted-foreground/70 italic' : ''}`}>
+            {formatCurrency(displayPrice)}
+          </span>
         ) : (
-          <span className="text-xs text-muted-foreground/40">—</span>
+          <span className="text-xs text-muted-foreground/30">—</span>
         )}
       </div>
 
-      {/* Specs: beds/baths/sqft */}
-      <div className="flex items-center gap-2 text-xs text-muted-foreground w-32 shrink-0">
-        {ed?.bedrooms && <span className="flex items-center gap-0.5"><Bed className="w-3 h-3" />{ed.bedrooms}</span>}
-        {ed?.bathrooms && <span className="flex items-center gap-0.5"><Bath className="w-3 h-3" />{ed.bathrooms}</span>}
-        {ed?.sqft && <span className="flex items-center gap-0.5"><Square className="w-3 h-3" />{ed.sqft.toLocaleString()}</span>}
-        {!ed?.bedrooms && !ed?.bathrooms && !ed?.sqft && (
+      {/* Specs: beds / baths */}
+      <div className="flex items-center gap-2 text-xs text-muted-foreground w-20 shrink-0">
+        {displayBeds  && <span className={`flex items-center gap-0.5 ${specsFromSnippet ? 'opacity-60' : ''}`}><Bed  className="w-3 h-3" />{displayBeds}</span>}
+        {displayBaths && <span className={`flex items-center gap-0.5 ${specsFromSnippet ? 'opacity-60' : ''}`}><Bath className="w-3 h-3" />{displayBaths}</span>}
+        {!displayBeds && !displayBaths && <span className="text-muted-foreground/30">—</span>}
+      </div>
+
+      {/* Sqft */}
+      <div className="w-20 shrink-0 text-xs text-muted-foreground">
+        {displaySqft ? (
+          <span className={`flex items-center gap-0.5 ${specsFromSnippet ? 'opacity-60' : ''}`}>
+            <Square className="w-3 h-3" />{displaySqft.toLocaleString()}
+          </span>
+        ) : (
           <span className="text-muted-foreground/30">—</span>
         )}
       </div>
@@ -862,7 +908,8 @@ export default function EmailSearchPage() {
                   <div className="w-4 shrink-0" />
                   <div className="w-56 shrink-0">Address</div>
                   <div className="w-24 shrink-0">Price</div>
-                  <div className="w-32 shrink-0">Specs</div>
+                  <div className="w-20 shrink-0">Beds/Baths</div>
+                  <div className="w-20 shrink-0">Sqft</div>
                   <div className="flex-1">Sender</div>
                   <div className="w-16 shrink-0">Status</div>
                   <div className="w-18 shrink-0">Links</div>
