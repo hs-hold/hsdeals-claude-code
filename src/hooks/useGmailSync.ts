@@ -16,6 +16,7 @@ interface SyncDetail {
   dealType?: string | null;
   extractedData?: Record<string, any>;
   emailSnippet?: string;
+  extractionSource?: 'ai' | 'regex';
 }
 
 interface SyncResult {

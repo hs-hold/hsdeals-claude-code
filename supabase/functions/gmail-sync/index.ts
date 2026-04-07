@@ -57,6 +57,7 @@ interface SyncDetails {
   dealType?: string | null;
   extractedData?: Record<string, any>;
   emailSnippet?: string;
+  extractionSource?: 'ai' | 'regex';
 }
 
 // Decode base64url encoded content from Gmail
@@ -740,7 +741,7 @@ serve(async (req) => {
 
           // Skip over-budget
           if (emailPurchasePrice && emailPurchasePrice > MAX_DEAL_PRICE) {
-            syncDetails.push({ address, action: 'skipped_over_budget', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `$${emailPurchasePrice.toLocaleString()} > $${MAX_DEAL_PRICE.toLocaleString()}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet });
+            syncDetails.push({ address, action: 'skipped_over_budget', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `$${emailPurchasePrice.toLocaleString()} > $${MAX_DEAL_PRICE.toLocaleString()}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
             continue;
           }
 
@@ -757,12 +758,12 @@ serve(async (req) => {
                 email_subject: subject,
                 email_date: date ? new Date(date).toISOString() : null,
               }).eq('id', duplicateMatch.id);
-              syncDetails.push({ address, action: 'updated_existing', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `Better price: $${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet });
+              syncDetails.push({ address, action: 'updated_existing', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `Better price: $${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
               dealsFromThisEmail++;
             } else {
               skippedAddresses.push(address);
               dealsSkippedDuplicate++;
-              syncDetails.push({ address, action: 'skipped_duplicate', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet });
+              syncDetails.push({ address, action: 'skipped_duplicate', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
             }
             continue;
           }
@@ -779,7 +780,7 @@ serve(async (req) => {
             const normState = state.toUpperCase().trim();
             const normTarget = target_state.toUpperCase().trim();
             if (normState !== normTarget) {
-              syncDetails.push({ address, action: 'skipped_wrong_state', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `State ${normState} != ${normTarget}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet });
+              syncDetails.push({ address, action: 'skipped_wrong_state', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `State ${normState} != ${normTarget}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
               continue;
             }
           }
@@ -832,13 +833,13 @@ serve(async (req) => {
 
           existingAddresses.push({ id: newDeal.id, address: newDeal.address_full, deal: newDeal });
           processedDeals.push(newDeal);
-          syncDetails.push({ address, action: 'created', dealId: newDeal.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet });
+          syncDetails.push({ address, action: 'created', dealId: newDeal.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
           dealsFromThisEmail++;
           console.log(`  ✓ Created deal: ${address}`);
         }
 
-        // ── Mark as read only if we actually processed deals from this email ──
-        if (!dry_run && dealsFromThisEmail > 0) {
+        // Mark as read only when deals were processed, and NOT in force_rescan mode (testing)
+        if (!dry_run && !force_rescan && dealsFromThisEmail > 0) {
           await markEmailAsRead(access_token, msg.id);
         }
         // If no deals found from a non-portal email → leave unread for retry

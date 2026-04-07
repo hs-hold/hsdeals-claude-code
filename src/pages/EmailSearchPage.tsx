@@ -70,6 +70,7 @@ interface EmailResultItem {
   messageId?: string;
   extractedData?: ExtractedData;
   emailSnippet?: string;
+  extractionSource?: 'ai' | 'regex';
 }
 
 const SCAN_COUNTS = [10, 20, 40, 60, 100] as const;
@@ -278,6 +279,11 @@ function PropertyRow({
             {item.senderName && (
               <p className="text-muted-foreground text-[11px]">
                 From: {item.senderName}{item.senderEmail ? ` · ${item.senderEmail}` : ''}
+                {item.extractionSource && (
+                  <span className={`ml-2 font-mono text-[10px] px-1 rounded ${item.extractionSource === 'ai' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                    {item.extractionSource === 'ai' ? '✓ AI' : '⚠ Regex fallback'}
+                  </span>
+                )}
               </p>
             )}
 
@@ -443,6 +449,7 @@ export default function EmailSearchPage() {
           messageId: d.messageId ?? undefined,
           extractedData: d.extractedData ?? undefined,
           emailSnippet: d.emailSnippet ?? undefined,
+          extractionSource: d.extractionSource ?? undefined,
         };
       });
 
@@ -485,6 +492,7 @@ export default function EmailSearchPage() {
           subject: d.subject ?? '', reason: d.reason ?? '', scannedAt,
           messageId: d.messageId ?? undefined, extractedData: d.extractedData ?? undefined,
           emailSnippet: d.emailSnippet ?? undefined,
+          extractionSource: d.extractionSource ?? undefined,
         };
       });
     setResults(newItems);
