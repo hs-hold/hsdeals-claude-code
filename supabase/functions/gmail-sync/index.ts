@@ -145,6 +145,65 @@ function extractEmailBody(message: GmailMessage): string {
   return body.substring(0, 25000);
 }
 
+// Extract raw HTML (un-stripped) from a Gmail message for link parsing
+function extractRawHtml(message: GmailMessage): string {
+  if (message.payload?.body?.data) {
+    const raw = decodeBase64Url(message.payload.body.data);
+    if (raw.trim().startsWith('<') || message.payload.mimeType === 'text/html') return raw;
+  }
+  if (message.payload?.parts) {
+    let html = '';
+    const walk = (parts: any[]) => {
+      for (const part of parts ?? []) {
+        if (part.mimeType === 'text/html' && part.body?.data && !html) {
+          html = decodeBase64Url(part.body.data);
+        }
+        if (part.parts) walk(part.parts);
+      }
+    };
+    walk(message.payload.parts);
+    return html;
+  }
+  return '';
+}
+
+// Extract labeled document links from raw HTML before it's stripped.
+// Handles patterns like:  Photos <a href="url">HERE</a>
+//                         <a href="url">House Sketch</a>
+function extractDocumentLinks(rawHtml: string): Array<{label: string; url: string}> {
+  if (!rawHtml) return [];
+  const results: Array<{label: string; url: string}> = [];
+  const seen = new Set<string>();
+
+  // Pattern 1: "Some Label <a href="url">HERE</a>"
+  const herePattern = /([A-Za-z][A-Za-z\s&;:#\-]{0,60}?)\s*<a[^>]+href=["'](https?:\/\/[^"']+)["'][^>]*>\s*HERE\s*<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = herePattern.exec(rawHtml)) !== null) {
+    const rawLabel = m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const url = m[2];
+    if (!url || seen.has(url)) continue;
+    // Take last meaningful segment (avoid trailing HTML noise)
+    const label = rawLabel.split(/[|•·\n\r>]+/).pop()?.trim() ?? rawLabel;
+    if (label && label.length >= 2 && label.length <= 60) {
+      seen.add(url);
+      results.push({ label: label.substring(0, 50), url });
+    }
+  }
+
+  // Pattern 2: links with descriptive anchor text
+  const descriptivePattern = /<a[^>]+href=["'](https?:\/\/[^"']+)["'][^>]*>\s*(Photos?|House\s*Sketch|Sold\s*Comps?|Rent\s*Comp|Closed\s*Rent|Property\s*Info|Active\s*Under\s*Contract[^<]*|Inspection[^<]*|Appraisal[^<]*|Flyer|Floor\s*Plan|Layout|Sketch)\s*<\/a>/gi;
+  while ((m = descriptivePattern.exec(rawHtml)) !== null) {
+    const url = m[1];
+    const label = m[2].replace(/\s+/g, ' ').trim();
+    if (!seen.has(url) && label.length >= 2) {
+      seen.add(url);
+      results.push({ label, url });
+    }
+  }
+
+  return results.slice(0, 15);
+}
+
 // Get header value from Gmail message
 function getHeader(message: GmailMessage, headerName: string): string {
   const header = message.payload?.headers?.find(
@@ -347,6 +406,7 @@ RULES:
 - "Market Rent", "Rental Income" → use as rent
 - "FCFS" = First Come First Served (note in dealNotes)
 - Beds/Baths may appear as "3 Beds / 3 Baths", "3BD/2BA", "Bedrooms: 3", "3 bed 2 bath"
+- "Total Interior Area", "Second Floor Finished", "First Floor Finished" → sum for sqft if no single total given
 
 For each property, extract:
 - address: Full US address with street, city, state, ZIP (required)
@@ -362,11 +422,14 @@ For each property, extract:
 - rent: monthly rent as plain number
 - capRate, cashFlow, downPayment, existingLoanBalance, monthlyPITI
 - propertyType: single_family / multi_family / condo / townhouse / duplex / triplex / fourplex / commercial / land / other
-- condition, occupancy
+- condition: e.g. "Good", "Fair", "Needs Work", "Occupied" — any condition descriptor
+- exterior: exterior material/style e.g. "Siding", "Brick", "Stucco" (null if not mentioned)
+- access: how to access the property e.g. "Appointment", "Lockbox", "Vacant" (null if not mentioned)
+- occupancy: e.g. "Occupied", "Vacant", "Tenant Occupied"
 - county, neighborhood
 - financingNotes, dealNotes
-- propertyDescription: organized summary of all available details (do not invent data)
-- photoLinks: array of Google Drive / Dropbox / photo URLs (empty array if none)
+- propertyDescription: organized summary of ALL details from the email — include floor breakdown, garage, access info, financing terms, FCFS, everything
+- photoLinks: array of any http/https URLs mentioned in the email (Google Drive, Dropbox, etc.)
 
 Return ONLY valid JSON, nothing else:
 {
@@ -391,6 +454,8 @@ Return ONLY valid JSON, nothing else:
       "monthlyPITI": null,
       "propertyType": "single_family",
       "condition": null,
+      "exterior": null,
+      "access": null,
       "occupancy": null,
       "financingNotes": null,
       "dealNotes": null,
@@ -414,7 +479,7 @@ Return { "deals": [] } if no valid US property addresses with street numbers are
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5-20251001',
+        model: 'claude-sonnet-4-6',
         max_tokens: 8192,
         messages: [{ role: 'user', content: prompt }],
       }),
@@ -714,7 +779,9 @@ serve(async (req) => {
         const date    = getHeader(fullMessage, 'date');
         const from    = getHeader(fullMessage, 'from');
         const senderInfo = parseSenderInfo(from);
-        const body    = extractEmailBody(fullMessage);
+        const rawHtml = extractRawHtml(fullMessage);   // un-stripped, for link extraction
+        const body    = extractEmailBody(fullMessage); // stripped plain text for AI
+        const docLinks = extractDocumentLinks(rawHtml);
         const snippet = fullMessage.snippet || '';
 
         console.log(`Processing: from=${senderInfo.email} | subject="${subject}" | body_len=${body.length}`);
@@ -795,12 +862,16 @@ serve(async (req) => {
             }
           }
 
-          // Merge image links
-          const regexImageLinks = extractImageLinks(body);
+          // Merge image links (use rawHtml so <img> tags are still present)
+          const regexImageLinks = extractImageLinks(rawHtml || body);
           const aiPhotoLinks: string[] = Array.isArray(dealInfo.extractedData?.photoLinks)
             ? dealInfo.extractedData.photoLinks : [];
           const allImageLinks = [...new Set([...aiPhotoLinks, ...regexImageLinks])].slice(0, 20);
-          const enrichedExtractedData = { ...dealInfo.extractedData, imageLinks: allImageLinks };
+          const enrichedExtractedData = {
+            ...dealInfo.extractedData,
+            imageLinks: allImageLinks,
+            documentLinks: docLinks.length > 0 ? docLinks : undefined,
+          };
 
           const dealData: Record<string, any> = {
             address_street: street,

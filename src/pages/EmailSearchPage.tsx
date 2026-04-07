@@ -59,6 +59,9 @@ interface ExtractedData {
   units?: number | null;
   county?: string | null;
   neighborhood?: string | null;
+  exterior?: string | null;
+  access?: string | null;
+  documentLinks?: Array<{label: string; url: string}>;
 }
 
 interface EmailResultItem {
@@ -383,6 +386,25 @@ function PropertyRow({
                 {ed?.county       && <span><span className="text-muted-foreground">County: </span><span className="text-foreground">{ed.county}</span></span>}
                 {ed?.neighborhood && <span><span className="text-muted-foreground">Area: </span><span className="text-foreground">{ed.neighborhood}</span></span>}
                 {ed?.condition    && <span><span className="text-muted-foreground">Condition: </span><span className="text-foreground">{ed.condition}</span></span>}
+                {ed?.exterior     && <span><span className="text-muted-foreground">Exterior: </span><span className="text-foreground">{ed.exterior}</span></span>}
+                {ed?.access       && <span><span className="text-muted-foreground">Access: </span><span className="text-foreground">{ed.access}</span></span>}
+              </div>
+            )}
+
+            {/* Document / file links */}
+            {ed?.documentLinks && ed.documentLinks.length > 0 && (
+              <div className="border-t border-border/30 pt-2 flex flex-wrap gap-1.5">
+                {ed.documentLinks.map((dl, i) => (
+                  <a
+                    key={i}
+                    href={dl.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[10px] px-1.5 py-0.5 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:text-blue-300 hover:bg-blue-500/20 transition-colors"
+                  >
+                    {dl.label}
+                  </a>
+                ))}
               </div>
             )}
 
