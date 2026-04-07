@@ -197,11 +197,60 @@ export function useGmailAuth() {
     });
   }, [toast]);
 
+  /** Refresh the access token using the stored refresh_token */
+  const refreshAccessToken = useCallback(async (currentTokens: GmailTokens): Promise<GmailTokens | null> => {
+    if (!currentTokens.refresh_token) return null;
+    try {
+      const { data, error } = await supabase.functions.invoke('gmail-exchange-token', {
+        body: { refresh_token: currentTokens.refresh_token, grant_type: 'refresh_token' },
+      });
+      if (error || !data?.success) return null;
+      const newTokens: GmailTokens = {
+        access_token: data.access_token,
+        refresh_token: data.refresh_token || currentTokens.refresh_token,
+        expires_at: Date.now() + (data.expires_in * 1000),
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(newTokens));
+      setTokens(newTokens);
+      return newTokens;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  /**
+   * Returns a valid access token — auto-refreshes if expiring within 5 minutes.
+   * Returns null if not connected or refresh fails (caller should reconnect).
+   */
+  const getValidToken = useCallback(async (): Promise<string | null> => {
+    if (!tokens) return null;
+    const fiveMinutes = 5 * 60 * 1000;
+    const isExpiringSoon = tokens.expires_at && (tokens.expires_at - Date.now()) < fiveMinutes;
+    if (isExpiringSoon) {
+      const refreshed = await refreshAccessToken(tokens);
+      if (!refreshed) {
+        // Refresh failed — clear stale tokens and ask user to reconnect
+        localStorage.removeItem(STORAGE_KEY);
+        setTokens(null);
+        setIsConnected(false);
+        toast({
+          title: "Session Expired",
+          description: "Please reconnect Gmail to continue",
+          variant: "destructive",
+        });
+        return null;
+      }
+      return refreshed.access_token;
+    }
+    return tokens.access_token;
+  }, [tokens, refreshAccessToken, toast]);
+
   return {
     isConnected,
     isLoading,
     tokens,
     connect,
     disconnect,
+    getValidToken,
   };
 }

@@ -297,6 +297,16 @@ function PropertyRow({
               </div>
             )}
 
+            {/* Debug: body preview for no_address emails */}
+            {item.action === 'no_address' && item.reason && item.reason.startsWith('No address found. Body preview:') && (
+              <div className="border-t border-border/30 pt-2">
+                <p className="text-amber-400/80 text-[10px] font-medium mb-0.5">Body sent to AI:</p>
+                <p className="text-muted-foreground/70 whitespace-pre-wrap line-clamp-6 leading-relaxed text-[10px] font-mono">
+                  {item.reason.replace('No address found. Body preview: "', '').replace(/"$/, '')}
+                </p>
+              </div>
+            )}
+
             {/* Email snippet / description */}
             {(item.emailSnippet || ed?.propertyDescription || ed?.dealNotes) ? (
               <p className="text-muted-foreground/80 whitespace-pre-wrap line-clamp-8 leading-relaxed border-t border-border/30 pt-2 text-[11px]">
@@ -366,7 +376,7 @@ function PropertyRow({
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function EmailSearchPage() {
-  const { isConnected, isLoading: isAuthLoading, tokens, connect, disconnect } = useGmailAuth();
+  const { isConnected, isLoading: isAuthLoading, tokens, connect, disconnect, getValidToken } = useGmailAuth();
   const { isSyncing, isMarkingOld, sync, markOldAsRead, markUnreadRecent } = useGmailSync();
   const { selectedState } = useUserState();
   const { deals, refetch } = useDeals();
@@ -401,7 +411,10 @@ export default function EmailSearchPage() {
   const runScan = useCallback(async (includeRead: boolean) => {
     if (!tokens?.access_token || isSyncing) return;
 
-    const result = await sync(tokens.access_token, {
+    const accessToken = await getValidToken();
+    if (!accessToken) return; // expired + refresh failed → toast already shown
+
+    const result = await sync(accessToken, {
       maxResults: scanCount,
       includeRead,
       markAllRead: false,
@@ -440,7 +453,7 @@ export default function EmailSearchPage() {
     });
 
     await refetch();
-  }, [tokens, isSyncing, sync, scanCount, selectedState, refetch]);
+  }, [tokens, isSyncing, sync, scanCount, selectedState, refetch, getValidToken]);
 
   const handleScan   = useCallback(() => runScan(false), [runScan]);
   const handleRescan = useCallback(() => runScan(true),  [runScan]);
@@ -448,14 +461,16 @@ export default function EmailSearchPage() {
   // ── Mark old as read ──────────────────────────────────────────────────────
 
   const handleMarkOld = useCallback(async () => {
-    if (!tokens?.access_token) return;
-    await markOldAsRead(tokens.access_token, 7);
-  }, [tokens, markOldAsRead]);
+    const accessToken = await getValidToken();
+    if (!accessToken) return;
+    await markOldAsRead(accessToken, 7);
+  }, [getValidToken, markOldAsRead]);
 
   const handleMarkUnreadRecent = useCallback(async () => {
-    if (!tokens?.access_token) return;
-    await markUnreadRecent(tokens.access_token, 7);
-  }, [tokens, markUnreadRecent]);
+    const accessToken = await getValidToken();
+    if (!accessToken) return;
+    await markUnreadRecent(accessToken, 7);
+  }, [getValidToken, markUnreadRecent]);
 
   // ── Selection ────────────────────────────────────────────────────────────
 

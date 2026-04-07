@@ -11,14 +11,8 @@ serve(async (req) => {
   }
 
   try {
-    const { code, redirect_uri } = await req.json();
-    
-    if (!code) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'No authorization code provided' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    const body = await req.json();
+    const { code, redirect_uri, refresh_token, grant_type } = body;
 
     const clientId = Deno.env.get('GOOGLE_CLIENT_ID');
     const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET');
@@ -27,6 +21,55 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ success: false, error: 'Google OAuth credentials not configured' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // ── Refresh token flow ──────────────────────────────────────────────────
+    if (grant_type === 'refresh_token' || refresh_token) {
+      if (!refresh_token) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'No refresh token provided' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      console.log('Refreshing access token...');
+      const refreshResponse = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token,
+          grant_type: 'refresh_token',
+        }),
+      });
+      if (!refreshResponse.ok) {
+        const errorText = await refreshResponse.text();
+        console.error('Token refresh error:', errorText);
+        return new Response(
+          JSON.stringify({ success: false, error: 'Failed to refresh token', details: errorText }),
+          { status: refreshResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      const refreshData = await refreshResponse.json();
+      console.log('Token refresh successful');
+      return new Response(
+        JSON.stringify({
+          success: true,
+          access_token: refreshData.access_token,
+          // Google doesn't re-issue refresh_token on refresh — keep the old one
+          refresh_token: refresh_token,
+          expires_in: refreshData.expires_in,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // ── Authorization code exchange flow ────────────────────────────────────
+    if (!code) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'No authorization code provided' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 

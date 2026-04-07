@@ -130,10 +130,15 @@ function extractEmailBody(message: GmailMessage): string {
     walk(message.payload.parts);
   }
 
-  // Prefer HTML when plain text is very short or looks like a browser-view placeholder
-  // (CRM emails like resimpli.com often have minimal plain text but rich HTML)
-  const plainIsUseful = plainText.length > 200 && !/view (this|in) (your )?browser/i.test(plainText);
-  console.log(`[extractBody] plain=${plainText.length} chars, html=${htmlText.length} chars, usingPlain=${plainIsUseful}`);
+  // Decide which source to use:
+  // Prefer HTML when:
+  //   1. plain text is very short (< 200 chars) — "view in browser" placeholder
+  //   2. plain text contains a browser-view hint
+  //   3. HTML is significantly longer than plain text (CRM email with rich HTML body)
+  const plainHasBrowserHint = /view (this |in |your )?((email|message) (in|on) )?(a |your )?(web)?browser/i.test(plainText);
+  const htmlIsRicher = htmlText.length > 0 && htmlText.length > plainText.length * 1.5;
+  const plainIsUseful = plainText.length > 200 && !plainHasBrowserHint && !htmlIsRicher;
+  console.log(`[extractBody] plain=${plainText.length} chars, html=${htmlText.length} chars, usingPlain=${plainIsUseful} (browserHint=${plainHasBrowserHint}, htmlIsRicher=${htmlIsRicher})`);
   const body = (plainIsUseful ? plainText : (htmlText || plainText)) || message.snippet || '';
   // Limit to 25000 chars (stripped HTML is dense; property details can appear late in CRM emails)
   return body.substring(0, 25000);
@@ -716,7 +721,9 @@ serve(async (req) => {
 
         if (extractedDeals.length === 0) {
           console.log(`No addresses found in: "${subject}"`);
-          syncDetails.push({ address: '', action: 'no_address', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: 'No property address found (AI + regex both returned nothing)', messageId: msg.id, emailSnippet: snippet });
+          // DEBUG: include body preview in reason so we can see what Claude received
+          const bodyPreview = body.substring(0, 400).replace(/\n+/g, ' ');
+          syncDetails.push({ address: '', action: 'no_address', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `No address found. Body preview: "${bodyPreview}"`, messageId: msg.id, emailSnippet: snippet });
           // ── KEY FIX: Do NOT mark as read — leave unread so it can be retried ──
           continue;
         }
