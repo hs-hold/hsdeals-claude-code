@@ -745,8 +745,8 @@ serve(async (req) => {
             continue;
           }
 
-          // Duplicate check
-          const duplicateMatch = existingAddresses.find(ea => addressesMatch(ea.address, address));
+          // Duplicate check — skip when force_rescan so we can see full extraction
+          const duplicateMatch = force_rescan ? null : existingAddresses.find(ea => addressesMatch(ea.address, address));
           if (duplicateMatch) {
             const newDealData = { emailPurchasePrice, purchasePrice: emailPurchasePrice };
             if (!dry_run && isBetterDeal(newDealData, duplicateMatch.deal)) {
@@ -812,10 +812,10 @@ serve(async (req) => {
             email_extracted_data: Object.keys(enrichedExtractedData).length > 0 ? enrichedExtractedData : null,
           };
 
-          if (dry_run) {
-            // Don't save — just report
+          if (dry_run || force_rescan) {
+            // Don't save — just report (dry_run or force_rescan testing mode)
             processedDeals.push({ ...dealData, dry_run: true, extractionSource: dealInfo.source });
-            syncDetails.push({ address, action: 'created', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `[DRY RUN] Would create. Source: ${dealInfo.source}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet });
+            syncDetails.push({ address, action: 'created', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `[TEST] Source: ${dealInfo.source} price=${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
             existingAddresses.push({ id: 'dry-run', address, deal: dealData });
             dealsFromThisEmail++;
             continue;
