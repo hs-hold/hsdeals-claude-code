@@ -503,28 +503,36 @@ serve(async (req) => {
       );
     }
 
-    // ── Mark recent emails as UNREAD so they can be re-scanned ──────────
+    // ── Mark recent INBOX emails as UNREAD so they can be re-scanned ─────
     if (mark_unread_recent) {
       const days = since_days ?? 7;
-      const query = encodeURIComponent(`newer_than:${days}d`);
+      // Use unix timestamp (seconds) for reliable date filtering
+      const afterTs = Math.floor((Date.now() - days * 24 * 60 * 60 * 1000) / 1000);
+      // labelIds=INBOX ensures we only touch inbox; after: filters by date
+      const url = `${GMAIL_API_BASE}/users/me/messages?maxResults=500&labelIds=INBOX&q=after:${afterTs}`;
+      console.log(`[mark_unread_recent] Fetching: ${url}`);
 
-      const listResp = await fetch(
-        `${GMAIL_API_BASE}/users/me/messages?maxResults=500&q=${query}`,
-        { headers: { 'Authorization': `Bearer ${access_token}` } }
-      );
+      const listResp = await fetch(url, { headers: { 'Authorization': `Bearer ${access_token}` } });
 
       if (!listResp.ok) {
         const errText = await listResp.text();
         console.error('[mark_unread_recent] list failed:', listResp.status, errText);
         return new Response(
-          JSON.stringify({ success: false, error: `Gmail list failed: ${listResp.status} ${errText}` }),
+          JSON.stringify({ success: false, error: `Gmail list failed: ${listResp.status} — ${errText}` }),
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
 
       const listData = await listResp.json();
       const messages: any[] = listData.messages || [];
-      console.log(`[mark_unread_recent] Marking ${messages.length} messages as unread`);
+      console.log(`[mark_unread_recent] Found ${messages.length} inbox messages after ${new Date(afterTs * 1000).toISOString()}`);
+
+      if (messages.length === 0) {
+        return new Response(
+          JSON.stringify({ success: true, marked: 0, message: `No inbox messages found after ${new Date(afterTs * 1000).toDateString()}` }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
 
       let marked = 0;
       for (const msg of messages) {
@@ -537,8 +545,9 @@ serve(async (req) => {
         else console.error(`[mark_unread_recent] failed to mark ${msg.id}: ${r.status}`);
       }
 
+      console.log(`[mark_unread_recent] Marked ${marked}/${messages.length} as unread`);
       return new Response(
-        JSON.stringify({ success: true, marked, message: `Marked ${marked} of ${messages.length} emails as unread` }),
+        JSON.stringify({ success: true, marked, message: `Marked ${marked} of ${messages.length} inbox emails as unread` }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }

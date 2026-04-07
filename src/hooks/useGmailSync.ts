@@ -155,8 +155,8 @@ export function useGmailSync() {
       if (!data?.success) throw new Error(data?.error || 'Unknown error');
       const count: number = data.marked ?? 0;
       toast({
-        title: count > 0 ? `✓ Marked ${count} emails as unread` : 'No emails found',
-        description: count > 0 ? 'Scan now to pick them up.' : 'No inbox emails found for the last 7 days.',
+        title: count > 0 ? `✓ Marked ${count} emails as unread` : 'No emails to mark',
+        description: count > 0 ? 'Click Scan to pick them up.' : (data.message ?? 'No inbox emails found for the last 7 days.'),
       });
       return count;
     } catch (err) {
