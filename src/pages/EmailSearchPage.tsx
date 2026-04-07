@@ -44,15 +44,21 @@ interface ExtractedData {
   sqft?: number | null;
   yearBuilt?: number | null;
   rehabCost?: number | null;
+  rent?: number | null;
+  capRate?: number | null;
+  cashFlow?: number | null;
   propertyType?: string | null;
   condition?: string | null;
   occupancy?: string | null;
   dealNotes?: string | null;
+  financingNotes?: string | null;
   propertyDescription?: string | null;
   photoLinks?: string[];
   imageLinks?: string[];
   lotSize?: string | null;
   units?: number | null;
+  county?: string | null;
+  neighborhood?: string | null;
 }
 
 interface EmailResultItem {
@@ -83,30 +89,53 @@ function looksLikeAddress(s?: string): boolean {
   return /^\d+\s+\S+.*,\s*[a-zA-Z\s]+,\s*[a-zA-Z]{2}\s+\d{5}/i.test(s.trim());
 }
 
-/** Extract price/specs from Gmail snippet when AI extraction returns nulls */
-function extractFromSnippet(snippet?: string): { price: number | null; beds: number | null; baths: number | null; sqft: number | null } {
-  const empty = { price: null, beds: null, baths: null, sqft: null };
+interface SnippetData {
+  price: number | null; arv: number | null; rehabCost: number | null; rent: number | null;
+  beds: number | null; baths: number | null; sqft: number | null;
+  yearBuilt: number | null; lotSize: string | null;
+}
+
+/** Extract all deal fields from Gmail snippet as fallback when AI extraction returns nulls */
+function extractFromSnippet(snippet?: string): SnippetData {
+  const empty: SnippetData = { price: null, arv: null, rehabCost: null, rent: null, beds: null, baths: null, sqft: null, yearBuilt: null, lotSize: null };
   if (!snippet) return empty;
   const s = snippet.replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&#\d+;/g, '');
 
-  // Price: "PRICE: $320000", "Purchase Price: $162,000", "Asking: $585,000", "price $162000"
-  const priceMatch = s.match(/(?:asking|purchase\s+price|price|offer)[:\s]+\$?([\d,]+)/i)
-    || s.match(/\$([\d,]{4,})/);
-  const price = priceMatch ? parseInt(priceMatch[1].replace(/,/g, ''), 10) || null : null;
+  const num = (m: RegExpMatchArray | null, g = 1) => m ? parseInt(m[g].replace(/,/g, ''), 10) || null : null;
+  const flt = (m: RegExpMatchArray | null, g = 1) => m ? parseFloat(m[g]) || null : null;
 
-  // Beds: "4BD", "4 Bed", "4 Bedrooms", "Bedrooms: 4"
-  const bedsMatch = s.match(/(\d+)\s*(?:bd|bed(?:room)?s?)\b/i) || s.match(/bed(?:room)?s?[:\s]+(\d+)/i);
-  const beds = bedsMatch ? parseInt(bedsMatch[1], 10) || null : null;
+  // Price: "Purchase Price: $162,000", "PRICE: $320,000", "Asking: $585,000", "Offer: $150k"
+  const price = num(s.match(/(?:purchase\s+price|asking\s+price|asking|price|offer)[:\s]+\$?([\d,]+)/i) ?? s.match(/\$([\d,]{5,})/));
 
-  // Baths: "3BA", "3 Bath", "3 Bathrooms", "2.5 Baths"
-  const bathsMatch = s.match(/([\d.]+)\s*(?:ba|bath(?:room)?s?)\b/i) || s.match(/bath(?:room)?s?[:\s]+([\d.]+)/i);
-  const baths = bathsMatch ? parseFloat(bathsMatch[1]) || null : null;
+  // ARV: "ARV: $285,000", "After Repair Value: $300k"
+  const arv = num(s.match(/(?:arv|after\s+repair\s+value)[:\s]+\$?([\d,]+)/i));
 
-  // Sqft: "3782 Sq Ft", "1500 sqft", "1,500 SF"
-  const sqftMatch = s.match(/([\d,]+)\s*(?:sq\.?\s*ft|sqft|sf)\b/i);
-  const sqft = sqftMatch ? parseInt(sqftMatch[1].replace(/,/g, ''), 10) || null : null;
+  // Rehab / Budget: "Budget: $60,000", "Rehab: $45k", "Repairs: $30,000"
+  const rehabCost = num(s.match(/(?:budget|rehab|repair[s]?|renovation)[:\s]+\$?([\d,]+)/i));
 
-  return { price, beds, baths, sqft };
+  // Rent: "Market Rent: $1800", "Rent: $1,500/mo"
+  const rent = num(s.match(/(?:market\s+rent|rent)[:\s]+\$?([\d,]+)/i));
+
+  // Beds: "3 Beds", "4BD", "4 Bedrooms", "Bedrooms: 3"
+  const beds = num(s.match(/(\d+)\s*(?:bd|bed(?:room)?s?)\b/i) ?? s.match(/bed(?:room)?s?[:\s]+(\d+)/i));
+
+  // Baths: "3 Baths", "2.5 BA", "Bathrooms: 2"
+  const baths = flt(s.match(/([\d.]+)\s*(?:ba|bath(?:room)?s?)\b/i) ?? s.match(/bath(?:room)?s?[:\s]+([\d.]+)/i));
+
+  // Sqft: "2,314 Sq Ft", "1500 sqft", "Total Interior Area: 2,314", "Interior: 1,500"
+  const sqft = num(
+    s.match(/([\d,]+)\s*(?:sq\.?\s*ft|sqft|sf)\b/i) ??
+    s.match(/(?:total\s+interior\s+area|interior\s+area|living\s+area)[:\s]+([\d,]+)/i)
+  );
+
+  // Year Built: "Year Built: 2004", "Built: 1985", "Built in 2001"
+  const yearBuilt = num(s.match(/(?:year\s+built|built)[:\s]+(\d{4})/i) ?? s.match(/built\s+in\s+(\d{4})/i));
+
+  // Lot Size: "Lot Size: .520 Acres", "0.37 acres", "Lot: 6,500 sqft"
+  const lotMatch = s.match(/(?:lot\s+size|lot)[:\s]+([\d.,]+\s*(?:acres?|sq\.?\s*ft|sf))/i);
+  const lotSize = lotMatch ? lotMatch[1].trim() : null;
+
+  return { price, arv, rehabCost, rent, beds, baths, sqft, yearBuilt, lotSize };
 }
 
 function isActionable(action: EmailAction): boolean {
@@ -199,15 +228,19 @@ function PropertyRow({
     ? (suggestedAddr ?? item.subject ?? '(no subject)')
     : item.address;
 
-  // Fallback: extract price/specs from Gmail snippet when AI extraction returned nulls
-  const snippetData = extractFromSnippet(item.emailSnippet);
-  const displayPrice = item.purchasePrice ?? snippetData.price;
-  const displayBeds  = ed?.bedrooms  ?? snippetData.beds;
-  const displayBaths = ed?.bathrooms ?? snippetData.baths;
-  const displaySqft  = ed?.sqft      ?? snippetData.sqft;
-  // Show italic when using snippet fallback (not AI-extracted)
-  const priceFromSnippet = !item.purchasePrice && !!snippetData.price;
-  const specsFromSnippet = !ed?.bedrooms && !ed?.bathrooms && !ed?.sqft && (snippetData.beds || snippetData.baths || snippetData.sqft);
+  // Fallback: extract all fields from Gmail snippet when AI extraction returned nulls
+  const sn = extractFromSnippet(item.emailSnippet);
+  const displayPrice    = item.purchasePrice    ?? sn.price;
+  const displayArv      = ed?.arv               ?? sn.arv;
+  const displayRehabCost= ed?.rehabCost         ?? sn.rehabCost;
+  const displayRent     = ed?.rent              ?? sn.rent;
+  const displayBeds     = ed?.bedrooms          ?? sn.beds;
+  const displayBaths    = ed?.bathrooms         ?? sn.baths;
+  const displaySqft     = ed?.sqft              ?? sn.sqft;
+  const displayYearBuilt= ed?.yearBuilt         ?? sn.yearBuilt;
+  const displayLotSize  = ed?.lotSize           ?? sn.lotSize;
+  const priceFromSnippet = !item.purchasePrice && !!sn.price;
+  const specsFromSnippet = !ed?.bedrooms && !ed?.bathrooms && !ed?.sqft && (sn.beds || sn.baths || sn.sqft);
 
   return (
     <div className={`flex items-center gap-3 px-4 py-2.5 border-b border-border/20 last:border-0 transition-colors hover:bg-muted/10 ${selected ? 'bg-primary/5' : ''} ${rowOpacity}`}>
@@ -333,19 +366,23 @@ function PropertyRow({
               </p>
             )}
 
-            {/* Structured extracted data */}
-            {(item.purchasePrice || ed?.arv || ed?.bedrooms || ed?.bathrooms || ed?.sqft || ed?.yearBuilt || ed?.lotSize || ed?.occupancy || ed?.rehabCost) && (
+            {/* All deal data — AI-extracted first, snippet fallback second */}
+            {(displayPrice || displayArv || displayBeds || displayBaths || displaySqft || displayYearBuilt || displayLotSize || displayRehabCost || displayRent || ed?.occupancy || item.dealType) && (
               <div className="border-t border-border/30 pt-2 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px]">
-                {item.purchasePrice  && <span><span className="text-muted-foreground">Ask: </span><span className="text-foreground font-medium">{formatCurrency(item.purchasePrice)}</span></span>}
-                {ed?.arv             && <span><span className="text-muted-foreground">ARV: </span><span className="text-foreground">{formatCurrency(ed.arv)}</span></span>}
-                {ed?.rehabCost       && <span><span className="text-muted-foreground">Rehab: </span><span className="text-foreground">{formatCurrency(ed.rehabCost)}</span></span>}
-                {ed?.bedrooms        && <span><span className="text-muted-foreground">Beds: </span><span className="text-foreground">{ed.bedrooms}</span></span>}
-                {ed?.bathrooms       && <span><span className="text-muted-foreground">Baths: </span><span className="text-foreground">{ed.bathrooms}</span></span>}
-                {ed?.sqft            && <span><span className="text-muted-foreground">Sqft: </span><span className="text-foreground">{ed.sqft.toLocaleString()}</span></span>}
-                {ed?.yearBuilt       && <span><span className="text-muted-foreground">Built: </span><span className="text-foreground">{ed.yearBuilt}</span></span>}
-                {ed?.lotSize         && <span><span className="text-muted-foreground">Lot: </span><span className="text-foreground">{ed.lotSize}</span></span>}
-                {ed?.occupancy       && <span><span className="text-muted-foreground">Occ: </span><span className="text-foreground">{ed.occupancy}</span></span>}
-                {item.dealType       && <span><span className="text-muted-foreground">Type: </span><span className="text-foreground">{item.dealType}</span></span>}
+                {displayPrice     && <span><span className="text-muted-foreground">Ask: </span><span className="text-foreground font-semibold">{formatCurrency(displayPrice)}</span></span>}
+                {displayArv       && <span><span className="text-muted-foreground">ARV: </span><span className="text-foreground">{formatCurrency(displayArv)}</span></span>}
+                {displayRehabCost && <span><span className="text-muted-foreground">Rehab: </span><span className="text-foreground">{formatCurrency(displayRehabCost)}</span></span>}
+                {displayRent      && <span><span className="text-muted-foreground">Rent: </span><span className="text-foreground">${displayRent.toLocaleString()}/mo</span></span>}
+                {displayBeds      && <span><span className="text-muted-foreground">Beds: </span><span className="text-foreground">{displayBeds}</span></span>}
+                {displayBaths     && <span><span className="text-muted-foreground">Baths: </span><span className="text-foreground">{displayBaths}</span></span>}
+                {displaySqft      && <span><span className="text-muted-foreground">Sqft: </span><span className="text-foreground">{displaySqft.toLocaleString()}</span></span>}
+                {displayYearBuilt && <span><span className="text-muted-foreground">Built: </span><span className="text-foreground">{displayYearBuilt}</span></span>}
+                {displayLotSize   && <span><span className="text-muted-foreground">Lot: </span><span className="text-foreground">{displayLotSize}</span></span>}
+                {ed?.occupancy    && <span><span className="text-muted-foreground">Occ: </span><span className="text-foreground">{ed.occupancy}</span></span>}
+                {item.dealType    && <span><span className="text-muted-foreground">Type: </span><span className="text-foreground">{item.dealType}</span></span>}
+                {ed?.county       && <span><span className="text-muted-foreground">County: </span><span className="text-foreground">{ed.county}</span></span>}
+                {ed?.neighborhood && <span><span className="text-muted-foreground">Area: </span><span className="text-foreground">{ed.neighborhood}</span></span>}
+                {ed?.condition    && <span><span className="text-muted-foreground">Condition: </span><span className="text-foreground">{ed.condition}</span></span>}
               </div>
             )}
 

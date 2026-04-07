@@ -340,23 +340,33 @@ ${emailContent}
 RULES:
 - Find ALL properties listed — wholesalers often list 2-10 properties per email
 - Each property needs a street number (e.g. "463 Main St"). City-only phrases are NOT addresses.
-- Common formats: "463 Voyles Drive, Riverdale, GA 30274", "Property: 456 Elm Dr, Atlanta GA 30311"
-- If the subject mentions a city/state and the body has street addresses, combine them
-- ALL numeric fields MUST be plain numbers (no $ signs, no commas). e.g. 585000 not "$585,000"
+- ALL numeric fields MUST be plain numbers — no $ signs, no commas. e.g. 162000 not "$162,000"
+- Extract EVERY available field. Never leave a field null if the data exists in the email.
+- "Total Interior Area", "Living Area", "Heated Sq Ft" etc. → use as sqft
+- "Budget", "Rehab Budget", "Repairs" → use as rehabCost
+- "Market Rent", "Rental Income" → use as rent
+- "FCFS" = First Come First Served (note in dealNotes)
+- Beds/Baths may appear as "3 Beds / 3 Baths", "3BD/2BA", "Bedrooms: 3", "3 bed 2 bath"
 
 For each property, extract:
 - address: Full US address with street, city, state, ZIP (required)
-- purchasePrice: Asking/offer price as a plain number (NOT ARV, NOT rehab cost). e.g. 585000
-- arv: After Repair Value
+- purchasePrice: Asking/offer/purchase price as plain number (NOT ARV, NOT rehab). e.g. 162000
+- arv: After Repair Value as plain number
 - dealType: Fix & Flip / Wholesale / Buy & Hold / BRRRR / Subject To / Seller Financing / Multifamily / Other / null
-- bedrooms, bathrooms, sqft, units, yearBuilt, lotSize
-- rehabCost, rent, capRate, cashFlow, downPayment
-- existingLoanBalance, monthlyPITI
+- bedrooms: number of bedrooms (integer)
+- bathrooms: number of bathrooms (decimal ok, e.g. 2.5)
+- sqft: total interior square footage (integer) — use any area field if explicit sqft not given
+- units, yearBuilt
+- lotSize: e.g. "0.52 acres" or "6500 sqft"
+- rehabCost: rehab/repair/budget cost as plain number
+- rent: monthly rent as plain number
+- capRate, cashFlow, downPayment, existingLoanBalance, monthlyPITI
 - propertyType: single_family / multi_family / condo / townhouse / duplex / triplex / fourplex / commercial / land / other
 - condition, occupancy
+- county, neighborhood
 - financingNotes, dealNotes
-- propertyDescription: 2-3 paragraph organized summary of all details (do not invent data)
-- photoLinks: Array of Google Drive / Dropbox / photo URLs found in email (empty array if none)
+- propertyDescription: organized summary of all available details (do not invent data)
+- photoLinks: array of Google Drive / Dropbox / photo URLs (empty array if none)
 
 Return ONLY valid JSON, nothing else:
 {
