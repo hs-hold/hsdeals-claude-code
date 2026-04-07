@@ -503,14 +503,16 @@ serve(async (req) => {
       );
     }
 
-    // ── Mark recent INBOX emails as UNREAD so they can be re-scanned ─────
+    // ── Mark recent READ inbox emails as UNREAD so they can be re-scanned ─
     if (mark_unread_recent) {
       const days = since_days ?? 7;
-      // Use unix timestamp (seconds) for reliable date filtering
-      const afterTs = Math.floor((Date.now() - days * 24 * 60 * 60 * 1000) / 1000);
-      // labelIds=INBOX ensures we only touch inbox; after: filters by date
-      const url = `${GMAIL_API_BASE}/users/me/messages?maxResults=500&labelIds=INBOX&q=after:${afterTs}`;
-      console.log(`[mark_unread_recent] Fetching: ${url}`);
+      // Gmail API after: needs YYYY/MM/DD format
+      const d = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+      const dateStr = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+      // is:read = only already-read emails; after: = from last N days; in:inbox = inbox only
+      const q = encodeURIComponent(`in:inbox is:read after:${dateStr}`);
+      const url = `${GMAIL_API_BASE}/users/me/messages?maxResults=500&q=${q}`;
+      console.log(`[mark_unread_recent] Fetching read inbox emails after ${dateStr}`);
 
       const listResp = await fetch(url, { headers: { 'Authorization': `Bearer ${access_token}` } });
 
@@ -525,11 +527,11 @@ serve(async (req) => {
 
       const listData = await listResp.json();
       const messages: any[] = listData.messages || [];
-      console.log(`[mark_unread_recent] Found ${messages.length} inbox messages after ${new Date(afterTs * 1000).toISOString()}`);
+      console.log(`[mark_unread_recent] Found ${messages.length} read inbox messages to mark as unread`);
 
       if (messages.length === 0) {
         return new Response(
-          JSON.stringify({ success: true, marked: 0, message: `No inbox messages found after ${new Date(afterTs * 1000).toDateString()}` }),
+          JSON.stringify({ success: true, marked: 0, message: `No read inbox emails found from the last ${days} days` }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
