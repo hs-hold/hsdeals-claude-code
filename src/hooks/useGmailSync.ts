@@ -147,22 +147,47 @@ export function useGmailSync() {
 
   const markUnreadRecent = useCallback(async (accessToken: string, sinceDays = 7): Promise<number> => {
     setIsMarkingOld(true);
+    const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
+    const headers = { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
+
     try {
-      const { data, error } = await supabase.functions.invoke('gmail-sync', {
-        body: { access_token: accessToken, mark_unread_recent: true, since_days: sinceDays },
-      });
-      if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || 'Unknown error');
-      const count: number = data.marked ?? 0;
+      // Step 1: list recent inbox messages directly from Gmail API (no edge function)
+      const listRes = await fetch(
+        `${GMAIL}/messages?maxResults=200&labelIds=INBOX`,
+        { headers }
+      );
+      if (!listRes.ok) {
+        const err = await listRes.text();
+        throw new Error(`Gmail list failed ${listRes.status}: ${err}`);
+      }
+      const listData = await listRes.json();
+      const messages: { id: string }[] = listData.messages || [];
+
+      if (messages.length === 0) {
+        toast({ title: 'No inbox emails found', description: 'Your inbox appears to be empty.' });
+        return 0;
+      }
+
+      // Step 2: mark each as UNREAD
+      let marked = 0;
+      for (const msg of messages) {
+        const r = await fetch(`${GMAIL}/messages/${msg.id}/modify`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ addLabelIds: ['UNREAD'] }),
+        });
+        if (r.ok) marked++;
+      }
+
       toast({
-        title: count > 0 ? `✓ Marked ${count} emails as unread` : 'No emails to mark',
-        description: count > 0 ? 'Click Scan to pick them up.' : (data.message ?? 'No inbox emails found for the last 7 days.'),
+        title: marked > 0 ? `✓ Marked ${marked} emails as unread` : 'Nothing to mark',
+        description: marked > 0 ? 'Click Scan Unread to process them.' : 'All inbox emails are already unread.',
       });
-      return count;
+      return marked;
     } catch (err) {
       console.error('markUnreadRecent error:', err);
       toast({
-        title: 'Failed to mark emails as unread',
+        title: 'Failed',
         description: err instanceof Error ? err.message : 'Unknown error',
         variant: 'destructive',
       });
