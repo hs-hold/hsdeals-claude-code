@@ -114,9 +114,12 @@ function extractEmailBody(message: GmailMessage): string {
     walk(message.payload.parts);
   }
 
-  const body = plainText || htmlText || message.snippet || '';
-  // Limit to 10000 chars
-  return body.substring(0, 10000);
+  // Prefer HTML when plain text is very short or looks like a browser-view placeholder
+  // (CRM emails like resimpli.com often have minimal plain text but rich HTML)
+  const plainIsUseful = plainText.length > 200 && !/view (this|in) (your )?browser/i.test(plainText);
+  const body = (plainIsUseful ? plainText : (htmlText || plainText)) || message.snippet || '';
+  // Limit to 25000 chars (stripped HTML is dense; property details can appear late in CRM emails)
+  return body.substring(0, 25000);
 }
 
 // Get header value from Gmail message
