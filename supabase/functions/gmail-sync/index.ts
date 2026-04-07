@@ -539,8 +539,9 @@ serve(async (req) => {
       include_read = false,
       target_state,
       mark_old_only = false,
-      mark_unread_recent = false,  // NEW: mark recent emails as unread for re-scanning
-      dry_run = false,             // NEW: extract but don't save to DB
+      mark_unread_recent = false,
+      dry_run = false,
+      force_rescan = false,        // DEBUG: skip already-processed check
     } = body;
 
     if (!access_token) {
@@ -677,8 +678,8 @@ serve(async (req) => {
 
     for (const msg of messages) {
       try {
-        // Skip already-processed message IDs (unless dry_run or include_read)
-        if (!dry_run && !include_read) {
+        // Skip already-processed message IDs (unless dry_run, include_read, or force_rescan)
+        if (!dry_run && !include_read && !force_rescan) {
           const alreadyProcessed = existingDeals?.some(d => d.gmail_message_id === msg.id);
           if (alreadyProcessed) {
             console.log(`Email ${msg.id} already processed, skipping`);

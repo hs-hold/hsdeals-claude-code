@@ -37,6 +37,7 @@ interface SyncOptions {
   markAllRead?: boolean;
   includeRead?: boolean;
   targetState?: string;
+  forceRescan?: boolean;
 }
 
 export function useGmailSync() {
@@ -46,11 +47,11 @@ export function useGmailSync() {
   const { toast } = useToast();
 
   const sync = useCallback(async (accessToken: string, options?: SyncOptions): Promise<SyncResult | null> => {
-    const { maxResults = 50, sinceDays, markAllRead = false, includeRead = false, targetState } = options || {};
+    const { maxResults = 50, sinceDays, markAllRead = false, includeRead = false, targetState, forceRescan = false } = options || {};
     setIsSyncing(true);
     try {
       const { data, error } = await supabase.functions.invoke('gmail-sync', {
-        body: { access_token: accessToken, max_results: maxResults, since_days: sinceDays, mark_all_read: markAllRead, include_read: includeRead, target_state: targetState }
+        body: { access_token: accessToken, max_results: maxResults, since_days: sinceDays, mark_all_read: markAllRead, include_read: includeRead, target_state: targetState, force_rescan: forceRescan }
       });
 
       if (error) throw error;

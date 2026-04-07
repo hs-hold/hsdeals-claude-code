@@ -455,8 +455,41 @@ export default function EmailSearchPage() {
     await refetch();
   }, [tokens, isSyncing, sync, scanCount, selectedState, refetch, getValidToken]);
 
-  const handleScan   = useCallback(() => runScan(false), [runScan]);
-  const handleRescan = useCallback(() => runScan(true),  [runScan]);
+  const handleScan        = useCallback(() => runScan(false), [runScan]);
+  const handleRescan      = useCallback(() => runScan(true),  [runScan]);
+
+  // DEBUG: clear session results + force-rescan (bypasses already-processed check)
+  const handleForceRescan = useCallback(async () => {
+    setResults([]);
+    sessionStorage.removeItem('email_scan_results_v2');
+    if (!tokens?.access_token || isSyncing) return;
+    const accessToken = await getValidToken();
+    if (!accessToken) return;
+    const result = await sync(accessToken, {
+      maxResults: scanCount,
+      includeRead: true,
+      forceRescan: true,
+      targetState: selectedState && selectedState !== 'ALL' ? selectedState : undefined,
+    });
+    if (!result?.success) return;
+    const scannedAt = new Date().toISOString();
+    const newItems: EmailResultItem[] = (result.syncDetails ?? [])
+      .filter((d: any) => d.action !== 'skipped_portal')
+      .map((d: any, idx: number) => {
+        const dealId = d.dealId || d.existingDealId || null;
+        return {
+          key: dealId ?? `skip-${scannedAt}-${idx}`,
+          dealId, address: d.address || '(no address)', action: d.action as EmailAction,
+          dealType: d.dealType ?? null, purchasePrice: d.purchasePrice ?? null,
+          senderName: d.senderName ?? '', senderEmail: d.senderEmail ?? '',
+          subject: d.subject ?? '', reason: d.reason ?? '', scannedAt,
+          messageId: d.messageId ?? undefined, extractedData: d.extractedData ?? undefined,
+          emailSnippet: d.emailSnippet ?? undefined,
+        };
+      });
+    setResults(newItems);
+    await refetch();
+  }, [tokens, isSyncing, sync, scanCount, selectedState, refetch, getValidToken]);
 
   // ── Mark old as read ──────────────────────────────────────────────────────
 
@@ -717,6 +750,18 @@ export default function EmailSearchPage() {
                   </TooltipTrigger>
                   <TooltipContent side="bottom">
                     Scans the {scanCount} most recent emails including already-read ones.
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="outline" onClick={handleForceRescan} disabled={isSyncing || isAnalyzing}
+                      className="border-amber-500/40 text-amber-400 hover:bg-amber-500/10 text-xs px-2.5">
+                      {isSyncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5 mr-1" />}
+                      Reset &amp; Rescan
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-xs">
+                    DEBUG: Clears all cached results and re-processes the {scanCount} most recent emails, ignoring scan history.
                   </TooltipContent>
                 </Tooltip>
               </div>
