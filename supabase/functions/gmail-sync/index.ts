@@ -8,7 +8,7 @@ const corsHeaders = {
 
 const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1';
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
-const MAX_DEAL_PRICE = 300000; // Skip deals above this price
+const MAX_DEAL_PRICE = 1000000; // Skip deals above this price
 
 // List of portal/listing service domains to skip
 const PORTAL_DOMAINS = [
@@ -75,10 +75,19 @@ function decodeBase64Url(data: string): string {
 /** Strip HTML tags and clean up whitespace for AI parsing */
 function stripHtml(html: string): string {
   return html
+    // Remove script/style blocks entirely
+    .replace(/<(script|style|head)[^>]*>[\s\S]*?<\/\1>/gi, '')
+    // Remove inline images (base64 or tracking pixels — keep nothing useful)
+    .replace(/<img[^>]+src=["']data:[^"']+["'][^>]*>/gi, '')
+    .replace(/<img[^>]*>/gi, '')
+    // Block-level elements → newlines
     .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/?(p|div|li|tr|td|th|h[1-6]|section|article)[^>]*>/gi, '\n')
-    .replace(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi, ' $1 ') // keep href text
+    .replace(/<\/?(p|div|li|tr|td|th|h[1-6]|section|article|table|tbody|thead|tfoot|blockquote)[^>]*>/gi, '\n')
+    // Keep href text for links (Google Drive, Dropbox, photo links)
+    .replace(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi, ' $1 ')
+    // Strip remaining tags
     .replace(/<[^>]+>/g, ' ')
+    // Decode HTML entities
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -86,6 +95,8 @@ function stripHtml(html: string): string {
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, ' ')
     .replace(/&#\d+;/g, ' ')
+    .replace(/&[a-z]+;/gi, ' ')
+    // Clean up whitespace
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -97,15 +108,20 @@ function extractEmailBody(message: GmailMessage): string {
   let htmlText  = '';
 
   if (message.payload?.body?.data) {
+    // Single-part message
     const raw = decodeBase64Url(message.payload.body.data);
-    plainText = raw.trim().startsWith('<') ? stripHtml(raw) : raw;
+    if (raw.trim().startsWith('<') || message.payload.mimeType === 'text/html') {
+      htmlText = stripHtml(raw);
+    } else {
+      plainText = raw;
+    }
   } else if (message.payload?.parts) {
+    // Multipart message — collect both plain and HTML from nested parts
     const walk = (parts: any[]) => {
       for (const part of parts ?? []) {
         if (part.mimeType === 'text/plain' && part.body?.data && !plainText) {
           plainText = decodeBase64Url(part.body.data);
-        }
-        if (part.mimeType === 'text/html' && part.body?.data && !htmlText) {
+        } else if (part.mimeType === 'text/html' && part.body?.data && !htmlText) {
           htmlText = stripHtml(decodeBase64Url(part.body.data));
         }
         if (part.parts) walk(part.parts);
@@ -117,6 +133,7 @@ function extractEmailBody(message: GmailMessage): string {
   // Prefer HTML when plain text is very short or looks like a browser-view placeholder
   // (CRM emails like resimpli.com often have minimal plain text but rich HTML)
   const plainIsUseful = plainText.length > 200 && !/view (this|in) (your )?browser/i.test(plainText);
+  console.log(`[extractBody] plain=${plainText.length} chars, html=${htmlText.length} chars, usingPlain=${plainIsUseful}`);
   const body = (plainIsUseful ? plainText : (htmlText || plainText)) || message.snippet || '';
   // Limit to 25000 chars (stripped HTML is dense; property details can appear late in CRM emails)
   return body.substring(0, 25000);
@@ -262,6 +279,30 @@ interface ExtractedDeal {
   source: 'ai' | 'regex';
 }
 
+/** Parse a price value that may come back as "$585,000", "585000", 585000, etc. */
+function parsePrice(val: any): number | null {
+  if (val === null || val === undefined || val === '') return null;
+  if (typeof val === 'number') return isNaN(val) ? null : Math.round(val);
+  const cleaned = String(val).replace(/[$,\s]/g, '');
+  const num = Number(cleaned);
+  return isNaN(num) || num <= 0 ? null : Math.round(num);
+}
+
+/** Parse a decimal number (bathrooms: "2.5", 2.5, etc.) */
+function parseDecimal(val: any): number | null {
+  if (val === null || val === undefined || val === '') return null;
+  if (typeof val === 'number') return isNaN(val) ? null : val;
+  const cleaned = String(val).replace(/[^0-9.]/g, '');
+  const num = Number(cleaned);
+  return isNaN(num) || num <= 0 ? null : num;
+}
+
+/** Parse an integer (bedrooms, sqft, yearBuilt, etc.) */
+function parseInteger(val: any): number | null {
+  const n = parseDecimal(val);
+  return n === null ? null : Math.round(n);
+}
+
 // Detect if a string looks like a US street address: "123 Main St, City, ST 12345"
 function looksLikeAddress(s: string): boolean {
   return /^\d+\s+[a-zA-Z0-9\s]+(?:st|ave|dr|blvd|rd|ln|ct|pl|way|cir|pkwy|hwy|sw|nw|se|ne)\b.*,\s*[a-zA-Z\s]+,\s*[a-zA-Z]{2}\s+\d{5}/i.test(s.trim());
@@ -295,10 +336,11 @@ RULES:
 - Each property needs a street number (e.g. "463 Main St"). City-only phrases are NOT addresses.
 - Common formats: "463 Voyles Drive, Riverdale, GA 30274", "Property: 456 Elm Dr, Atlanta GA 30311"
 - If the subject mentions a city/state and the body has street addresses, combine them
+- ALL numeric fields MUST be plain numbers (no $ signs, no commas). e.g. 585000 not "$585,000"
 
 For each property, extract:
 - address: Full US address with street, city, state, ZIP (required)
-- purchasePrice: Asking price (NOT ARV, NOT rehab cost)
+- purchasePrice: Asking/offer price as a plain number (NOT ARV, NOT rehab cost). e.g. 585000
 - arv: After Repair Value
 - dealType: Fix & Flip / Wholesale / Buy & Hold / BRRRR / Subject To / Seller Financing / Multifamily / Other / null
 - bedrooms, bathrooms, sqft, units, yearBuilt, lotSize
@@ -345,7 +387,9 @@ Return ONLY valid JSON, nothing else:
 Return { "deals": [] } if no valid US property addresses with street numbers are found.`;
 
   try {
-    console.log('[extractDeals] Calling Claude Haiku...');
+    console.log('[extractDeals] Calling Claude Sonnet — body preview (first 800 chars):');
+    console.log(emailContent.substring(0, 800));
+    console.log('[extractDeals] Subject:', subject);
     const response = await fetch(ANTHROPIC_API_URL, {
       method: 'POST',
       headers: {
@@ -396,11 +440,29 @@ Return { "deals": [] } if no valid US property addresses with street numbers are
       .filter((d: any) => d.address && typeof d.address === 'string' && d.address.length > 10)
       .map((d: any) => {
         const { address, purchasePrice, dealType, ...rest } = d;
+        // Normalize all numeric fields so "$585,000" / "3 beds" etc. become proper numbers
+        const normalizedData: Record<string, any> = { ...rest };
+        if ('arv'              in normalizedData) normalizedData.arv          = parsePrice(normalizedData.arv);
+        if ('rehabCost'        in normalizedData) normalizedData.rehabCost    = parsePrice(normalizedData.rehabCost);
+        if ('rent'             in normalizedData) normalizedData.rent         = parsePrice(normalizedData.rent);
+        if ('cashFlow'         in normalizedData) normalizedData.cashFlow     = parsePrice(normalizedData.cashFlow);
+        if ('downPayment'      in normalizedData) normalizedData.downPayment  = parsePrice(normalizedData.downPayment);
+        if ('existingLoanBalance' in normalizedData) normalizedData.existingLoanBalance = parsePrice(normalizedData.existingLoanBalance);
+        if ('monthlyPITI'      in normalizedData) normalizedData.monthlyPITI  = parsePrice(normalizedData.monthlyPITI);
+        if ('bedrooms'         in normalizedData) normalizedData.bedrooms     = parseInteger(normalizedData.bedrooms);
+        if ('bathrooms'        in normalizedData) normalizedData.bathrooms    = parseDecimal(normalizedData.bathrooms);
+        if ('sqft'             in normalizedData) normalizedData.sqft         = parseInteger(normalizedData.sqft);
+        if ('units'            in normalizedData) normalizedData.units        = parseInteger(normalizedData.units);
+        if ('yearBuilt'        in normalizedData) normalizedData.yearBuilt    = parseInteger(normalizedData.yearBuilt);
+        if ('capRate'          in normalizedData) normalizedData.capRate      = parseDecimal(normalizedData.capRate);
+
+        const parsedPrice = parsePrice(purchasePrice);
+        console.log(`[extractDeals] deal="${address}" price=${parsedPrice} beds=${normalizedData.bedrooms} baths=${normalizedData.bathrooms} sqft=${normalizedData.sqft}`);
         return {
           address: address.trim(),
-          purchasePrice: purchasePrice ? Number(purchasePrice) : null,
+          purchasePrice: parsedPrice,
           dealType: dealType || null,
-          extractedData: rest,
+          extractedData: normalizedData,
           source: 'ai' as const,
         };
       });

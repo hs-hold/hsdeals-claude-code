@@ -280,8 +280,26 @@ function PropertyRow({
                 From: {item.senderName}{item.senderEmail ? ` · ${item.senderEmail}` : ''}
               </p>
             )}
-            {emailPreview ? (
-              <p className="text-muted-foreground/80 whitespace-pre-wrap line-clamp-12 leading-relaxed border-t border-border/30 pt-2 text-[11px]">
+
+            {/* Structured extracted data */}
+            {(item.purchasePrice || ed?.arv || ed?.bedrooms || ed?.bathrooms || ed?.sqft || ed?.yearBuilt || ed?.lotSize || ed?.occupancy || ed?.rehabCost) && (
+              <div className="border-t border-border/30 pt-2 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px]">
+                {item.purchasePrice  && <span><span className="text-muted-foreground">Ask: </span><span className="text-foreground font-medium">{formatCurrency(item.purchasePrice)}</span></span>}
+                {ed?.arv             && <span><span className="text-muted-foreground">ARV: </span><span className="text-foreground">{formatCurrency(ed.arv)}</span></span>}
+                {ed?.rehabCost       && <span><span className="text-muted-foreground">Rehab: </span><span className="text-foreground">{formatCurrency(ed.rehabCost)}</span></span>}
+                {ed?.bedrooms        && <span><span className="text-muted-foreground">Beds: </span><span className="text-foreground">{ed.bedrooms}</span></span>}
+                {ed?.bathrooms       && <span><span className="text-muted-foreground">Baths: </span><span className="text-foreground">{ed.bathrooms}</span></span>}
+                {ed?.sqft            && <span><span className="text-muted-foreground">Sqft: </span><span className="text-foreground">{ed.sqft.toLocaleString()}</span></span>}
+                {ed?.yearBuilt       && <span><span className="text-muted-foreground">Built: </span><span className="text-foreground">{ed.yearBuilt}</span></span>}
+                {ed?.lotSize         && <span><span className="text-muted-foreground">Lot: </span><span className="text-foreground">{ed.lotSize}</span></span>}
+                {ed?.occupancy       && <span><span className="text-muted-foreground">Occ: </span><span className="text-foreground">{ed.occupancy}</span></span>}
+                {item.dealType       && <span><span className="text-muted-foreground">Type: </span><span className="text-foreground">{item.dealType}</span></span>}
+              </div>
+            )}
+
+            {/* Email snippet / description */}
+            {(item.emailSnippet || ed?.propertyDescription || ed?.dealNotes) ? (
+              <p className="text-muted-foreground/80 whitespace-pre-wrap line-clamp-8 leading-relaxed border-t border-border/30 pt-2 text-[11px]">
                 {item.emailSnippet || ed?.propertyDescription || ed?.dealNotes}
               </p>
             ) : (
