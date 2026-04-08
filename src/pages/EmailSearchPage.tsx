@@ -219,7 +219,7 @@ function PropertyRow({
 }: PropertyRowProps) {
   const actionable = isActionable(item.action);
   const addrHasStreet = hasStreetNumber(item.address); // needs street number for DealBeast
-  const canAnalyze = actionable && addrHasStreet && !!item.dealId;
+  const canAnalyze = actionable && addrHasStreet; // dealId not required — will create if missing
   const { text: badgeText, color: badgeColor } = actionBadgeConfig(item.action);
   const subjectIsAddr = looksLikeAddress(item.subject);
   const suggestedAddr = item.action === 'no_address' && subjectIsAddr ? item.subject! : undefined;
@@ -675,8 +675,9 @@ export default function EmailSearchPage() {
 
   // ── Selection ────────────────────────────────────────────────────────────
 
+  // actionableItems — all created/updated deals, with OR without dealId
   const actionableItems = useMemo(
-    () => results.filter(r => isActionable(r.action) && r.dealId),
+    () => results.filter(r => isActionable(r.action)),
     [results]
   );
 
@@ -728,17 +729,30 @@ export default function EmailSearchPage() {
 
   const handleAnalyzeSelected = useCallback(async () => {
     if (selectedActionable.length === 0 || isAnalyzing) return;
-    const list = selectedActionable.map(r => ({ id: r.dealId!, address: r.address }));
     setSelected(new Set());
-    await startAnalyzeList(list);
-  }, [selectedActionable, isAnalyzing, startAnalyzeList]);
+    // Items with dealId → batch analyze directly
+    const withId = selectedActionable.filter(r => r.dealId && hasStreetNumber(r.address));
+    // Items without dealId → create then analyze one by one
+    const withoutId = selectedActionable.filter(r => !r.dealId && hasStreetNumber(r.address));
+    for (const item of withoutId) {
+      await handleCreateAndAnalyze(item, item.address);
+    }
+    if (withId.length > 0) {
+      await startAnalyzeList(withId.map(r => ({ id: r.dealId!, address: r.address })));
+    }
+  }, [selectedActionable, isAnalyzing, startAnalyzeList, handleCreateAndAnalyze]);
 
   const handleAnalyzeOne = useCallback(async (item: EmailResultItem) => {
-    if (!item.dealId || isAnalyzing) return;
+    if (isAnalyzing) return;
+    if (!item.dealId) {
+      // No deal in DB yet — create it first, then analyze
+      await handleCreateAndAnalyze(item, item.address);
+      return;
+    }
     await startAnalyzeList([{ id: item.dealId, address: item.address }]);
     await refetch();
     window.open(`/deals/${item.dealId}`, '_blank', 'noopener,noreferrer');
-  }, [isAnalyzing, startAnalyzeList, refetch]);
+  }, [isAnalyzing, startAnalyzeList, refetch, handleCreateAndAnalyze]);
 
   // ── Create deal from address + immediately analyze ────────────────────────
 
@@ -757,6 +771,7 @@ export default function EmailSearchPage() {
       const stateZip = parts[2] || '';
       const [state, zip] = stateZip.split(' ').filter(Boolean);
 
+      const emailPrice = item.purchasePrice ?? null;
       const { data: inserted, error } = await supabase
         .from('deals')
         .insert({
@@ -767,11 +782,14 @@ export default function EmailSearchPage() {
           address_zip:    zip || null,
           source: 'email',
           status: 'new',
-          email_subject:  item.subject || null,
-          sender_name:    item.senderName || null,
-          sender_email:   item.senderEmail || null,
-          api_data:   {},
-          overrides:  {},
+          email_subject:       item.subject || null,
+          sender_name:         item.senderName || null,
+          sender_email:        item.senderEmail || null,
+          gmail_message_id:    item.messageId || null,
+          email_snippet:       item.emailSnippet || null,
+          email_extracted_data: item.extractedData || null,
+          api_data:    emailPrice ? { emailPurchasePrice: emailPrice } : {},
+          overrides:   emailPrice ? { arv: null, rent: null, rehabCost: null, purchasePrice: emailPrice } : {},
           created_by: user.id,
         })
         .select('id')
@@ -1045,24 +1063,29 @@ export default function EmailSearchPage() {
                   {unanalyzedActionable.length > 0 && !isAnalyzing && selectedActionable.length === 0 && (
                     <Button size="sm" variant="outline"
                       onClick={() => {
-                        // Only include items that actually have dealId + street number
-                        const analyzable = unanalyzedActionable.filter(r =>
-                          r.dealId && hasStreetNumber(r.address) &&
-                          (filter !== 'suspects' || (() => {
-                            const p = r.purchasePrice != null ? Number(r.purchasePrice) : null;
-                            return p == null || isNaN(p) || p <= maxPrice;
-                          })())
-                        );
-                        startAnalyzeList(analyzable.map(r => ({ id: r.dealId!, address: r.address })));
-                      }}>
-                      <Zap className="w-3.5 h-3.5 mr-1.5" />
-                      Analyze All ({unanalyzedActionable.filter(r =>
-                        r.dealId && hasStreetNumber(r.address) &&
-                        (filter !== 'suspects' || (() => {
+                        const inScope = unanalyzedActionable.filter(r => {
+                          if (!hasStreetNumber(r.address)) return false;
+                          if (filter !== 'suspects') return true;
                           const p = r.purchasePrice != null ? Number(r.purchasePrice) : null;
                           return p == null || isNaN(p) || p <= maxPrice;
-                        })())
-                      ).length})
+                        });
+                        // Items without dealId → create+analyze; with dealId → batch
+                        const needCreate = inScope.filter(r => !r.dealId);
+                        const hasId = inScope.filter(r => !!r.dealId);
+                        for (const item of needCreate) {
+                          await handleCreateAndAnalyze(item, item.address);
+                        }
+                        if (hasId.length > 0) {
+                          startAnalyzeList(hasId.map(r => ({ id: r.dealId!, address: r.address })));
+                        }
+                      }}>
+                      <Zap className="w-3.5 h-3.5 mr-1.5" />
+                      Analyze All ({unanalyzedActionable.filter(r => {
+                        if (!hasStreetNumber(r.address)) return false;
+                        if (filter !== 'suspects') return true;
+                        const p = r.purchasePrice != null ? Number(r.purchasePrice) : null;
+                        return p == null || isNaN(p) || p <= maxPrice;
+                      }).length})
                     </Button>
                   )}
                 </div>
