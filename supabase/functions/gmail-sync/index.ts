@@ -837,10 +837,15 @@ serve(async (req) => {
 
         let dealsFromThisEmail = 0;
 
+        let emailWasProcessed = false; // any address extracted → mark as read regardless of outcome
+
         for (const dealInfo of extractedDeals) {
           const address = dealInfo.address;
           const emailPurchasePrice = dealInfo.purchasePrice;
           console.log(`  Deal: "${address}" price=$${emailPurchasePrice} source=${dealInfo.source}`);
+
+          // Any address found → email is considered "processed", mark as read after loop
+          emailWasProcessed = true;
 
           // Skip over-budget
           if (emailPurchasePrice && emailPurchasePrice > MAX_DEAL_PRICE) {
@@ -958,11 +963,11 @@ serve(async (req) => {
           console.log(`  ✓ Created deal: ${address}`);
         }
 
-        // Mark as read only when deals were processed, and NOT in force_rescan mode (testing)
-        if (!dry_run && !force_rescan && dealsFromThisEmail > 0) {
+        // Mark as read whenever any address was found (even if skipped/duplicate/over-budget).
+        // Only leave unread when no address was found at all (no_address → retry).
+        if (!dry_run && !force_rescan && emailWasProcessed) {
           await markEmailAsRead(access_token, msg.id);
         }
-        // If no deals found from a non-portal email → leave unread for retry
 
       } catch (error) {
         console.error(`Error processing message ${msg.id}:`, error);
