@@ -541,6 +541,9 @@ export default function EmailSearchPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<'all' | 'deals' | 'suspects' | 'skipped'>('suspects');
   const [maxPrice, setMaxPrice] = useState<number>(220000);
+  const [minPrice, setMinPrice] = useState<number>(0);
+  const [minSqft,  setMinSqft]  = useState<number>(0);
+  const [minBeds,  setMinBeds]  = useState<number>(0);
 
   // Persist results to localStorage
   useEffect(() => {
@@ -688,16 +691,31 @@ export default function EmailSearchPage() {
     });
   }, [actionableItems, deals]);
 
+  // Apply extra filters (sqft / beds / minPrice) on top of an existing list
+  const applyExtraFilters = useCallback((list: EmailResultItem[]) => {
+    if (!minSqft && !minBeds && !minPrice) return list;
+    return list.filter(r => {
+      const sn   = extractFromSnippet(r.emailSnippet);
+      const beds  = r.extractedData?.bedrooms ?? sn.beds;
+      const sqft  = r.extractedData?.sqft     ?? sn.sqft;
+      const price = r.purchasePrice           ?? sn.price;
+      if (minBeds  > 0 && (beds  == null || beds  < minBeds))  return false;
+      if (minSqft  > 0 && (sqft  == null || sqft  < minSqft))  return false;
+      if (minPrice > 0 && price  != null && price  < minPrice) return false;
+      return true;
+    });
+  }, [minSqft, minBeds, minPrice]);
+
   // Suspects = actionable deals with valid address AND price ≤ maxPrice
   // Does NOT require dealId — items without dealId show but with disabled Analyze
   const suspectsItems = useMemo(
-    () => results.filter(r => {
+    () => applyExtraFilters(results.filter(r => {
       if (!isActionable(r.action)) return false;
-      if (!hasStreetNumber(r.address)) return false; // no address = skip
+      if (!hasStreetNumber(r.address)) return false;
       const price = r.purchasePrice != null ? Number(r.purchasePrice) : null;
       return price == null || isNaN(price) || price <= maxPrice;
-    }),
-    [results, maxPrice]
+    })),
+    [results, maxPrice, applyExtraFilters]
   );
 
   const selectedActionable = useMemo(
@@ -832,16 +850,16 @@ export default function EmailSearchPage() {
 
   const filtered = useMemo(() => {
     let list = results.filter(r => r.action !== 'skipped_portal');
-    if (filter === 'deals') return list.filter(r => isActionable(r.action));
-    if (filter === 'skipped') return list.filter(r => !isActionable(r.action));
-    if (filter === 'suspects') return list.filter(r => {
+    if (filter === 'deals')   list = list.filter(r => isActionable(r.action));
+    else if (filter === 'skipped') list = list.filter(r => !isActionable(r.action));
+    else if (filter === 'suspects') list = list.filter(r => {
       if (!isActionable(r.action)) return false;
-      if (!hasStreetNumber(r.address)) return false; // no street number → skip, can't analyze
+      if (!hasStreetNumber(r.address)) return false;
       const price = r.purchasePrice != null ? Number(r.purchasePrice) : null;
       return price == null || isNaN(price) || price <= maxPrice;
     });
-    return list;
-  }, [results, filter, maxPrice]);
+    return applyExtraFilters(list);
+  }, [results, filter, maxPrice, applyExtraFilters]);
 
   // ── Analysis progress ─────────────────────────────────────────────────────
 
@@ -1049,12 +1067,63 @@ export default function EmailSearchPage() {
                     value={maxPrice / 1000}
                     onChange={e => setMaxPrice(Math.max(1000, Number(e.target.value) * 1000))}
                     className="w-14 h-6 px-1.5 text-xs bg-muted/50 border border-border/50 rounded text-center"
-                    step={10}
-                    min={50}
-                    max={2000}
+                    step={10} min={50} max={2000}
                   />
                   <span className="text-[10px] text-muted-foreground">k</span>
                 </div>
+              </div>
+
+              {/* Extra filters row */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-1 py-1.5 border-t border-border/20 text-xs text-muted-foreground">
+                {/* Min price */}
+                <label className="flex items-center gap-1">
+                  <span>Min $</span>
+                  <input
+                    type="number"
+                    value={minPrice > 0 ? minPrice / 1000 : ''}
+                    placeholder="—"
+                    onChange={e => setMinPrice(e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) * 1000))}
+                    className="w-14 h-6 px-1.5 text-xs bg-muted/50 border border-border/50 rounded text-center"
+                    step={10} min={0} max={2000}
+                  />
+                  <span>k</span>
+                </label>
+                {/* Min sqft */}
+                <label className="flex items-center gap-1">
+                  <span>Min sqft</span>
+                  <input
+                    type="number"
+                    value={minSqft > 0 ? minSqft : ''}
+                    placeholder="—"
+                    onChange={e => setMinSqft(e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
+                    className="w-16 h-6 px-1.5 text-xs bg-muted/50 border border-border/50 rounded text-center"
+                    step={100} min={0}
+                  />
+                </label>
+                {/* Min beds */}
+                <label className="flex items-center gap-1">
+                  <span>Min beds</span>
+                  <select
+                    value={minBeds}
+                    onChange={e => setMinBeds(Number(e.target.value))}
+                    className="h-6 px-1.5 text-xs bg-muted/50 border border-border/50 rounded"
+                  >
+                    <option value={0}>Any</option>
+                    <option value={2}>2+</option>
+                    <option value={3}>3+</option>
+                    <option value={4}>4+</option>
+                    <option value={5}>5+</option>
+                  </select>
+                </label>
+                {/* Reset */}
+                {(minPrice > 0 || minSqft > 0 || minBeds > 0) && (
+                  <button
+                    onClick={() => { setMinPrice(0); setMinSqft(0); setMinBeds(0); }}
+                    className="text-[10px] text-muted-foreground hover:text-foreground underline"
+                  >
+                    Reset filters
+                  </button>
+                )}
               </div>
 
               {/* Bulk actions */}
