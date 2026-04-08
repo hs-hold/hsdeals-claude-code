@@ -218,8 +218,9 @@ function PropertyRow({
   onToggleSelect, onAnalyze, onStartEdit, onEditChange, onEditSubmit, onEditCancel, onCreateAndAnalyze,
 }: PropertyRowProps) {
   const actionable = isActionable(item.action);
-  const addrHasStreet = hasStreetNumber(item.address); // needs street number for DealBeast
-  const canAnalyze = actionable && addrHasStreet; // dealId not required — will create if missing
+  const addrHasStreet = hasStreetNumber(item.address);
+  const hasPrice = item.purchasePrice != null && item.purchasePrice > 0;
+  const canAnalyze = actionable && addrHasStreet && hasPrice;
   const { text: badgeText, color: badgeColor } = actionBadgeConfig(item.action);
   const subjectIsAddr = looksLikeAddress(item.subject);
   const suggestedAddr = item.action === 'no_address' && subjectIsAddr ? item.subject! : undefined;
@@ -509,7 +510,10 @@ function PropertyRow({
             <Zap className="w-3 h-3 mr-1" /> Analyze
           </Button>
         )}
-        {actionable && !canAnalyze && !isDone && !isAnalyzingThis && !addrHasStreet && (
+        {actionable && !isDone && !isAnalyzingThis && addrHasStreet && !hasPrice && (
+          <span className="text-[10px] text-amber-500/70">no price</span>
+        )}
+        {actionable && !isDone && !isAnalyzingThis && !addrHasStreet && (
           <span className="text-[10px] text-muted-foreground/40">no address</span>
         )}
       </div>
@@ -706,14 +710,15 @@ export default function EmailSearchPage() {
     });
   }, [minSqft, minBeds, minPrice]);
 
-  // Suspects = actionable deals with valid address AND price ≤ maxPrice
-  // Does NOT require dealId — items without dealId show but with disabled Analyze
+  // Suspects = actionable deals with valid address AND known price ≤ maxPrice
+  // Requires price > 0 — no-price deals are not actionable suspects
   const suspectsItems = useMemo(
     () => applyExtraFilters(results.filter(r => {
       if (!isActionable(r.action)) return false;
       if (!hasStreetNumber(r.address)) return false;
       const price = r.purchasePrice != null ? Number(r.purchasePrice) : null;
-      return price == null || isNaN(price) || price <= maxPrice;
+      if (price == null || isNaN(price) || price <= 0) return false; // must have a known price
+      return price <= maxPrice;
     })),
     [results, maxPrice, applyExtraFilters]
   );
@@ -749,6 +754,10 @@ export default function EmailSearchPage() {
   const handleCreateAndAnalyze = useCallback(async (item: EmailResultItem, addressOverride?: string) => {
     const addr = (addressOverride ?? editAddr).trim();
     if (!addr) { toast.error('Enter a property address'); return; }
+    if (!(item.purchasePrice != null && item.purchasePrice > 0)) {
+      toast.error('No price found for this deal — cannot create without a price.');
+      return;
+    }
     if (!hasStreetNumber(addr)) {
       toast.error('Address has no street number — cannot analyze. Please edit the address first.');
       return;
@@ -856,7 +865,8 @@ export default function EmailSearchPage() {
       if (!isActionable(r.action)) return false;
       if (!hasStreetNumber(r.address)) return false;
       const price = r.purchasePrice != null ? Number(r.purchasePrice) : null;
-      return price == null || isNaN(price) || price <= maxPrice;
+      if (price == null || isNaN(price) || price <= 0) return false;
+      return price <= maxPrice;
     });
     return applyExtraFilters(list);
   }, [results, filter, maxPrice, applyExtraFilters]);
@@ -1051,7 +1061,13 @@ export default function EmailSearchPage() {
                 {(['suspects', 'deals', 'all', 'skipped'] as const).map(f => (
                   <button key={f} onClick={() => setFilter(f)}
                     className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                      filter === f ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'
+                      f === 'suspects'
+                        ? filter === 'suspects'
+                          ? 'bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/40'
+                          : 'text-emerald-500/70 hover:text-emerald-400 hover:bg-emerald-500/10'
+                        : filter === f
+                          ? 'bg-muted text-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
                     }`}>
                     {f === 'suspects' ? `Suspects (${suspectsItems.length})` :
                      f === 'all'      ? `All (${results.filter(r => r.action !== 'skipped_portal').length})` :

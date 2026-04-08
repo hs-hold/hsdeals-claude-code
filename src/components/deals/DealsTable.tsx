@@ -377,9 +377,9 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                             {deal.apiData.grade}
                           </span>
                         )}
-                        {deal.financials.capRate > 0 && (
+                        {(deal.financials?.capRate ?? 0) > 0 && (
                           <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground">
-                            {(deal.financials.capRate * 100).toFixed(1)}%
+                            {((deal.financials?.capRate ?? 0) * 100).toFixed(1)}%
                           </span>
                         )}
                       </div>
