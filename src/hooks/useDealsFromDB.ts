@@ -445,20 +445,30 @@ export function useDealsFromDB() {
 
   const analyzeDeal = useCallback(async (id: string) => {
     const MAX_ANALYSIS_PRICE = 300000;
-    const deal = deals.find(d => d.id === id);
-    if (!deal) throw new Error('Deal not found');
+
+    // Try local state first; if not found (e.g. newly inserted deal, stale closure),
+    // fall back to a direct DB fetch so analysis always works immediately after creation.
+    let deal = deals.find(d => d.id === id);
+    if (!deal) {
+      const { data: dbRow, error: fetchErr } = await supabase
+        .from('deals')
+        .select('*')
+        .eq('id', id)
+        .single();
+      if (fetchErr || !dbRow) throw new Error('Deal not found');
+      deal = mapDBDealToDeal(dbRow as DBDeal, loanDefaults);
+    }
+
+    // Block analysis for addresses with no street number — DealBeast cannot work without one
+    const hasStreetNumber = /^\d+\s/.test(deal.address.street?.trim() || '');
+    if (!hasStreetNumber) {
+      throw new Error(`Address "${deal.address.full}" has no street number — cannot analyze. Please edit the address first.`);
+    }
 
     // Check if deal price exceeds budget limit
     const dealPrice = deal.overrides?.purchasePrice ?? deal.apiData?.purchasePrice ?? 0;
     if (dealPrice > MAX_ANALYSIS_PRICE) {
       throw new Error(`Deal price ($${dealPrice.toLocaleString()}) exceeds $${MAX_ANALYSIS_PRICE.toLocaleString()} limit. Skipping analysis.`);
-    }
-
-    // Warn if address looks incomplete (no street number) — DealBeast needs a real address
-    const hasStreetNumber = /^\d+\s/.test(deal.address.street?.trim() || '');
-    if (!hasStreetNumber) {
-      console.warn(`[analyzeDeal] Address may be incomplete (no street number): "${deal.address.full}" — DealBeast results may be inaccurate`);
-      // Don't throw — still try, but log the warning
     }
 
     // Call the analyze-property edge function

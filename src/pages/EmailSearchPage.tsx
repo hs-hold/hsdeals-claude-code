@@ -731,6 +731,10 @@ export default function EmailSearchPage() {
   const handleCreateAndAnalyze = useCallback(async (item: EmailResultItem, addressOverride?: string) => {
     const addr = (addressOverride ?? editAddr).trim();
     if (!addr) { toast.error('Enter a property address'); return; }
+    if (!hasStreetNumber(addr)) {
+      toast.error('Address has no street number — cannot analyze. Please edit the address first.');
+      return;
+    }
 
     setCreatingKey(item.key);
     try {
@@ -1061,7 +1065,7 @@ export default function EmailSearchPage() {
                   )}
                   {unanalyzedActionable.length > 0 && !isAnalyzing && selectedActionable.length === 0 && (
                     <Button size="sm" variant="outline"
-                      onClick={() => {
+                      onClick={async () => {
                         const inScope = unanalyzedActionable.filter(r => {
                           if (!hasStreetNumber(r.address)) return false;
                           if (filter !== 'suspects') return true;

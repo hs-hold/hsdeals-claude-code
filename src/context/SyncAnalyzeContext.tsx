@@ -44,6 +44,8 @@ export function SyncAnalyzeProvider({ children }: { children: React.ReactNode })
   const { sync } = useGmailSync();
   const abortRef = useRef(false);
   const isRunningRef = useRef(false);
+  // Separate flag for startAnalyzeList so it is never blocked by a running scan
+  const isAnalyzeListRunningRef = useRef(false);
 
   // Keep refs to latest functions so the async loop always uses current versions
   const analyzeDealRef = useRef(analyzeDeal);
@@ -264,9 +266,10 @@ export function SyncAnalyzeProvider({ children }: { children: React.ReactNode })
   }, []);
 
   // Analyze a specific list of deal IDs (e.g. from email search results)
+  // Uses its own flag so it is never blocked by a running scan/sync operation
   const startAnalyzeList = useCallback(async (dealsList: { id: string; address: string }[]) => {
-    if (isRunningRef.current || dealsList.length === 0) return;
-    isRunningRef.current = true;
+    if (isAnalyzeListRunningRef.current || dealsList.length === 0) return;
+    isAnalyzeListRunningRef.current = true;
     abortRef.current = false;
 
     const items = dealsList.map(d => ({
@@ -315,7 +318,7 @@ export function SyncAnalyzeProvider({ children }: { children: React.ReactNode })
 
     await refetchRef.current();
     setState(prev => ({ ...prev, isRunning: false, phase: 'done' }));
-    isRunningRef.current = false;
+    isAnalyzeListRunningRef.current = false;
     toast.success(`Analyzed ${items.length} deals!`);
   }, []);
 
