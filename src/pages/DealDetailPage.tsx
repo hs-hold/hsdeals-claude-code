@@ -805,24 +805,26 @@ export default function DealDetailPage() {
   }, [localOverrides, apiData, liveFinancials, loanDefaults]);
   
   // Destructure for easy access (with defaults for when derivedValues is null)
-  const purchasePrice = derivedValues?.purchasePrice ?? 0;
-  const arv = derivedValues?.arv ?? 0;
-  const rehabCost = derivedValues?.rehabCost ?? 0;
-  const rent = derivedValues?.rent ?? 0;
-  const propertyTaxMonthly = derivedValues?.propertyTaxMonthly ?? 0;
-  const insuranceMonthly = derivedValues?.insuranceMonthly ?? 0;
-  const monthlyHoldingCost = derivedValues?.monthlyHoldingCost ?? 0;
-  const rehabMonths = derivedValues?.rehabMonths ?? 6;
-  const totalHoldingCosts = derivedValues?.totalHoldingCosts ?? 0;
-  const closingCostsBuy = derivedValues?.closingCostsBuy ?? 0;
+  // Use (val || 0) instead of (val ?? 0) to also guard against NaN from calc errors
+  const safeNum = (v: number | null | undefined) => (v != null && isFinite(v) ? v : 0);
+  const purchasePrice = safeNum(derivedValues?.purchasePrice);
+  const arv           = safeNum(derivedValues?.arv);
+  const rehabCost     = safeNum(derivedValues?.rehabCost);
+  const rent          = safeNum(derivedValues?.rent);
+  const propertyTaxMonthly  = safeNum(derivedValues?.propertyTaxMonthly);
+  const insuranceMonthly    = safeNum(derivedValues?.insuranceMonthly);
+  const monthlyHoldingCost  = safeNum(derivedValues?.monthlyHoldingCost);
+  const rehabMonths         = safeNum(derivedValues?.rehabMonths) || 6;
+  const totalHoldingCosts   = safeNum(derivedValues?.totalHoldingCosts);
+  const closingCostsBuy     = safeNum(derivedValues?.closingCostsBuy);
   // Strategy summary metrics
-  const flipNetProfit = derivedValues?.flipNetProfit ?? 0;
-  const flipRoi = derivedValues?.flipRoi ?? 0;
-  const rentalMonthlyCashflow = derivedValues?.rentalMonthlyCashflow ?? 0;
-  const rentalCapRate = derivedValues?.rentalCapRate ?? 0;
-  const brrrrCashLeftInDeal = derivedValues?.brrrrCashLeftInDeal ?? 0;
-  const brrrrMonthlyCashflow = derivedValues?.brrrrMonthlyCashflow ?? 0;
-  const brrrrEquity = derivedValues?.brrrrEquity ?? 0;
+  const flipNetProfit        = safeNum(derivedValues?.flipNetProfit);
+  const flipRoi              = safeNum(derivedValues?.flipRoi);
+  const rentalMonthlyCashflow= safeNum(derivedValues?.rentalMonthlyCashflow);
+  const rentalCapRate        = safeNum(derivedValues?.rentalCapRate);
+  const brrrrCashLeftInDeal  = safeNum(derivedValues?.brrrrCashLeftInDeal);
+  const brrrrMonthlyCashflow = safeNum(derivedValues?.brrrrMonthlyCashflow);
+  const brrrrEquity          = safeNum(derivedValues?.brrrrEquity);
 
   // Build display-default map: what shows in each input when override is empty
   const fieldDisplayDefaults = useMemo((): Record<string, string> => {

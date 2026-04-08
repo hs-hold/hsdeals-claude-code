@@ -91,22 +91,38 @@ export function calculateArvFromRecentComps(
     };
   }
   
-  // Prefer exact layout matches
-  const exactMatchComps = recentComps.filter(c => 
+  // Prefer exact layout matches — only use comps with a valid salePrice
+  const validRecentComps = recentComps.filter(c => c.salePrice && isFinite(c.salePrice) && c.salePrice > 0);
+
+  if (validRecentComps.length === 0) {
+    return {
+      calculatedArv: apiArv,
+      useApiArv: true,
+      compsUsed: 0,
+      explanation: 'No recent comps with valid sale price — using API ARV'
+    };
+  }
+
+  const exactMatchComps = validRecentComps.filter(c =>
     c.bedrooms === targetBedrooms && c.bathrooms === targetBathrooms
   );
-  
-  const compsToUse = exactMatchComps.length > 0 
-    ? exactMatchComps.slice(0, 5) 
-    : recentComps.slice(0, 5);
-  
+
+  const compsToUse = exactMatchComps.length > 0
+    ? exactMatchComps.slice(0, 5)
+    : validRecentComps.slice(0, 5);
+
   const calculatedArv = Math.round(
     compsToUse.reduce((sum, c) => sum + c.salePrice, 0) / compsToUse.length
   );
-  
-  // Compare: If API ARV is within 90% of calculated ARV, use API ARV
+
+  // Guard: if calculatedArv is 0 or NaN, fall back to apiArv
+  if (!calculatedArv || !isFinite(calculatedArv)) {
+    return { calculatedArv: apiArv, useApiArv: true, compsUsed: 0, explanation: 'Calculated ARV invalid — using API ARV' };
+  }
+
+  // Compare: If API ARV is within 10% of calculated, use API ARV
   const differencePercent = Math.abs(apiArv - calculatedArv) / calculatedArv;
-  const useApiArv = differencePercent <= 0.10; // Within 10% difference (90% match)
+  const useApiArv = differencePercent <= 0.10;
   
   return {
     calculatedArv: useApiArv ? apiArv : calculatedArv,
