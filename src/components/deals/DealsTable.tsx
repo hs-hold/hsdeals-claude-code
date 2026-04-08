@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter, Zap, Loader2, Lock, X, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter, Zap, Loader2, Lock, X, CheckCircle2, AlertTriangle, Mail, Globe } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { DealAgeFilter, AgeFilterType, applyDealAgeFilter } from '@/components/deals/DealAgeFilter';
@@ -275,14 +275,6 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
 
         <Input
           type="number"
-          placeholder="Min Cashflow $"
-          value={minCashflow}
-          onChange={e => setMinCashflow(e.target.value)}
-          className="w-[140px]"
-        />
-
-        <Input
-          type="number"
           placeholder="Min Yield %"
           value={minYield}
           onChange={e => setMinYield(e.target.value)}
@@ -313,14 +305,10 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                 <SortHeader field="equity">Equity</SortHeader>
               </TableHead>
               <TableHead className="text-right">
-                <SortHeader field="cashflow">Cashflow/mo</SortHeader>
-              </TableHead>
-              <TableHead className="text-right">
                 <SortHeader field="yield">CoC Return</SortHeader>
               </TableHead>
-              <TableHead className="text-right">
-                <SortHeader field="capRate">Cap Rate</SortHeader>
-              </TableHead>
+              <TableHead>Source</TableHead>
+              <TableHead>Seller / Agent</TableHead>
               <TableHead className="text-right">
                 <SortHeader field="created">Analyzed</SortHeader>
               </TableHead>
@@ -336,7 +324,6 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
               </TableRow>
             ) : (
               filteredAndSorted.map(deal => {
-                const cashflow = deal.financials?.monthlyCashflow ?? 0;
                 const cocReturn = deal.financials?.cashOnCashReturn ?? 0;
                 const equity = deal.financials?.equityAtPurchase ?? 0;
                 
@@ -425,19 +412,28 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                       {formatCurrency(equity)}
                     </TableCell>
                     <TableCell className={cn(
-                      "text-right font-medium",
-                      cashflow > 0 ? "text-success" : "text-destructive"
-                    )}>
-                      {formatCurrency(cashflow)}
-                    </TableCell>
-                    <TableCell className={cn(
                       "text-right font-semibold",
                       cocReturn >= 0.08 ? "text-success" : cocReturn > 0 ? "text-warning" : "text-destructive"
                     )}>
                       {formatPercent(cocReturn)}
                     </TableCell>
-                    <TableCell className="text-right">
-                      {formatPercent(deal.financials?.capRate ?? 0)}
+                    <TableCell>
+                      {deal.source === 'email' ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/20">
+                          <Mail className="w-3 h-3" />
+                          Off Market
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
+                          <Globe className="w-3 h-3" />
+                          Market
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground max-w-[140px]">
+                      {deal.source === 'email'
+                        ? (deal.senderName || deal.senderEmail || '—')
+                        : (deal.apiData?.agentName || deal.apiData?.brokerName || '—')}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="text-xs text-muted-foreground space-y-0.5">
