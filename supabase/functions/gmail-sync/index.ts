@@ -922,11 +922,20 @@ serve(async (req) => {
           };
 
           if (dry_run || force_rescan) {
-            // Don't save — just report (dry_run or force_rescan testing mode)
+            // force_rescan: look up existing deal to return its ID for analysis
+            const existingMatch = force_rescan
+              ? state.existingAddresses.find(ea => addressesMatch(ea.address, address))
+              : null;
+            const existingId = existingMatch?.id && existingMatch.id !== 'dry-run' ? existingMatch.id : null;
+
             state.processedDeals.push({ ...dealData, dry_run: true, extractionSource: dealInfo.source });
-            state.syncDetails.push({ address, action: 'created', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `[TEST] Source: ${dealInfo.source} price=${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
+            if (existingId) {
+              state.syncDetails.push({ address, action: 'updated_existing', existingDealId: existingId, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `[RESCAN] Source: ${dealInfo.source} price=${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
+            } else {
+              state.syncDetails.push({ address, action: 'created', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `[TEST] Source: ${dealInfo.source} price=${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
+            }
             // Register address immediately so within-batch dedup works
-            state.existingAddresses.push({ id: 'dry-run', address, deal: dealData });
+            state.existingAddresses.push({ id: existingId || 'dry-run', address, deal: dealData });
             dealsFromThisEmail++;
             continue;
           }

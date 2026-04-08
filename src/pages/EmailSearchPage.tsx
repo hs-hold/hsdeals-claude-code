@@ -192,6 +192,7 @@ interface PropertyRowProps {
   isError: boolean;
   analyzeError?: string;
   isCreating: boolean;
+  grade?: string | null;
   editingKey: string | null;
   editAddr: string;
   selected: boolean;
@@ -206,6 +207,7 @@ interface PropertyRowProps {
 
 function PropertyRow({
   item, isAnalyzingThis, isDone, isError, analyzeError, isCreating,
+  grade,
   editingKey, editAddr, selected,
   onToggleSelect, onAnalyze, onStartEdit, onEditChange, onEditSubmit, onEditCancel, onCreateAndAnalyze,
 }: PropertyRowProps) {
@@ -313,8 +315,16 @@ function PropertyRow({
         </span>
       </div>
 
-      {/* Action badge */}
-      <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium shrink-0 ${badgeColor}`}>{badgeText}</span>
+      {/* Action badge / Grade */}
+      {isDone && grade ? (
+        <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium shrink-0 ${
+          Number(grade) >= 8 ? 'bg-green-500/15 border-green-500/30 text-green-400' :
+          Number(grade) >= 6 ? 'bg-yellow-500/15 border-yellow-500/30 text-yellow-400' :
+          'bg-red-500/15 border-red-500/30 text-red-400'
+        }`}>{grade}/10</span>
+      ) : (
+        <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium shrink-0 ${badgeColor}`}>{badgeText}</span>
+      )}
 
       {/* Icon buttons: Photos · Gmail · Email content hover */}
       <div className="flex items-center gap-0.5 shrink-0">
@@ -509,16 +519,17 @@ export default function EmailSearchPage() {
   const [scanCount, setScanCount] = useState<ScanCount>(20);
   const [results, setResults] = useState<EmailResultItem[]>(() => {
     try {
-      const saved = sessionStorage.getItem('email_scan_results_v2');
+      const saved = localStorage.getItem('email_scan_results_v2');
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [filter, setFilter] = useState<'all' | 'deals' | 'skipped'>('all');
+  const [filter, setFilter] = useState<'all' | 'deals' | 'suspects' | 'skipped'>('suspects');
+  const [maxPrice, setMaxPrice] = useState<number>(220000);
 
-  // Persist results to sessionStorage
+  // Persist results to localStorage
   useEffect(() => {
-    try { sessionStorage.setItem('email_scan_results_v2', JSON.stringify(results)); } catch {}
+    try { localStorage.setItem('email_scan_results_v2', JSON.stringify(results)); } catch {}
   }, [results]);
 
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -613,7 +624,7 @@ export default function EmailSearchPage() {
           const toAdd = newItems.filter(i => !existingKeys.has(i.key));
           const updated = [...toAdd, ...prev];
           // Persist incrementally after each batch
-          try { sessionStorage.setItem('email_scan_results_v2', JSON.stringify(updated)); } catch {}
+          try { localStorage.setItem('email_scan_results_v2', JSON.stringify(updated)); } catch {}
           return updated;
         });
       }
@@ -629,7 +640,7 @@ export default function EmailSearchPage() {
   // DEBUG: clear session results + force-rescan (bypasses already-processed check)
   const handleForceRescan = useCallback(() => {
     setResults([]);
-    sessionStorage.removeItem('email_scan_results_v2');
+    localStorage.removeItem('email_scan_results_v2');
     handleBatchedScan(true, true);
   }, [handleBatchedScan]);
 
@@ -660,6 +671,11 @@ export default function EmailSearchPage() {
       return deal ? !isDealAnalyzed(deal) : true;
     });
   }, [actionableItems, deals]);
+
+  const suspectsItems = useMemo(
+    () => actionableItems.filter(r => !r.purchasePrice || r.purchasePrice <= maxPrice),
+    [actionableItems, maxPrice]
+  );
 
   const selectedActionable = useMemo(
     () => actionableItems.filter(r => selected.has(r.key) && r.dealId),
@@ -766,10 +782,14 @@ export default function EmailSearchPage() {
   // ── Filtered list ─────────────────────────────────────────────────────────
 
   const filtered = useMemo(() => {
-    if (filter === 'deals') return results.filter(r => isActionable(r.action));
-    if (filter === 'skipped') return results.filter(r => !isActionable(r.action));
-    return results;
-  }, [results, filter]);
+    let list = results.filter(r => r.action !== 'skipped_portal');
+    if (filter === 'deals') return list.filter(r => isActionable(r.action));
+    if (filter === 'skipped') return list.filter(r => !isActionable(r.action));
+    if (filter === 'suspects') return list.filter(r =>
+      isActionable(r.action) && (!r.purchasePrice || r.purchasePrice <= maxPrice)
+    );
+    return list;
+  }, [results, filter, maxPrice]);
 
   // ── Analysis progress ─────────────────────────────────────────────────────
 
@@ -957,17 +977,32 @@ export default function EmailSearchPage() {
             {/* Toolbar */}
             <div className="flex flex-wrap items-center gap-3">
               {/* Filter tabs */}
-              <div className="flex gap-1">
-                {(['all', 'deals', 'skipped'] as const).map(f => (
+              <div className="flex gap-1 items-center">
+                {(['suspects', 'deals', 'all', 'skipped'] as const).map(f => (
                   <button key={f} onClick={() => setFilter(f)}
                     className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
                       filter === f ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'
                     }`}>
-                    {f === 'all'     ? `All (${results.filter(r => r.action !== 'skipped_portal').length})` :
-                     f === 'deals'   ? `Deals (${actionableItems.length})` :
+                    {f === 'suspects' ? `Suspects (${suspectsItems.length})` :
+                     f === 'all'      ? `All (${results.filter(r => r.action !== 'skipped_portal').length})` :
+                     f === 'deals'    ? `Deals (${actionableItems.length})` :
                      `Skipped (${results.filter(r => !isActionable(r.action) && r.action !== 'skipped_portal').length})`}
                   </button>
                 ))}
+                {/* Max price filter */}
+                <div className="ml-2 flex items-center gap-1">
+                  <span className="text-[10px] text-muted-foreground">≤</span>
+                  <input
+                    type="number"
+                    value={maxPrice / 1000}
+                    onChange={e => setMaxPrice(Math.max(1000, Number(e.target.value) * 1000))}
+                    className="w-14 h-6 px-1.5 text-xs bg-muted/50 border border-border/50 rounded text-center"
+                    step={10}
+                    min={50}
+                    max={2000}
+                  />
+                  <span className="text-[10px] text-muted-foreground">k</span>
+                </div>
               </div>
 
               {/* Bulk actions */}
@@ -984,9 +1019,16 @@ export default function EmailSearchPage() {
                   )}
                   {unanalyzedActionable.length > 0 && !isAnalyzing && selectedActionable.length === 0 && (
                     <Button size="sm" variant="outline"
-                      onClick={() => startAnalyzeList(unanalyzedActionable.map(r => ({ id: r.dealId!, address: r.address })))}>
+                      onClick={() => {
+                        const toAnalyze = filter === 'suspects'
+                          ? unanalyzedActionable.filter(r => !r.purchasePrice || r.purchasePrice <= maxPrice)
+                          : unanalyzedActionable;
+                        startAnalyzeList(toAnalyze.map(r => ({ id: r.dealId!, address: r.address })));
+                      }}>
                       <Zap className="w-3.5 h-3.5 mr-1.5" />
-                      Analyze All New ({unanalyzedActionable.length})
+                      Analyze All ({filter === 'suspects'
+                        ? unanalyzedActionable.filter(r => !r.purchasePrice || r.purchasePrice <= maxPrice).length
+                        : unanalyzedActionable.length})
                     </Button>
                   )}
                 </div>
@@ -995,7 +1037,7 @@ export default function EmailSearchPage() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button size="sm" variant="ghost"
-                    onClick={() => { setResults([]); setSelected(new Set()); try { sessionStorage.removeItem('email_scan_results_v2'); } catch {} }}
+                    onClick={() => { setResults([]); setSelected(new Set()); try { localStorage.removeItem('email_scan_results_v2'); } catch {} }}
                     className="text-muted-foreground ml-auto sm:ml-0">
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
@@ -1023,6 +1065,7 @@ export default function EmailSearchPage() {
                   {filtered.map(item => {
                     const deal = item.dealId ? deals.find(d => d.id === item.dealId) : null;
                     const analyzed = deal ? isDealAnalyzed(deal) : false;
+                    const grade = deal?.apiData?.grade != null ? String(deal.apiData.grade) : null;
                     const qItem = item.dealId ? analyzeQueue.find(a => a.id === item.dealId) : null;
                     const isAnalyzingThis = qItem?.status === 'analyzing' || creatingKey === item.key;
                     const isDone = qItem?.status === 'done' || analyzed;
@@ -1037,6 +1080,7 @@ export default function EmailSearchPage() {
                         isError={isError}
                         analyzeError={qItem?.error}
                         isCreating={creatingKey === item.key}
+                        grade={grade}
                         editingKey={editingKey}
                         editAddr={editAddr}
                         selected={selected.has(item.key)}
