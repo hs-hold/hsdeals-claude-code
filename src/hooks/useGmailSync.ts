@@ -251,6 +251,26 @@ export function useGmailSync() {
     }
   }, [toast]);
 
+  // Mark a single Gmail message as read directly via Gmail API (no edge function needed)
+  const markMessageRead = useCallback(async (accessToken: string, messageId: string): Promise<void> => {
+    try {
+      const res = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/modify`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ removeLabelIds: ['UNREAD'] }),
+        }
+      );
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        console.warn(`markMessageRead ${messageId} → HTTP ${res.status}: ${errText}`);
+      }
+    } catch (err) {
+      console.warn('markMessageRead failed:', err);
+    }
+  }, []);
+
   return {
     isSyncing,
     isMarkingOld,
@@ -259,5 +279,6 @@ export function useGmailSync() {
     syncBatch,
     markOldAsRead,
     markUnreadRecent,
+    markMessageRead,
   };
 }

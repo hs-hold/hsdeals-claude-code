@@ -569,11 +569,15 @@ Return { "deals": [] } if no valid US property addresses with street numbers are
 // Mark email as read in Gmail
 async function markEmailAsRead(accessToken: string, messageId: string): Promise<void> {
   try {
-    await fetch(`${GMAIL_API_BASE}/users/me/messages/${messageId}/modify`, {
+    const res = await fetch(`${GMAIL_API_BASE}/users/me/messages/${messageId}/modify`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ removeLabelIds: ['UNREAD'] }),
     });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.error(`markEmailAsRead ${messageId} → HTTP ${res.status}: ${errText}`);
+    }
   } catch (error) {
     console.error(`Failed to mark email ${messageId} as read:`, error);
   }
@@ -965,7 +969,9 @@ serve(async (req) => {
 
         // Mark as read whenever any address was found (even if skipped/duplicate/over-budget).
         // Only leave unread when no address was found at all (no_address → retry).
-        if (!dry_run && !force_rescan && emailWasProcessed) {
+        // force_rescan is also allowed to mark as read — it is used as "Reset & Rescan"
+        // which is a real scan, not a preview. Only dry_run (true preview) skips marking.
+        if (!dry_run && emailWasProcessed) {
           await markEmailAsRead(access_token, msg.id);
         }
 

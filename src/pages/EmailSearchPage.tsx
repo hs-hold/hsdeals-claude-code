@@ -521,7 +521,7 @@ function PropertyRow({
 
 export default function EmailSearchPage() {
   const { isConnected, isLoading: isAuthLoading, tokens, connect, disconnect, getValidToken } = useGmailAuth();
-  const { isSyncing, isMarkingOld, syncBatch, markOldAsRead, markUnreadRecent } = useGmailSync();
+  const { isSyncing, isMarkingOld, syncBatch, markOldAsRead, markUnreadRecent, markMessageRead } = useGmailSync();
   const { selectedState } = useUserState();
   const { deals, refetch } = useDeals();
   const {
@@ -784,6 +784,12 @@ export default function EmailSearchPage() {
       setEditAddr('');
       await refetch();
 
+      // Mark the source email as read in Gmail now that a deal was created from it
+      if (item.messageId) {
+        const accessToken = await getValidToken();
+        if (accessToken) markMessageRead(accessToken, item.messageId);
+      }
+
       toast.success('Deal created — sending to DealBeast...');
       await startAnalyzeList([{ id: dealId, address: addr }]);
       await refetch();
@@ -793,7 +799,7 @@ export default function EmailSearchPage() {
     } finally {
       setCreatingKey(null);
     }
-  }, [editAddr, refetch, startAnalyzeList]);
+  }, [editAddr, refetch, startAnalyzeList, getValidToken, markMessageRead]);
 
   // ── Analysis ─────────────────────────────────────────────────────────────
 
