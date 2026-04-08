@@ -1633,6 +1633,40 @@ export default function DealDetailPage() {
         </div>
       )}
 
+      {/* From Email banner — shows when deal was imported from an email */}
+      {deal.source === 'email' && !bannerDismissed && (
+        <div className="flex flex-wrap items-center gap-3 p-3 rounded-lg bg-blue-500/10 border border-blue-500/30 text-sm mb-3">
+          <Mail className="w-4 h-4 text-blue-400 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <span className="font-semibold text-blue-400">From Email · </span>
+            <span className="text-muted-foreground">
+              {deal.senderName && `${deal.senderName} `}
+              {deal.senderEmail && <span className="font-mono text-xs">{deal.senderEmail}</span>}
+              {deal.emailSubject && <> · <em>&ldquo;{deal.emailSubject}&rdquo;</em></>}
+            </span>
+          </div>
+          {/* Photo links */}
+          {Array.isArray((deal.emailExtractedData as any)?.photoLinks) &&
+            (deal.emailExtractedData as any).photoLinks.slice(0, 3).map((url: string, i: number) => (
+              <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+                className="text-[10px] px-1.5 py-0.5 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:text-blue-300">
+                📷 Photos{i > 0 ? ` ${i + 1}` : ''}
+              </a>
+            ))
+          }
+          {/* Document links */}
+          {Array.isArray((deal.emailExtractedData as any)?.documentLinks) &&
+            (deal.emailExtractedData as any).documentLinks.slice(0, 4).map((dl: any, i: number) => (
+              <a key={i} href={dl.url} target="_blank" rel="noopener noreferrer"
+                className="text-[10px] px-1.5 py-0.5 rounded border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:text-indigo-300">
+                {dl.label}
+              </a>
+            ))
+          }
+          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setBannerDismissed(true)}>✕</Button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex items-start gap-4">
@@ -3199,6 +3233,47 @@ BRRRR STRATEGY:
                   })()}
                 </CardContent>
               </Card>
+            )}
+
+            {/* Email Details Card — shown for all email-sourced deals (complementary to the off-market card) */}
+            {deal.source === 'email' && !deal.isOffMarket && deal.emailSnippet && (
+              <Collapsible>
+                <Card className="border-border/50 bg-card/50">
+                  <CollapsibleTrigger asChild>
+                    <CardHeader className="pb-2 pt-3 px-4 cursor-pointer hover:bg-muted/30 transition-colors">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                          <Mail className="w-4 h-4" />
+                          Email Details
+                        </CardTitle>
+                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                      </div>
+                    </CardHeader>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <CardContent className="px-4 pb-4 space-y-3">
+                      <div className="flex flex-wrap gap-4 text-sm">
+                        {deal.senderName && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-muted-foreground">From:</span>
+                            <span className="font-medium">{deal.senderName}</span>
+                            {deal.senderEmail && <span className="text-muted-foreground text-xs">({deal.senderEmail})</span>}
+                          </div>
+                        )}
+                        {deal.emailSubject && (
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-muted-foreground shrink-0">Subject:</span>
+                            <span className="text-xs truncate max-w-xs">{deal.emailSubject}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-3 bg-muted/30 rounded text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                        {deal.emailSnippet}
+                      </div>
+                    </CardContent>
+                  </CollapsibleContent>
+                </Card>
+              </Collapsible>
             )}
 
             {/* Primary Metrics Card - Editable - Collapsible */}

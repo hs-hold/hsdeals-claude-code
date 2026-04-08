@@ -606,6 +606,24 @@ export function useDealsFromDB() {
       rawResponse: data,
     };
 
+    // Merge trusted email-extracted fields into API data gaps.
+    // Factual property attributes from the seller's own listing are often more accurate
+    // than Zillow estimates for off-market / wholesaler deals.
+    // NEVER merge: arv, rent, capRate, cashFlow — get these from DealBeast API only.
+    const emailData = deal.emailExtractedData;
+    if (emailData && typeof emailData === 'object') {
+      const trusted = emailData as any;
+      if (!apiData.bedrooms   && trusted.bedrooms)    apiData.bedrooms    = trusted.bedrooms;
+      if (!apiData.bathrooms  && trusted.bathrooms)   apiData.bathrooms   = trusted.bathrooms;
+      if (!apiData.sqft       && trusted.sqft)        apiData.sqft        = trusted.sqft;
+      if (!apiData.yearBuilt  && trusted.yearBuilt)   apiData.yearBuilt   = trusted.yearBuilt;
+      if (!apiData.lotSize    && trusted.lotSize)     apiData.lotSize     = trusted.lotSize;
+      if (!apiData.propertyType && trusted.propertyType) apiData.propertyType = trusted.propertyType;
+    }
+
+    // Verify purchasePrice override from email is preserved
+    // (already set in overrides.purchasePrice when deal was created from email)
+
     // Calculate financials with new API data
     const financials = calculateFinancials(apiData, deal.overrides, loanDefaults);
 

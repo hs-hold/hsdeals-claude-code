@@ -262,6 +262,14 @@ function PropertyRow({
           <Link to={`/deals/${item.dealId}`} className="font-medium text-sm hover:text-primary transition-colors block truncate">
             {displayAddress}
           </Link>
+        ) : item.messageId && item.action !== 'no_address' ? (
+          <Link
+            to={`/email-preview/${item.messageId}`}
+            state={{ emailItem: item }}
+            className="font-medium text-sm hover:text-primary transition-colors block truncate"
+          >
+            {displayAddress}
+          </Link>
         ) : (
           <span className={`font-medium text-sm block truncate ${item.action === 'no_address' ? 'text-muted-foreground/60 italic' : ''}`}>
             {displayAddress}
@@ -488,7 +496,7 @@ function PropertyRow({
 
 export default function EmailSearchPage() {
   const { isConnected, isLoading: isAuthLoading, tokens, connect, disconnect, getValidToken } = useGmailAuth();
-  const { isSyncing, isMarkingOld, sync, markOldAsRead, markUnreadRecent } = useGmailSync();
+  const { isSyncing, isMarkingOld, sync, syncBatch, markOldAsRead, markUnreadRecent } = useGmailSync();
   const { selectedState } = useUserState();
   const { deals, refetch } = useDeals();
   const {
@@ -516,6 +524,9 @@ export default function EmailSearchPage() {
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editAddr, setEditAddr] = useState('');
   const [creatingKey, setCreatingKey] = useState<string | null>(null);
+
+  // Batch scan progress
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
 
   // ── Scan ──────────────────────────────────────────────────────────────────
 
@@ -567,8 +578,100 @@ export default function EmailSearchPage() {
     await refetch();
   }, [tokens, isSyncing, sync, scanCount, selectedState, refetch, getValidToken]);
 
-  const handleScan        = useCallback(() => runScan(false), [runScan]);
-  const handleRescan      = useCallback(() => runScan(true),  [runScan]);
+  // ── Batched scan: fetch message IDs from Gmail API, then process in batches of 8 ──
+
+  const handleBatchedScan = useCallback(async (includeRead: boolean) => {
+    if (!tokens?.access_token || isSyncing) return;
+
+    const accessToken = await getValidToken();
+    if (!accessToken) return;
+
+    const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
+    const headers = { 'Authorization': `Bearer ${accessToken}` };
+
+    // Build query
+    const labelParam = includeRead ? '' : '&labelIds=UNREAD';
+    const listUrl = `${GMAIL}/messages?maxResults=${scanCount}${labelParam}`;
+
+    let msgIds: string[];
+    try {
+      const listRes = await fetch(listUrl, { headers });
+      if (!listRes.ok) {
+        const err = await listRes.text();
+        toast.error(`Gmail list failed: ${err}`);
+        return;
+      }
+      const listData = await listRes.json();
+      msgIds = (listData.messages || []).map((m: { id: string }) => m.id);
+    } catch (e) {
+      toast.error('Failed to fetch email list');
+      return;
+    }
+
+    if (msgIds.length === 0) {
+      toast.info('No emails found to scan');
+      return;
+    }
+
+    const BATCH_SIZE = 8;
+    const totalBatches = Math.ceil(msgIds.length / BATCH_SIZE);
+    setBatchProgress({ current: 0, total: totalBatches });
+
+    const options = {
+      includeRead,
+      markAllRead: false,
+      targetState: selectedState && selectedState !== 'ALL' ? selectedState : undefined,
+    };
+
+    for (let i = 0; i < msgIds.length; i += BATCH_SIZE) {
+      const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+      setBatchProgress({ current: batchNum, total: totalBatches });
+
+      const batchIds = msgIds.slice(i, i + BATCH_SIZE);
+      const result = await syncBatch(accessToken, batchIds, options);
+
+      if (result?.syncDetails) {
+        const scannedAt = new Date().toISOString();
+        const newItems: EmailResultItem[] = result.syncDetails
+          .filter((d: any) => d.action !== 'skipped_portal')
+          .map((d: any, idx: number) => {
+            const dealId = d.dealId || d.existingDealId || null;
+            return {
+              key: dealId ?? `skip-${scannedAt}-${batchNum}-${idx}`,
+              dealId,
+              address: d.address || '(no address)',
+              action: d.action as EmailAction,
+              dealType: d.dealType ?? null,
+              purchasePrice: d.purchasePrice ?? null,
+              senderName: d.senderName ?? '',
+              senderEmail: d.senderEmail ?? '',
+              subject: d.subject ?? '',
+              reason: d.reason ?? '',
+              scannedAt,
+              messageId: d.messageId ?? undefined,
+              extractedData: d.extractedData ?? undefined,
+              emailSnippet: d.emailSnippet ?? undefined,
+              extractionSource: d.extractionSource ?? undefined,
+            };
+          });
+
+        setResults(prev => {
+          const existingKeys = new Set(prev.map(i => i.key));
+          const toAdd = newItems.filter(i => !existingKeys.has(i.key));
+          const updated = [...toAdd, ...prev];
+          // Persist incrementally after each batch
+          try { sessionStorage.setItem('email_scan_results_v2', JSON.stringify(updated)); } catch {}
+          return updated;
+        });
+      }
+    }
+
+    setBatchProgress(null);
+    await refetch();
+  }, [tokens, isSyncing, syncBatch, scanCount, selectedState, refetch, getValidToken]);
+
+  const handleScan        = useCallback(() => handleBatchedScan(false), [handleBatchedScan]);
+  const handleRescan      = useCallback(() => handleBatchedScan(true),  [handleBatchedScan]);
 
   // DEBUG: clear session results + force-rescan (bypasses already-processed check)
   const handleForceRescan = useCallback(async () => {
@@ -884,6 +987,22 @@ export default function EmailSearchPage() {
             </p>
           </CardContent>
         </Card>
+
+        {/* ── Batch scan progress ───────────────────────────────────────── */}
+        {batchProgress && (
+          <Card className="border-blue-500/30 bg-card/50">
+            <CardContent className="pt-4 pb-4 space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="flex items-center gap-2 font-medium">
+                  <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+                  Scanning batch {batchProgress.current}/{batchProgress.total}...
+                </span>
+                <span className="text-muted-foreground">{batchProgress.current} / {batchProgress.total}</span>
+              </div>
+              <Progress value={(batchProgress.current / batchProgress.total) * 100} className="h-1.5" />
+            </CardContent>
+          </Card>
+        )}
 
         {/* ── Analysis progress ─────────────────────────────────────────── */}
         {isAnalyzing && (

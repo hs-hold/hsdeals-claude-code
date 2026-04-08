@@ -199,11 +199,64 @@ export function useGmailSync() {
     }
   }, [toast]);
 
+  const syncBatch = useCallback(async (accessToken: string, messageIds: string[], options?: SyncOptions): Promise<SyncResult | null> => {
+    const { sinceDays, markAllRead = false, includeRead = false, targetState, forceRescan = false } = options || {};
+    setIsSyncing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('gmail-sync', {
+        body: {
+          access_token: accessToken,
+          message_ids: messageIds,
+          since_days: sinceDays,
+          mark_all_read: markAllRead,
+          include_read: includeRead,
+          target_state: targetState,
+          force_rescan: forceRescan,
+        },
+      });
+
+      if (error) throw error;
+
+      const result: SyncResult = {
+        success: data.success ?? false,
+        processed: data.processed ?? 0,
+        deals: data.deals ?? [],
+        skippedDuplicate: data.skippedDuplicate ?? 0,
+        skippedPortal: data.skippedPortal ?? 0,
+        totalScanned: data.totalScanned ?? 0,
+        olderMarkedRead: data.olderMarkedRead ?? 0,
+        syncDetails: data.syncDetails ?? [],
+        syncHistoryId: data.syncHistoryId,
+        errors: data.errors,
+        message: data.message,
+      };
+
+      setLastSyncResult(result);
+
+      if (!result.success) {
+        throw new Error(data.error || 'Sync failed');
+      }
+
+      return result;
+    } catch (error) {
+      console.error('syncBatch error:', error);
+      toast({
+        title: 'Batch Sync Failed',
+        description: error instanceof Error ? error.message : 'Failed to sync email batch',
+        variant: 'destructive',
+      });
+      return null;
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [toast]);
+
   return {
     isSyncing,
     isMarkingOld,
     lastSyncResult,
     sync,
+    syncBatch,
     markOldAsRead,
     markUnreadRecent,
   };

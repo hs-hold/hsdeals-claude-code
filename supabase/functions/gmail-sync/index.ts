@@ -618,6 +618,7 @@ serve(async (req) => {
       mark_unread_recent = false,
       dry_run = false,
       force_rescan = false,        // DEBUG: skip already-processed check
+      message_ids,                 // Optional: pre-fetched message IDs to skip Gmail list API
     } = body;
 
     if (!access_token) {
@@ -700,29 +701,38 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Fetching emails... (since_days: ${since_days ?? 'all'}, include_read: ${include_read}, dry_run: ${dry_run})`);
+    console.log(`Fetching emails... (since_days: ${since_days ?? 'all'}, include_read: ${include_read}, dry_run: ${dry_run}, message_ids: ${message_ids ? message_ids.length : 'none'})`);
 
-    // Build Gmail search query
-    let query = include_read ? '' : 'is:unread';
-    if (since_days) query += `${query ? ' ' : ''}newer_than:${since_days}d`;
-    const encodedQuery = encodeURIComponent(query.trim());
+    let messages: Array<{ id: string }>;
 
-    const listResponse = await fetch(
-      `${GMAIL_API_BASE}/users/me/messages?maxResults=${max_results}&q=${encodedQuery}`,
-      { headers: { 'Authorization': `Bearer ${access_token}` } }
-    );
+    if (Array.isArray(message_ids) && message_ids.length > 0) {
+      // Caller already fetched the message list — skip Gmail list API
+      messages = message_ids.map((id: string) => ({ id }));
+      console.log(`Using provided ${messages.length} message IDs — skipping Gmail list API`);
+    } else {
+      // Build Gmail search query
+      let query = include_read ? '' : 'is:unread';
+      if (since_days) query += `${query ? ' ' : ''}newer_than:${since_days}d`;
+      const encodedQuery = encodeURIComponent(query.trim());
 
-    if (!listResponse.ok) {
-      const errorText = await listResponse.text();
-      console.error('Gmail API error:', listResponse.status, errorText);
-      return new Response(
-        JSON.stringify({ success: false, error: 'Failed to fetch emails', details: errorText }),
-        { status: listResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      const listResponse = await fetch(
+        `${GMAIL_API_BASE}/users/me/messages?maxResults=${max_results}&q=${encodedQuery}`,
+        { headers: { 'Authorization': `Bearer ${access_token}` } }
       );
+
+      if (!listResponse.ok) {
+        const errorText = await listResponse.text();
+        console.error('Gmail API error:', listResponse.status, errorText);
+        return new Response(
+          JSON.stringify({ success: false, error: 'Failed to fetch emails', details: errorText }),
+          { status: listResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const listData = await listResponse.json();
+      messages = listData.messages || [];
     }
 
-    const listData = await listResponse.json();
-    const messages = listData.messages || [];
     console.log(`Found ${messages.length} emails to process`);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -737,13 +747,28 @@ serve(async (req) => {
       id: d.id, address: d.address_full, deal: d,
     })) || [];
 
-    const syncDetails: SyncDetails[] = [];
-    const processedDeals: any[] = [];
-    const errors: string[] = [];
-    const skippedAddresses: string[] = [];
-    const portalEmails: string[] = [];
-    let dealsSkippedDuplicate = 0;
-    let dealsSkippedPortal = 0;
+    // Shared mutable state — all concurrent workers accumulate into this object
+    interface SharedState {
+      existingAddresses: Array<{ id: string; address: string; deal: any }>;
+      syncDetails: SyncDetails[];
+      processedDeals: any[];
+      errors: string[];
+      skippedAddresses: string[];
+      portalEmails: string[];
+      dealsSkippedDuplicate: number;
+      dealsSkippedPortal: number;
+    }
+
+    const sharedState: SharedState = {
+      existingAddresses,
+      syncDetails: [],
+      processedDeals: [],
+      errors: [],
+      skippedAddresses: [],
+      portalEmails: [],
+      dealsSkippedDuplicate: 0,
+      dealsSkippedPortal: 0,
+    };
 
     if (messages.length === 0) {
       return new Response(
@@ -752,7 +777,8 @@ serve(async (req) => {
       );
     }
 
-    for (const msg of messages) {
+    // Process one email message — accumulates into sharedState
+    async function processOneMessage(msg: { id: string }, state: SharedState): Promise<void> {
       try {
         // Skip already-processed message IDs (unless dry_run, include_read, or force_rescan)
         if (!dry_run && !include_read && !force_rescan) {
@@ -760,7 +786,7 @@ serve(async (req) => {
           if (alreadyProcessed) {
             console.log(`Email ${msg.id} already processed, skipping`);
             await markEmailAsRead(access_token, msg.id);
-            continue;
+            return;
           }
         }
 
@@ -771,7 +797,7 @@ serve(async (req) => {
         );
         if (!msgResponse.ok) {
           console.error(`Failed to fetch message ${msg.id}`);
-          continue;
+          return;
         }
 
         const fullMessage: GmailMessage = await msgResponse.json();
@@ -788,11 +814,11 @@ serve(async (req) => {
 
         // Skip portal emails — mark them as read immediately
         if (isPortalEmail(senderInfo.email)) {
-          portalEmails.push(`${senderInfo.email}: ${subject}`);
-          dealsSkippedPortal++;
-          syncDetails.push({ address: '', action: 'skipped_portal', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `Portal: ${senderInfo.email}`, messageId: msg.id, emailSnippet: snippet });
+          state.portalEmails.push(`${senderInfo.email}: ${subject}`);
+          state.dealsSkippedPortal++;
+          state.syncDetails.push({ address: '', action: 'skipped_portal', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `Portal: ${senderInfo.email}`, messageId: msg.id, emailSnippet: snippet });
           await markEmailAsRead(access_token, msg.id);
-          continue;
+          return;
         }
 
         // Extract deals (AI + regex fallback)
@@ -802,9 +828,9 @@ serve(async (req) => {
           console.log(`No addresses found in: "${subject}"`);
           // DEBUG: include body preview in reason so we can see what Claude received
           const bodyPreview = body.substring(0, 400).replace(/\n+/g, ' ');
-          syncDetails.push({ address: '', action: 'no_address', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `No address found. Body preview: "${bodyPreview}"`, messageId: msg.id, emailSnippet: snippet });
+          state.syncDetails.push({ address: '', action: 'no_address', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `No address found. Body preview: "${bodyPreview}"`, messageId: msg.id, emailSnippet: snippet });
           // ── KEY FIX: Do NOT mark as read — leave unread so it can be retried ──
-          continue;
+          return;
         }
 
         console.log(`Found ${extractedDeals.length} deal(s) in "${subject}"`);
@@ -818,12 +844,14 @@ serve(async (req) => {
 
           // Skip over-budget
           if (emailPurchasePrice && emailPurchasePrice > MAX_DEAL_PRICE) {
-            syncDetails.push({ address, action: 'skipped_over_budget', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `$${emailPurchasePrice.toLocaleString()} > $${MAX_DEAL_PRICE.toLocaleString()}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
+            state.syncDetails.push({ address, action: 'skipped_over_budget', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `$${emailPurchasePrice.toLocaleString()} > $${MAX_DEAL_PRICE.toLocaleString()}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
             continue;
           }
 
           // Duplicate check — skip when force_rescan so we can see full extraction
-          const duplicateMatch = force_rescan ? null : existingAddresses.find(ea => addressesMatch(ea.address, address));
+          // Note: existingAddresses is shared — within-batch dedup works because workers
+          // push to it immediately after creating a deal.
+          const duplicateMatch = force_rescan ? null : state.existingAddresses.find(ea => addressesMatch(ea.address, address));
           if (duplicateMatch) {
             const newDealData = { emailPurchasePrice, purchasePrice: emailPurchasePrice };
             if (!dry_run && isBetterDeal(newDealData, duplicateMatch.deal)) {
@@ -835,12 +863,12 @@ serve(async (req) => {
                 email_subject: subject,
                 email_date: date ? new Date(date).toISOString() : null,
               }).eq('id', duplicateMatch.id);
-              syncDetails.push({ address, action: 'updated_existing', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `Better price: $${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
+              state.syncDetails.push({ address, action: 'updated_existing', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `Better price: $${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
               dealsFromThisEmail++;
             } else {
-              skippedAddresses.push(address);
-              dealsSkippedDuplicate++;
-              syncDetails.push({ address, action: 'skipped_duplicate', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
+              state.skippedAddresses.push(address);
+              state.dealsSkippedDuplicate++;
+              state.syncDetails.push({ address, action: 'skipped_duplicate', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
             }
             continue;
           }
@@ -850,14 +878,14 @@ serve(async (req) => {
           const street   = addressParts[0] || address;
           const city     = addressParts[1] || '';
           const stateZip = addressParts[2] || '';
-          const [state, zip] = stateZip.split(' ').filter(Boolean);
+          const [state_code, zip] = stateZip.split(' ').filter(Boolean);
 
           // State filter
-          if (target_state && state) {
-            const normState = state.toUpperCase().trim();
+          if (target_state && state_code) {
+            const normState = state_code.toUpperCase().trim();
             const normTarget = target_state.toUpperCase().trim();
             if (normState !== normTarget) {
-              syncDetails.push({ address, action: 'skipped_wrong_state', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `State ${normState} != ${normTarget}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
+              state.syncDetails.push({ address, action: 'skipped_wrong_state', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `State ${normState} != ${normTarget}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
               continue;
             }
           }
@@ -876,7 +904,7 @@ serve(async (req) => {
           const dealData: Record<string, any> = {
             address_street: street,
             address_city: city,
-            address_state: state || '',
+            address_state: state_code || '',
             address_zip: zip || null,
             address_full: address,
             status: 'new',
@@ -895,9 +923,10 @@ serve(async (req) => {
 
           if (dry_run || force_rescan) {
             // Don't save — just report (dry_run or force_rescan testing mode)
-            processedDeals.push({ ...dealData, dry_run: true, extractionSource: dealInfo.source });
-            syncDetails.push({ address, action: 'created', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `[TEST] Source: ${dealInfo.source} price=${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
-            existingAddresses.push({ id: 'dry-run', address, deal: dealData });
+            state.processedDeals.push({ ...dealData, dry_run: true, extractionSource: dealInfo.source });
+            state.syncDetails.push({ address, action: 'created', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `[TEST] Source: ${dealInfo.source} price=${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
+            // Register address immediately so within-batch dedup works
+            state.existingAddresses.push({ id: 'dry-run', address, deal: dealData });
             dealsFromThisEmail++;
             continue;
           }
@@ -907,14 +936,15 @@ serve(async (req) => {
 
           if (insertError) {
             console.error('Error inserting deal:', insertError);
-            errors.push(`Failed to save ${address}: ${insertError.message}`);
-            syncDetails.push({ address, action: 'error', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: insertError.message, messageId: msg.id, emailSnippet: snippet });
+            state.errors.push(`Failed to save ${address}: ${insertError.message}`);
+            state.syncDetails.push({ address, action: 'error', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: insertError.message, messageId: msg.id, emailSnippet: snippet });
             continue;
           }
 
-          existingAddresses.push({ id: newDeal.id, address: newDeal.address_full, deal: newDeal });
-          processedDeals.push(newDeal);
-          syncDetails.push({ address, action: 'created', dealId: newDeal.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
+          // Register immediately so subsequent parallel workers see this address
+          state.existingAddresses.push({ id: newDeal.id, address: newDeal.address_full, deal: newDeal });
+          state.processedDeals.push(newDeal);
+          state.syncDetails.push({ address, action: 'created', dealId: newDeal.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
           dealsFromThisEmail++;
           console.log(`  ✓ Created deal: ${address}`);
         }
@@ -927,10 +957,20 @@ serve(async (req) => {
 
       } catch (error) {
         console.error(`Error processing message ${msg.id}:`, error);
-        errors.push(`Error: ${error instanceof Error ? error.message : 'Unknown'}`);
-        syncDetails.push({ address: '', action: 'error', reason: error instanceof Error ? error.message : 'Unknown error' });
+        sharedState.errors.push(`Error: ${error instanceof Error ? error.message : 'Unknown'}`);
+        sharedState.syncDetails.push({ address: '', action: 'error', reason: error instanceof Error ? error.message : 'Unknown error' });
       }
     }
+
+    // Process messages in parallel batches of 4 to stay well within the 60s timeout
+    const CONCURRENCY = 4;
+    for (let i = 0; i < messages.length; i += CONCURRENCY) {
+      const batch = messages.slice(i, i + CONCURRENCY);
+      await Promise.allSettled(batch.map(msg => processOneMessage(msg, sharedState)));
+    }
+
+    // Extract from shared state for response building
+    const { syncDetails, processedDeals, errors, skippedAddresses, portalEmails, dealsSkippedDuplicate, dealsSkippedPortal } = sharedState;
 
     // Mark older unread emails as read if requested
     let olderMarkedRead = 0;

@@ -41,6 +41,7 @@ import AgentDealsPage from "./pages/AgentDealsPage";
 import AgentManagementPage from "./pages/AgentManagementPage";
 import ApiDocumentationPage from "./pages/ApiDocumentationPage";
 import ApiActivityPage from "./pages/ApiActivityPage";
+import EmailDealPreviewPage from "./pages/EmailDealPreviewPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({});
@@ -65,6 +66,7 @@ const App = () => (
                   <Route path="/analyze/address" element={<ProtectedRoute><AppLayout><AddressSearchPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/analyze/market" element={<ProtectedRoute><AppLayout><MarketSearchPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/analyze/email" element={<ProtectedRoute><AppLayout><EmailSearchPage /></AppLayout></ProtectedRoute>} />
+                  <Route path="/email-preview/:id" element={<ProtectedRoute><AppLayout><EmailDealPreviewPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/market-search-results" element={<ProtectedRoute><AppLayout><MarketSearchResultsPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/new-deals" element={<ProtectedRoute><AppLayout><NewDealsPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/deals" element={<ProtectedRoute><AppLayout><DealsListPage /></AppLayout></ProtectedRoute>} />
