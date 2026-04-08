@@ -92,6 +92,12 @@ function looksLikeAddress(s?: string): boolean {
   return /^\d+\s+\S+.*,\s*[a-zA-Z\s]+,\s*[a-zA-Z]{2}\s+\d{5}/i.test(s.trim());
 }
 
+// Address has a real street number (needed for DealBeast analysis)
+function hasStreetNumber(s?: string): boolean {
+  if (!s) return false;
+  return /^\d+\s/.test(s.trim());
+}
+
 interface SnippetData {
   price: number | null; arv: number | null; rehabCost: number | null; rent: number | null;
   beds: number | null; baths: number | null; sqft: number | null;
@@ -212,6 +218,8 @@ function PropertyRow({
   onToggleSelect, onAnalyze, onStartEdit, onEditChange, onEditSubmit, onEditCancel, onCreateAndAnalyze,
 }: PropertyRowProps) {
   const actionable = isActionable(item.action);
+  const addrHasStreet = hasStreetNumber(item.address); // needs street number for DealBeast
+  const canAnalyze = actionable && addrHasStreet && !!item.dealId;
   const { text: badgeText, color: badgeColor } = actionBadgeConfig(item.action);
   const subjectIsAddr = looksLikeAddress(item.subject);
   const suggestedAddr = item.action === 'no_address' && subjectIsAddr ? item.subject! : undefined;
@@ -276,6 +284,10 @@ function PropertyRow({
           <span className={`font-medium text-sm block truncate ${item.action === 'no_address' ? 'text-muted-foreground/60 italic' : ''}`}>
             {displayAddress}
           </span>
+        )}
+        {/* Warn when address has no street number — DealBeast needs a real address */}
+        {actionable && !addrHasStreet && (
+          <span className="text-[10px] text-amber-500/70 block">⚠ no street number</span>
         )}
       </div>
 
@@ -491,11 +503,14 @@ function PropertyRow({
             </Button>
           </Link>
         )}
-        {actionable && !isDone && !isAnalyzingThis && (
+        {canAnalyze && !isDone && !isAnalyzingThis && (
           <Button size="sm" variant="outline" className="h-7 text-xs px-3"
             onClick={onAnalyze}>
             <Zap className="w-3 h-3 mr-1" /> Analyze
           </Button>
+        )}
+        {actionable && !canAnalyze && !isDone && !isAnalyzingThis && !addrHasStreet && (
+          <span className="text-[10px] text-muted-foreground/40">no address</span>
         )}
       </div>
     </div>
@@ -672,9 +687,16 @@ export default function EmailSearchPage() {
     });
   }, [actionableItems, deals]);
 
+  // Suspects = actionable deals with valid address AND price ≤ maxPrice
+  // Does NOT require dealId — items without dealId show but with disabled Analyze
   const suspectsItems = useMemo(
-    () => actionableItems.filter(r => !r.purchasePrice || r.purchasePrice <= maxPrice),
-    [actionableItems, maxPrice]
+    () => results.filter(r => {
+      if (!isActionable(r.action)) return false;
+      if (!hasStreetNumber(r.address)) return false; // no address = skip
+      const price = r.purchasePrice != null ? Number(r.purchasePrice) : null;
+      return price == null || isNaN(price) || price <= maxPrice;
+    }),
+    [results, maxPrice]
   );
 
   const selectedActionable = useMemo(
@@ -785,9 +807,12 @@ export default function EmailSearchPage() {
     let list = results.filter(r => r.action !== 'skipped_portal');
     if (filter === 'deals') return list.filter(r => isActionable(r.action));
     if (filter === 'skipped') return list.filter(r => !isActionable(r.action));
-    if (filter === 'suspects') return list.filter(r =>
-      isActionable(r.action) && (!r.purchasePrice || r.purchasePrice <= maxPrice)
-    );
+    if (filter === 'suspects') return list.filter(r => {
+      if (!isActionable(r.action)) return false;
+      if (!hasStreetNumber(r.address)) return false; // no street number → skip, can't analyze
+      const price = r.purchasePrice != null ? Number(r.purchasePrice) : null;
+      return price == null || isNaN(price) || price <= maxPrice;
+    });
     return list;
   }, [results, filter, maxPrice]);
 
@@ -1020,15 +1045,24 @@ export default function EmailSearchPage() {
                   {unanalyzedActionable.length > 0 && !isAnalyzing && selectedActionable.length === 0 && (
                     <Button size="sm" variant="outline"
                       onClick={() => {
-                        const toAnalyze = filter === 'suspects'
-                          ? unanalyzedActionable.filter(r => !r.purchasePrice || r.purchasePrice <= maxPrice)
-                          : unanalyzedActionable;
-                        startAnalyzeList(toAnalyze.map(r => ({ id: r.dealId!, address: r.address })));
+                        // Only include items that actually have dealId + street number
+                        const analyzable = unanalyzedActionable.filter(r =>
+                          r.dealId && hasStreetNumber(r.address) &&
+                          (filter !== 'suspects' || (() => {
+                            const p = r.purchasePrice != null ? Number(r.purchasePrice) : null;
+                            return p == null || isNaN(p) || p <= maxPrice;
+                          })())
+                        );
+                        startAnalyzeList(analyzable.map(r => ({ id: r.dealId!, address: r.address })));
                       }}>
                       <Zap className="w-3.5 h-3.5 mr-1.5" />
-                      Analyze All ({filter === 'suspects'
-                        ? unanalyzedActionable.filter(r => !r.purchasePrice || r.purchasePrice <= maxPrice).length
-                        : unanalyzedActionable.length})
+                      Analyze All ({unanalyzedActionable.filter(r =>
+                        r.dealId && hasStreetNumber(r.address) &&
+                        (filter !== 'suspects' || (() => {
+                          const p = r.purchasePrice != null ? Number(r.purchasePrice) : null;
+                          return p == null || isNaN(p) || p <= maxPrice;
+                        })())
+                      ).length})
                     </Button>
                   )}
                 </div>
