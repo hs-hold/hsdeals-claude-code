@@ -725,36 +725,8 @@ export default function EmailSearchPage() {
     });
   };
 
-  // ── Analysis ─────────────────────────────────────────────────────────────
-
-  const handleAnalyzeSelected = useCallback(async () => {
-    if (selectedActionable.length === 0 || isAnalyzing) return;
-    setSelected(new Set());
-    // Items with dealId → batch analyze directly
-    const withId = selectedActionable.filter(r => r.dealId && hasStreetNumber(r.address));
-    // Items without dealId → create then analyze one by one
-    const withoutId = selectedActionable.filter(r => !r.dealId && hasStreetNumber(r.address));
-    for (const item of withoutId) {
-      await handleCreateAndAnalyze(item, item.address);
-    }
-    if (withId.length > 0) {
-      await startAnalyzeList(withId.map(r => ({ id: r.dealId!, address: r.address })));
-    }
-  }, [selectedActionable, isAnalyzing, startAnalyzeList, handleCreateAndAnalyze]);
-
-  const handleAnalyzeOne = useCallback(async (item: EmailResultItem) => {
-    if (isAnalyzing) return;
-    if (!item.dealId) {
-      // No deal in DB yet — create it first, then analyze
-      await handleCreateAndAnalyze(item, item.address);
-      return;
-    }
-    await startAnalyzeList([{ id: item.dealId, address: item.address }]);
-    await refetch();
-    window.open(`/deals/${item.dealId}`, '_blank', 'noopener,noreferrer');
-  }, [isAnalyzing, startAnalyzeList, refetch, handleCreateAndAnalyze]);
-
   // ── Create deal from address + immediately analyze ────────────────────────
+  // Defined first — used by handleAnalyzeOne and handleAnalyzeSelected below
 
   const handleCreateAndAnalyze = useCallback(async (item: EmailResultItem, addressOverride?: string) => {
     const addr = (addressOverride ?? editAddr).trim();
@@ -818,6 +790,33 @@ export default function EmailSearchPage() {
       setCreatingKey(null);
     }
   }, [editAddr, refetch, startAnalyzeList]);
+
+  // ── Analysis ─────────────────────────────────────────────────────────────
+
+  const handleAnalyzeOne = useCallback(async (item: EmailResultItem) => {
+    if (isAnalyzing) return;
+    if (!item.dealId) {
+      // No deal in DB yet — create it first, then analyze
+      await handleCreateAndAnalyze(item, item.address);
+      return;
+    }
+    await startAnalyzeList([{ id: item.dealId, address: item.address }]);
+    await refetch();
+    window.open(`/deals/${item.dealId}`, '_blank', 'noopener,noreferrer');
+  }, [isAnalyzing, startAnalyzeList, refetch, handleCreateAndAnalyze]);
+
+  const handleAnalyzeSelected = useCallback(async () => {
+    if (selectedActionable.length === 0 || isAnalyzing) return;
+    setSelected(new Set());
+    const withId    = selectedActionable.filter(r =>  r.dealId && hasStreetNumber(r.address));
+    const withoutId = selectedActionable.filter(r => !r.dealId && hasStreetNumber(r.address));
+    for (const item of withoutId) {
+      await handleCreateAndAnalyze(item, item.address);
+    }
+    if (withId.length > 0) {
+      await startAnalyzeList(withId.map(r => ({ id: r.dealId!, address: r.address })));
+    }
+  }, [selectedActionable, isAnalyzing, startAnalyzeList, handleCreateAndAnalyze]);
 
   // ── Filtered list ─────────────────────────────────────────────────────────
 
