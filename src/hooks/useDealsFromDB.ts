@@ -454,6 +454,13 @@ export function useDealsFromDB() {
       throw new Error(`Deal price ($${dealPrice.toLocaleString()}) exceeds $${MAX_ANALYSIS_PRICE.toLocaleString()} limit. Skipping analysis.`);
     }
 
+    // Warn if address looks incomplete (no street number) — DealBeast needs a real address
+    const hasStreetNumber = /^\d+\s/.test(deal.address.street?.trim() || '');
+    if (!hasStreetNumber) {
+      console.warn(`[analyzeDeal] Address may be incomplete (no street number): "${deal.address.full}" — DealBeast results may be inaccurate`);
+      // Don't throw — still try, but log the warning
+    }
+
     // Call the analyze-property edge function
     const { data, error } = await supabase.functions.invoke('analyze-property', {
       body: {
