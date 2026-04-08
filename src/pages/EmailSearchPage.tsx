@@ -496,7 +496,7 @@ function PropertyRow({
 
 export default function EmailSearchPage() {
   const { isConnected, isLoading: isAuthLoading, tokens, connect, disconnect, getValidToken } = useGmailAuth();
-  const { isSyncing, isMarkingOld, sync, syncBatch, markOldAsRead, markUnreadRecent } = useGmailSync();
+  const { isSyncing, isMarkingOld, syncBatch, markOldAsRead, markUnreadRecent } = useGmailSync();
   const { selectedState } = useUserState();
   const { deals, refetch } = useDeals();
   const {
@@ -530,57 +530,9 @@ export default function EmailSearchPage() {
 
   // ── Scan ──────────────────────────────────────────────────────────────────
 
-  const runScan = useCallback(async (includeRead: boolean) => {
-    if (!tokens?.access_token || isSyncing) return;
-
-    const accessToken = await getValidToken();
-    if (!accessToken) return; // expired + refresh failed → toast already shown
-
-    const result = await sync(accessToken, {
-      maxResults: scanCount,
-      includeRead,
-      markAllRead: false,
-      targetState: selectedState && selectedState !== 'ALL' ? selectedState : undefined,
-    });
-
-    if (!result?.success) return;
-
-    const scannedAt = new Date().toISOString();
-    const newItems: EmailResultItem[] = (result.syncDetails ?? [])
-      .filter((d: any) => d.action !== 'skipped_portal') // hide portals
-      .map((d: any, idx: number) => {
-        const dealId = d.dealId || d.existingDealId || null;
-        return {
-          key: dealId ?? `skip-${scannedAt}-${idx}`,
-          dealId,
-          address: d.address || '(no address)',
-          action: d.action as EmailAction,
-          dealType: d.dealType ?? null,
-          purchasePrice: d.purchasePrice ?? null,
-          senderName: d.senderName ?? '',
-          senderEmail: d.senderEmail ?? '',
-          subject: d.subject ?? '',
-          reason: d.reason ?? '',
-          scannedAt,
-          messageId: d.messageId ?? undefined,
-          extractedData: d.extractedData ?? undefined,
-          emailSnippet: d.emailSnippet ?? undefined,
-          extractionSource: d.extractionSource ?? undefined,
-        };
-      });
-
-    setResults(prev => {
-      const existingKeys = new Set(prev.map(i => i.key));
-      const toAdd = newItems.filter(i => !existingKeys.has(i.key));
-      return [...toAdd, ...prev];
-    });
-
-    await refetch();
-  }, [tokens, isSyncing, sync, scanCount, selectedState, refetch, getValidToken]);
-
   // ── Batched scan: fetch message IDs from Gmail API, then process in batches of 8 ──
 
-  const handleBatchedScan = useCallback(async (includeRead: boolean) => {
+  const handleBatchedScan = useCallback(async (includeRead: boolean, forceRescan = false) => {
     if (!tokens?.access_token || isSyncing) return;
 
     const accessToken = await getValidToken();
@@ -619,6 +571,7 @@ export default function EmailSearchPage() {
 
     const options = {
       includeRead,
+      forceRescan,
       markAllRead: false,
       targetState: selectedState && selectedState !== 'ALL' ? selectedState : undefined,
     };
@@ -674,38 +627,11 @@ export default function EmailSearchPage() {
   const handleRescan      = useCallback(() => handleBatchedScan(true),  [handleBatchedScan]);
 
   // DEBUG: clear session results + force-rescan (bypasses already-processed check)
-  const handleForceRescan = useCallback(async () => {
+  const handleForceRescan = useCallback(() => {
     setResults([]);
     sessionStorage.removeItem('email_scan_results_v2');
-    if (!tokens?.access_token || isSyncing) return;
-    const accessToken = await getValidToken();
-    if (!accessToken) return;
-    const result = await sync(accessToken, {
-      maxResults: scanCount,
-      includeRead: true,
-      forceRescan: true,
-      targetState: selectedState && selectedState !== 'ALL' ? selectedState : undefined,
-    });
-    if (!result?.success) return;
-    const scannedAt = new Date().toISOString();
-    const newItems: EmailResultItem[] = (result.syncDetails ?? [])
-      .filter((d: any) => d.action !== 'skipped_portal')
-      .map((d: any, idx: number) => {
-        const dealId = d.dealId || d.existingDealId || null;
-        return {
-          key: dealId ?? `skip-${scannedAt}-${idx}`,
-          dealId, address: d.address || '(no address)', action: d.action as EmailAction,
-          dealType: d.dealType ?? null, purchasePrice: d.purchasePrice ?? null,
-          senderName: d.senderName ?? '', senderEmail: d.senderEmail ?? '',
-          subject: d.subject ?? '', reason: d.reason ?? '', scannedAt,
-          messageId: d.messageId ?? undefined, extractedData: d.extractedData ?? undefined,
-          emailSnippet: d.emailSnippet ?? undefined,
-          extractionSource: d.extractionSource ?? undefined,
-        };
-      });
-    setResults(newItems);
-    await refetch();
-  }, [tokens, isSyncing, sync, scanCount, selectedState, refetch, getValidToken]);
+    handleBatchedScan(true, true);
+  }, [handleBatchedScan]);
 
   // ── Mark old as read ──────────────────────────────────────────────────────
 
