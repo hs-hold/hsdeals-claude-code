@@ -1711,24 +1711,32 @@ export default function DealDetailPage() {
           </Button>
           
           {/* Property Thumbnail - Clickable for full size */}
-          {apiData.imgSrc && (
-            <Dialog>
-              <DialogTrigger asChild>
-                <img 
-                  src={apiData.imgSrc} 
-                  alt={deal.address.street}
-                  className="w-20 h-14 object-cover rounded-lg border border-border cursor-pointer hover:opacity-80 transition-opacity hidden sm:block"
-                />
-              </DialogTrigger>
-              <DialogContent className="max-w-4xl p-2">
-                <img 
-                  src={apiData.imgSrc} 
-                  alt={deal.address.street}
-                  className="w-full h-auto rounded-lg"
-                />
-              </DialogContent>
-            </Dialog>
-          )}
+          {(() => {
+            const directImageExt = /\.(jpg|jpeg|png|webp|gif)(\?.*)?$/i;
+            const emailImageLinks: string[] = Array.isArray((deal.emailExtractedData as any)?.imageLinks)
+              ? (deal.emailExtractedData as any).imageLinks
+              : [];
+            const thumbSrc = apiData.imgSrc || emailImageLinks.find(u => directImageExt.test(u)) || null;
+            if (!thumbSrc) return null;
+            return (
+              <Dialog>
+                <DialogTrigger asChild>
+                  <img
+                    src={thumbSrc}
+                    alt={deal.address.street}
+                    className="w-20 h-14 object-cover rounded-lg border border-border cursor-pointer hover:opacity-80 transition-opacity hidden sm:block"
+                  />
+                </DialogTrigger>
+                <DialogContent className="max-w-4xl p-2">
+                  <img
+                    src={thumbSrc}
+                    alt={deal.address.street}
+                    className="w-full h-auto rounded-lg"
+                  />
+                </DialogContent>
+              </Dialog>
+            );
+          })()}
           
           <div>
             <div className="flex items-center gap-3 mb-1 flex-wrap">
