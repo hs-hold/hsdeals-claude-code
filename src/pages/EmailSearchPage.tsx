@@ -834,8 +834,9 @@ export default function EmailSearchPage() {
   };
 
   const toggleSelectAll = () => {
-    const keys = actionableItems.map(r => r.key);
-    const allSelected = keys.every(k => selected.has(k));
+    // Only select items that are truly ready to analyze (full address + price in range)
+    const keys = readyToAnalyzeItems.map(r => r.key);
+    const allSelected = keys.length > 0 && keys.every(k => selected.has(k));
     setSelected(prev => {
       const next = new Set(prev);
       if (allSelected) keys.forEach(k => next.delete(k));
@@ -1002,8 +1003,8 @@ export default function EmailSearchPage() {
     );
   }
 
-  const allActionableSelected = actionableItems.length > 0 &&
-    actionableItems.every(r => selected.has(r.key));
+  const allActionableSelected = readyToAnalyzeItems.length > 0 &&
+    readyToAnalyzeItems.every(r => selected.has(r.key));
 
   const viewingSession = viewingSessionId ? sessions.find(s => s.id === viewingSessionId) : null;
 
