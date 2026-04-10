@@ -45,7 +45,7 @@ interface GmailMessage {
 
 interface SyncDetails {
   address: string;
-  action: 'created' | 'skipped_duplicate' | 'skipped_portal' | 'skipped_over_budget' | 'skipped_wrong_state' | 'updated_existing' | 'no_address' | 'error';
+  action: 'created' | 'skipped_duplicate' | 'skipped_portal' | 'skipped_over_budget' | 'skipped_wrong_state' | 'updated_existing' | 'no_address' | 'error' | 'message' | 'skipped_newsletter';
   dealId?: string;
   senderEmail?: string;
   senderName?: string;
@@ -58,6 +58,8 @@ interface SyncDetails {
   extractedData?: Record<string, any>;
   emailSnippet?: string;
   extractionSource?: 'ai' | 'regex';
+  isImportant?: boolean;
+  messagePreview?: string;
 }
 
 // Decode base64url encoded content from Gmail
@@ -371,6 +373,77 @@ function parseInteger(val: any): number | null {
 // Detect if a string looks like a US street address: "123 Main St, City, ST 12345"
 function looksLikeAddress(s: string): boolean {
   return /^\d+\s+[a-zA-Z0-9\s]+(?:st|ave|dr|blvd|rd|ln|ct|pl|way|cir|pkwy|hwy|sw|nw|se|ne)\b.*,\s*[a-zA-Z\s]+,\s*[a-zA-Z]{2}\s+\d{5}/i.test(s.trim());
+}
+
+interface NonDealClassification {
+  type: 'message' | 'newsletter';
+  isImportant: boolean;
+  preview: string;
+}
+
+/** Classify a non-deal email: personal message vs newsletter/spam */
+async function classifyNonDealEmail(emailContent: string, subject: string, senderEmail: string): Promise<NonDealClassification> {
+  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+  const preview = emailContent.substring(0, 300).replace(/\s+/g, ' ').trim();
+
+  if (!apiKey) {
+    return { type: 'newsletter', isImportant: false, preview };
+  }
+
+  const prompt = `You are classifying an email that does NOT contain real estate deal listings.
+
+From: ${senderEmail}
+Subject: ${subject}
+Content (first 600 chars): ${emailContent.substring(0, 600)}
+
+Classify this email:
+1. Is it a personal/business message (someone reaching out, replying, asking something, sharing info directly) OR a newsletter/marketing/automated email?
+2. If it's a personal message, is it important (requires attention or response)?
+
+Return JSON only:
+{
+  "type": "message" | "newsletter",
+  "isImportant": true | false,
+  "reason": "brief reason"
+}
+
+- "message": a real person wrote this specifically (not mass-sent), OR it contains important business information
+- "newsletter": automated, marketing, mass-mailed, subscription, notification, alert, digest, promotion
+- isImportant: true only for "message" type that seems to need attention`;
+
+  try {
+    const response = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 150,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      return { type: 'newsletter', isImportant: false, preview };
+    }
+
+    const data = await response.json();
+    const text = data.content?.[0]?.text?.trim() || '';
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return { type: 'newsletter', isImportant: false, preview };
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    return {
+      type: parsed.type === 'message' ? 'message' : 'newsletter',
+      isImportant: Boolean(parsed.isImportant),
+      preview,
+    };
+  } catch {
+    return { type: 'newsletter', isImportant: false, preview };
+  }
 }
 
 // Use Anthropic claude-haiku to extract ALL property addresses and deal info from email
@@ -829,11 +902,35 @@ serve(async (req) => {
         const extractedDeals = await extractDealsWithAI(body, subject);
 
         if (extractedDeals.length === 0) {
-          console.log(`No addresses found in: "${subject}"`);
-          // DEBUG: include body preview in reason so we can see what Claude received
-          const bodyPreview = body.substring(0, 400).replace(/\n+/g, ' ');
-          state.syncDetails.push({ address: '', action: 'no_address', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `No address found. Body preview: "${bodyPreview}"`, messageId: msg.id, emailSnippet: snippet });
-          // ── KEY FIX: Do NOT mark as read — leave unread so it can be retried ──
+          console.log(`No addresses found in: "${subject}" — classifying email type`);
+          const classification = await classifyNonDealEmail(body, subject, senderInfo.email);
+          await markEmailAsRead(access_token, msg.id);
+
+          if (classification.type === 'message') {
+            console.log(`[classify] Personal message from ${senderInfo.email}, important=${classification.isImportant}`);
+            state.syncDetails.push({
+              address: '',
+              action: 'message',
+              senderEmail: senderInfo.email,
+              senderName: senderInfo.name,
+              subject,
+              messageId: msg.id,
+              emailSnippet: snippet,
+              isImportant: classification.isImportant,
+              messagePreview: classification.preview,
+            });
+          } else {
+            console.log(`[classify] Newsletter/automated from ${senderInfo.email} — marked read, skipping`);
+            state.syncDetails.push({
+              address: '',
+              action: 'skipped_newsletter',
+              senderEmail: senderInfo.email,
+              senderName: senderInfo.name,
+              subject,
+              messageId: msg.id,
+              emailSnippet: snippet,
+            });
+          }
           return;
         }
 

@@ -43,7 +43,9 @@ type EmailAction =
   | 'skipped_over_budget'
   | 'skipped_wrong_state'
   | 'no_address'
-  | 'error';
+  | 'error'
+  | 'message'
+  | 'skipped_newsletter';
 
 interface ExtractedData {
   arv?: number | null;
@@ -88,6 +90,8 @@ interface EmailResultItem {
   extractedData?: ExtractedData;
   emailSnippet?: string;
   extractionSource?: 'ai' | 'regex';
+  isImportant?: boolean;
+  messagePreview?: string;
 }
 
 const SCAN_COUNTS = [10, 20, 40, 60, 100] as const;
@@ -223,7 +227,43 @@ function actionBadgeConfig(action: EmailAction) {
   if (action === 'skipped_wrong_state') return { text: 'Wrong State', color: 'bg-muted/10 text-muted-foreground border-border/30' };
   if (action === 'no_address') return { text: 'No Address', color: 'bg-muted/10 text-muted-foreground/60 border-border/20' };
   if (action === 'error')            return { text: 'Error', color: 'bg-red-500/10 text-red-400 border-red-500/30' };
+  if (action === 'message')          return { text: 'Message', color: 'bg-blue-500/10 text-blue-400 border-blue-500/30' };
+  if (action === 'skipped_newsletter') return { text: 'Newsletter', color: 'bg-muted/10 text-muted-foreground/50 border-border/20' };
   return { text: action, color: 'bg-muted/10 text-muted-foreground border-border/30' };
+}
+
+// ── Message Row ──────────────────────────────────────────────────────────────
+
+function MessageRow({ item }: { item: EmailResultItem }) {
+  const gmailUrl = gmailLink(item.messageId);
+  return (
+    <div className={`flex items-start gap-3 px-4 py-3 border-b border-border/20 last:border-0 transition-colors hover:bg-muted/10 ${item.isImportant ? 'bg-blue-500/5' : ''}`}>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium truncate">{item.senderName || item.senderEmail}</span>
+          {item.senderEmail && item.senderName && (
+            <span className="text-xs text-muted-foreground truncate">{item.senderEmail}</span>
+          )}
+          {item.isImportant && (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30 uppercase tracking-wide">Important</span>
+          )}
+        </div>
+        {item.subject && (
+          <p className="text-xs text-muted-foreground mt-0.5 truncate">{item.subject}</p>
+        )}
+        {item.messagePreview && (
+          <p className="text-xs text-muted-foreground/70 mt-1 line-clamp-2">{item.messagePreview}</p>
+        )}
+      </div>
+      {gmailUrl && (
+        <a href={gmailUrl} target="_blank" rel="noopener noreferrer"
+          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+          title="Open in Gmail">
+          <ExternalLink className="w-3.5 h-3.5" />
+        </a>
+      )}
+    </div>
+  );
 }
 
 // ── Property Row ──────────────────────────────────────────────────────────────
@@ -581,7 +621,7 @@ export default function EmailSearchPage() {
   const [viewingSessionId, setViewingSessionId] = useState<string | null>(null);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [filter, setFilter] = useState<'all' | 'deals' | 'readyToAnalyze' | 'skipped'>('readyToAnalyze');
+  const [filter, setFilter] = useState<'all' | 'deals' | 'readyToAnalyze' | 'skipped' | 'messages'>('readyToAnalyze');
   const [maxPrice, setMaxPrice] = useState<number>(220000);
   const [minPrice, setMinPrice] = useState<number>(0);
   const [minSqft,  setMinSqft]  = useState<number>(0);
@@ -696,6 +736,8 @@ export default function EmailSearchPage() {
               extractedData: d.extractedData ?? undefined,
               emailSnippet: d.emailSnippet ?? undefined,
               extractionSource: d.extractionSource ?? undefined,
+              isImportant: d.isImportant ?? undefined,
+              messagePreview: d.messagePreview ?? undefined,
             };
           });
 
@@ -911,10 +953,16 @@ export default function EmailSearchPage() {
 
   // ── Filtered list ─────────────────────────────────────────────────────────
 
+  const messageItems = useMemo(
+    () => displayResults.filter(r => r.action === 'message'),
+    [displayResults]
+  );
+
   const filtered = useMemo(() => {
-    let list = displayResults.filter(r => r.action !== 'skipped_portal');
+    let list = displayResults.filter(r => r.action !== 'skipped_portal' && r.action !== 'skipped_newsletter');
     if (filter === 'deals')   list = list.filter(r => isActionable(r.action));
-    else if (filter === 'skipped') list = list.filter(r => !isActionable(r.action));
+    else if (filter === 'messages') list = displayResults.filter(r => r.action === 'message');
+    else if (filter === 'skipped') list = list.filter(r => !isActionable(r.action) && r.action !== 'message');
     else if (filter === 'readyToAnalyze') list = list.filter(r => {
       if (!isActionable(r.action)) return false;
       if (!hasStreetNumber(r.address)) return false;
@@ -922,7 +970,7 @@ export default function EmailSearchPage() {
       if (price == null || isNaN(price) || price <= 0) return false;
       return price <= maxPrice;
     });
-    return applyExtraFilters(list);
+    return filter === 'messages' ? list : applyExtraFilters(list);
   }, [displayResults, filter, maxPrice, applyExtraFilters]);
 
   // ── Analysis progress ─────────────────────────────────────────────────────
@@ -1157,21 +1205,28 @@ export default function EmailSearchPage() {
             <div className="flex flex-wrap items-center gap-3">
               {/* Filter tabs */}
               <div className="flex gap-1 items-center">
-                {(['readyToAnalyze', 'deals', 'all', 'skipped'] as const).map(f => (
+                {(['readyToAnalyze', 'deals', 'all', 'messages', 'skipped'] as const).map(f => (
                   <button key={f} onClick={() => setFilter(f)}
                     className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
                       f === 'readyToAnalyze'
                         ? filter === 'readyToAnalyze'
                           ? 'bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/40'
                           : 'text-emerald-500/70 hover:text-emerald-400 hover:bg-emerald-500/10'
+                        : f === 'messages'
+                          ? filter === 'messages'
+                            ? 'bg-blue-500/20 text-blue-400 ring-1 ring-blue-500/40'
+                            : messageItems.some(m => m.isImportant)
+                              ? 'text-blue-400/80 hover:text-blue-400 hover:bg-blue-500/10'
+                              : 'text-muted-foreground hover:text-foreground'
                         : filter === f
                           ? 'bg-muted text-foreground'
                           : 'text-muted-foreground hover:text-foreground'
                     }`}>
                     {f === 'readyToAnalyze' ? `Ready to Analyze (${readyToAnalyzeItems.length})` :
-                     f === 'all'            ? `All (${displayResults.filter(r => r.action !== 'skipped_portal').length})` :
+                     f === 'all'            ? `All (${displayResults.filter(r => r.action !== 'skipped_portal' && r.action !== 'skipped_newsletter').length})` :
                      f === 'deals'          ? `Deals (${actionableItems.length})` :
-                     `Skipped (${displayResults.filter(r => !isActionable(r.action) && r.action !== 'skipped_portal').length})`}
+                     f === 'messages'       ? `Messages (${messageItems.length})${messageItems.some(m => m.isImportant) ? ' ●' : ''}` :
+                     `Skipped (${displayResults.filter(r => !isActionable(r.action) && r.action !== 'skipped_portal' && r.action !== 'skipped_newsletter' && r.action !== 'message').length})`}
                   </button>
                 ))}
                 {/* Max price filter */}
@@ -1310,8 +1365,8 @@ export default function EmailSearchPage() {
             {/* Results list */}
             {filtered.length > 0 ? (
               <Card className="border-border/50 bg-card/50">
-                {/* Column headers */}
-                <div className="flex items-center gap-3 px-4 py-2 border-b border-border text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                {/* Column headers — hidden for messages view */}
+                {filter !== 'messages' && <div className="flex items-center gap-3 px-4 py-2 border-b border-border text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                   <div className="w-4 shrink-0" />
                   <div className="w-56 shrink-0">Address</div>
                   <div className="w-24 shrink-0">Price</div>
@@ -1321,9 +1376,13 @@ export default function EmailSearchPage() {
                   <div className="w-16 shrink-0">Status</div>
                   <div className="w-18 shrink-0">Links</div>
                   <div className="w-24 shrink-0" />
-                </div>
+                </div>}
                 <div className="divide-y divide-border/20">
                   {filtered.map(item => {
+                    if (item.action === 'message') {
+                      return <MessageRow key={item.key} item={item} />;
+                    }
+
                     const deal = item.dealId ? deals.find(d => d.id === item.dealId) : null;
                     const analyzed = deal ? isDealAnalyzed(deal) : false;
                     const grade = deal?.apiData?.grade != null ? String(deal.apiData.grade) : null;
