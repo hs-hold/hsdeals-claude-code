@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter, Zap, Loader2, Lock, X, CheckCircle2, AlertTriangle, Mail, Globe } from 'lucide-react';
+import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter, Zap, Loader2, Lock, X, CheckCircle2, AlertTriangle, Mail, Globe, Trash2, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { DealAgeFilter, AgeFilterType, applyDealAgeFilter } from '@/components/deals/DealAgeFilter';
@@ -51,10 +51,11 @@ interface DealsTableProps {
 }
 
 export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true, showAnalyzeButton = true }: DealsTableProps) {
-  const { analyzeDeal, updateDealStatus } = useDeals();
+  const { analyzeDeal, updateDealStatus, deleteDeal } = useDeals();
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [markingNotRelevantId, setMarkingNotRelevantId] = useState<string | null>(null);
   const [closingDealId, setClosingDealId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<DealStatus | 'all'>('all');
   const [lockedFilter, setLockedFilter] = useState<'all' | 'locked' | 'unlocked'>('all');
@@ -87,6 +88,19 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
       toast.error('Failed to update deal');
     } finally {
       setMarkingNotRelevantId(null);
+    }
+  };
+
+  const handleDeleteDeal = async (dealId: string) => {
+    setDeletingId(dealId);
+    try {
+      await deleteDeal(dealId);
+      toast.success('Deal deleted permanently');
+    } catch (error) {
+      console.error('Error deleting deal:', error);
+      toast.error('Failed to delete deal');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -431,9 +445,24 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                       )}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground max-w-[140px]">
-                      {deal.source === 'email'
-                        ? (deal.senderName || deal.senderEmail || '—')
-                        : (deal.apiData?.agentName || deal.apiData?.brokerName || '—')}
+                      {deal.source === 'email' ? (
+                        <span className="flex items-center gap-1">
+                          <span className="truncate">{deal.senderName || deal.senderEmail || '—'}</span>
+                          {deal.emailId && (
+                            <a
+                              href={`https://mail.google.com/mail/u/0/#all/${deal.emailId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={e => e.stopPropagation()}
+                              className="text-primary hover:text-primary/80 flex-shrink-0"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
+                        </span>
+                      ) : (
+                        deal.apiData?.agentName || deal.apiData?.brokerName || '—'
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="text-xs text-muted-foreground space-y-0.5">
@@ -543,6 +572,47 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                             </span>
                           </TooltipTrigger>
                           <TooltipContent>Mark as Not Relevant ✗</TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span>
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-8 px-2 bg-destructive/10 text-destructive hover:bg-destructive/20 border border-destructive/20"
+                                    disabled={deletingId === deal.id}
+                                  >
+                                    {deletingId === deal.id ? (
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="w-4 h-4" />
+                                    )}
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Delete Deal Permanently?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      This will permanently delete "{deal.address.street || 'this deal'}". This action cannot be undone.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction
+                                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                      onClick={() => handleDeleteDeal(deal.id)}
+                                    >
+                                      Delete
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>Delete permanently</TooltipContent>
                         </Tooltip>
                       </div>
                     </TableCell>

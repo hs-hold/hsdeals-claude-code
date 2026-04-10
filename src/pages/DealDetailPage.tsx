@@ -35,9 +35,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { 
-  ArrowLeft, 
-  Zap, 
-  XCircle, 
+  ArrowLeft,
+  Zap,
+  XCircle,
+  Trash2,
   MapPin,
   Calendar,
   Mail,
@@ -112,7 +113,7 @@ export default function DealDetailPage() {
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const { settings } = useSettings();
   const loanDefaults = settings.loanDefaults;
-  const { getDeal, updateDealStatus, updateDealOverrides, updateDealNotes, refreshDealFromApi, refetch, isLoading, toggleDealLock } = useDeals();
+  const { getDeal, updateDealStatus, updateDealOverrides, updateDealNotes, refreshDealFromApi, refetch, isLoading, toggleDealLock, deleteDeal } = useDeals();
 
   const arvOverrideRef = useRef<HTMLInputElement>(null);
   const rehabOverrideRef = useRef<HTMLInputElement>(null);
@@ -1411,6 +1412,13 @@ export default function DealDetailPage() {
     toast.success(deal.isLocked ? 'Deal unlocked' : 'Deal locked');
   };
 
+  const handleDeleteDeal = async () => {
+    if (!deal) return;
+    await deleteDeal(deal.id);
+    toast.success('Deal deleted permanently');
+    navigate(-1);
+  };
+
   const handleStatusChange = (status: DealStatus) => {
     if (status === 'not_relevant') {
       updateDealStatus(deal.id, status, rejectionReason || 'Not specified');
@@ -1793,13 +1801,13 @@ export default function DealDetailPage() {
           
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button 
-                variant={deal.isLocked ? "default" : "outline"} 
+              <Button
+                variant={deal.isLocked ? "default" : "outline"}
                 size="icon"
                 onClick={handleToggleLock}
                 className={cn(
-                  deal.isLocked 
-                    ? "bg-amber-500 hover:bg-amber-600 text-black" 
+                  deal.isLocked
+                    ? "bg-amber-500 hover:bg-amber-600 text-black"
                     : "border-muted-foreground/30"
                 )}
               >
@@ -1810,6 +1818,37 @@ export default function DealDetailPage() {
               {deal.isLocked ? 'Unlock deal to allow edits' : 'Lock deal to prevent changes'}
             </TooltipContent>
           </Tooltip>
+
+          <AlertDialog>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" size="icon" className="border-destructive/30 text-destructive hover:bg-destructive/10">
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </AlertDialogTrigger>
+              </TooltipTrigger>
+              <TooltipContent>Delete deal permanently</TooltipContent>
+            </Tooltip>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete Deal Permanently?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete "{deal.address.street || 'this deal'}". This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={handleDeleteDeal}
+                >
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
           <Dialog open={isExportSummaryDialogOpen} onOpenChange={setIsExportSummaryDialogOpen}>
             <DialogTrigger asChild>
               <Button 
@@ -2819,7 +2858,7 @@ BRRRR STRATEGY:
                       
                       {/* Email Subject */}
                       {deal.emailSubject && (
-                        <div 
+                        <div
                           className="flex items-start gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded transition-colors"
                           onClick={() => {
                             navigator.clipboard.writeText(deal.emailSubject!);
@@ -2832,6 +2871,22 @@ BRRRR STRATEGY:
                             <Copy className="w-3 h-3 text-muted-foreground flex-shrink-0 mt-0.5" />
                           </div>
                         </div>
+                      )}
+
+                      {/* Open in Gmail link */}
+                      {deal.emailId && (
+                        <>
+                          <Separator className="my-2" />
+                          <a
+                            href={`https://mail.google.com/mail/u/0/#all/${deal.emailId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2 text-primary hover:underline text-xs p-1.5"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            Open original email in Gmail
+                          </a>
+                        </>
                       )}
                     </div>
                   </HoverCardContent>

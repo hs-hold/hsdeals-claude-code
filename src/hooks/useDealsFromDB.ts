@@ -686,6 +686,17 @@ export function useDealsFromDB() {
     return analyzeDeal(id);
   }, [analyzeDeal]);
 
+  const deleteDeal = useCallback(async (id: string) => {
+    const { error } = await supabase
+      .from('deals')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+
+    setDeals(prev => prev.filter(d => d.id !== id));
+  }, []);
+
   return {
     deals,
     isLoading,
@@ -699,5 +710,6 @@ export function useDealsFromDB() {
     refetch: fetchDeals,
     toggleDealLock,
     recalculateAllDealsFinancials,
+    deleteDeal,
   };
 }
