@@ -673,8 +673,11 @@ export default function EmailSearchPage() {
     const headers = { 'Authorization': `Bearer ${accessToken}` };
 
     // Build query
-    const labelParam = includeRead ? '' : '&labelIds=UNREAD';
-    const listUrl = `${GMAIL}/messages?maxResults=${scanCount}${labelParam}`;
+    // Use q=in:inbox to scan only inbox messages (not Promotions/Social/Spam tabs)
+    const qParam = includeRead
+      ? `&q=${encodeURIComponent('in:inbox')}`
+      : `&q=${encodeURIComponent('in:inbox is:unread')}`;
+    const listUrl = `${GMAIL}/messages?maxResults=${scanCount}${qParam}`;
 
     let msgIds: string[];
     try {
