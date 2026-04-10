@@ -82,6 +82,7 @@ function mapToDealApiData(analysis: PropertyAnalysis, property?: PropertyData): 
   return {
     // Property basics
     arv: arv,
+    sellerArv: null, // Populated later from emailExtractedData if available
     purchasePrice: analysis.asking_price ?? null,
     rent: analysis.metrics?.monthly_rent ?? null,
     rehabCost: analysis.metrics?.rehab_cost ?? null,

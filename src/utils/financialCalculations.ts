@@ -366,6 +366,15 @@ export function calculateFinancials(
     arvValidationDelta = arv - arvValidation.validatedArv;
     arv = arvValidation.validatedArv;
 
+    // If seller stated an ARV (from email), use the lower of seller ARV vs analyzed ARV
+    const sellerArv = apiData.sellerArv;
+    if (sellerArv && sellerArv > 0) {
+      const sellerArvWithLayout = sellerArv + layoutArvIncrease;
+      if (sellerArvWithLayout < arv) {
+        arvValidationDelta += arv - sellerArvWithLayout;
+        arv = sellerArvWithLayout;
+      }
+    }
   }
 
   const rehabCost = baseRehabCost + layoutRehabCost;

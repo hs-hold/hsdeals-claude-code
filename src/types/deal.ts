@@ -69,6 +69,7 @@ export interface Section8Data {
 export interface DealApiData {
   // Property basics
   arv: number | null;
+  sellerArv: number | null; // Seller's stated ARV from email — used as cap if lower than analyzed ARV
   purchasePrice: number | null;
   rent: number | null;
   rehabCost: number | null;

@@ -22,6 +22,7 @@ const createMockDeal = (
 ): Deal => {
   const apiData = {
     arv,
+    sellerArv: null,
     purchasePrice,
     rent,
     rehabCost,
