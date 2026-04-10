@@ -624,7 +624,7 @@ export default function EmailSearchPage() {
   const [filter, setFilter] = useState<'all' | 'deals' | 'readyToAnalyze' | 'skipped' | 'messages'>('readyToAnalyze');
   const [maxPrice, setMaxPrice] = useState<number>(220000);
   const [minPrice, setMinPrice] = useState<number>(0);
-  const [minSqft,  setMinSqft]  = useState<number>(0);
+  const [minSqft,  setMinSqft]  = useState<number>(1200);
   const [minBeds,  setMinBeds]  = useState<number>(0);
 
   // Derived: what's actually shown (current scan or historical session)
