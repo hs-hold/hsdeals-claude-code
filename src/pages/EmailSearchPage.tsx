@@ -673,10 +673,10 @@ export default function EmailSearchPage() {
     const headers = { 'Authorization': `Bearer ${accessToken}` };
 
     // Build query
-    // Use q=in:inbox to scan only inbox messages (not Promotions/Social/Spam tabs)
+    // Use category:primary to scan only the Primary inbox tab (excludes Promotions/Social/Updates)
     const qParam = includeRead
-      ? `&q=${encodeURIComponent('in:inbox')}`
-      : `&q=${encodeURIComponent('in:inbox is:unread')}`;
+      ? `&q=${encodeURIComponent('category:primary')}`
+      : `&q=${encodeURIComponent('category:primary is:unread')}`;
     const listUrl = `${GMAIL}/messages?maxResults=${scanCount}${qParam}`;
 
     let msgIds: string[];
