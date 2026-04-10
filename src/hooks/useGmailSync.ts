@@ -16,6 +16,7 @@ interface SyncDetail {
   dealType?: string | null;
   extractedData?: Record<string, any>;
   emailSnippet?: string;
+  extractionSource?: 'ai' | 'regex';
 }
 
 interface SyncResult {
@@ -37,6 +38,7 @@ interface SyncOptions {
   markAllRead?: boolean;
   includeRead?: boolean;
   targetState?: string;
+  forceRescan?: boolean;
 }
 
 export function useGmailSync() {
@@ -46,11 +48,11 @@ export function useGmailSync() {
   const { toast } = useToast();
 
   const sync = useCallback(async (accessToken: string, options?: SyncOptions): Promise<SyncResult | null> => {
-    const { maxResults = 50, sinceDays, markAllRead = false, includeRead = false, targetState } = options || {};
+    const { maxResults = 50, sinceDays, markAllRead = false, includeRead = false, targetState, forceRescan = false } = options || {};
     setIsSyncing(true);
     try {
       const { data, error } = await supabase.functions.invoke('gmail-sync', {
-        body: { access_token: accessToken, max_results: maxResults, since_days: sinceDays, mark_all_read: markAllRead, include_read: includeRead, target_state: targetState }
+        body: { access_token: accessToken, max_results: maxResults, since_days: sinceDays, mark_all_read: markAllRead, include_read: includeRead, target_state: targetState, force_rescan: forceRescan }
       });
 
       if (error) throw error;
@@ -197,12 +199,86 @@ export function useGmailSync() {
     }
   }, [toast]);
 
+  const syncBatch = useCallback(async (accessToken: string, messageIds: string[], options?: SyncOptions): Promise<SyncResult | null> => {
+    const { sinceDays, markAllRead = false, includeRead = false, targetState, forceRescan = false } = options || {};
+    setIsSyncing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('gmail-sync', {
+        body: {
+          access_token: accessToken,
+          message_ids: messageIds,
+          since_days: sinceDays,
+          mark_all_read: markAllRead,
+          include_read: includeRead,
+          target_state: targetState,
+          force_rescan: forceRescan,
+        },
+      });
+
+      if (error) throw error;
+
+      const result: SyncResult = {
+        success: data.success ?? false,
+        processed: data.processed ?? 0,
+        deals: data.deals ?? [],
+        skippedDuplicate: data.skippedDuplicate ?? 0,
+        skippedPortal: data.skippedPortal ?? 0,
+        totalScanned: data.totalScanned ?? 0,
+        olderMarkedRead: data.olderMarkedRead ?? 0,
+        syncDetails: data.syncDetails ?? [],
+        syncHistoryId: data.syncHistoryId,
+        errors: data.errors,
+        message: data.message,
+      };
+
+      setLastSyncResult(result);
+
+      if (!result.success) {
+        throw new Error(data.error || 'Sync failed');
+      }
+
+      return result;
+    } catch (error) {
+      console.error('syncBatch error:', error);
+      toast({
+        title: 'Batch Sync Failed',
+        description: error instanceof Error ? error.message : 'Failed to sync email batch',
+        variant: 'destructive',
+      });
+      return null;
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [toast]);
+
+  // Mark a single Gmail message as read directly via Gmail API (no edge function needed)
+  const markMessageRead = useCallback(async (accessToken: string, messageId: string): Promise<void> => {
+    try {
+      const res = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/modify`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ removeLabelIds: ['UNREAD'] }),
+        }
+      );
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        console.warn(`markMessageRead ${messageId} → HTTP ${res.status}: ${errText}`);
+      }
+    } catch (err) {
+      console.warn('markMessageRead failed:', err);
+    }
+  }, []);
+
   return {
     isSyncing,
     isMarkingOld,
     lastSyncResult,
     sync,
+    syncBatch,
     markOldAsRead,
     markUnreadRecent,
+    markMessageRead,
   };
 }

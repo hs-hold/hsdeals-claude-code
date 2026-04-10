@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Button } from '@/components/ui/button';
@@ -55,12 +55,21 @@ export function WhatIfAnalysis({
   totalHoldingCosts,
 }: WhatIfAnalysisProps) {
   const [isSensitivityOpen, setIsSensitivityOpen] = useState(false);
-  const [whatIfPurchasePrice, setWhatIfPurchasePrice] = useState(purchasePrice);
-  const [whatIfArv, setWhatIfArv] = useState(arv);
-  const [whatIfRehabCost, setWhatIfRehabCost] = useState(rehabCost);
-  const [whatIfInterestRate, setWhatIfInterestRate] = useState(interestRate);
-  const [whatIfRent, setWhatIfRent] = useState(rent);
-  const [whatIfHoldingMonths, setWhatIfHoldingMonths] = useState(holdingMonths);
+  // Guard initial values against NaN (can happen when deal data loads async)
+  const safeN = (v: number) => (isFinite(v) && v != null) ? v : 0;
+  const [whatIfPurchasePrice, setWhatIfPurchasePrice] = useState(() => safeN(purchasePrice));
+  const [whatIfArv, setWhatIfArv] = useState(() => safeN(arv));
+  const [whatIfRehabCost, setWhatIfRehabCost] = useState(() => safeN(rehabCost));
+  const [whatIfInterestRate, setWhatIfInterestRate] = useState(() => safeN(interestRate));
+  const [whatIfRent, setWhatIfRent] = useState(() => safeN(rent));
+  const [whatIfHoldingMonths, setWhatIfHoldingMonths] = useState(() => safeN(holdingMonths) || 6);
+
+  // Sync state when props change from NaN → valid (e.g. after data loads)
+  useEffect(() => { if (isFinite(purchasePrice) && !isFinite(whatIfPurchasePrice)) setWhatIfPurchasePrice(purchasePrice); }, [purchasePrice]);
+  useEffect(() => { if (isFinite(arv) && !isFinite(whatIfArv)) setWhatIfArv(arv); }, [arv]);
+  useEffect(() => { if (isFinite(rehabCost) && !isFinite(whatIfRehabCost)) setWhatIfRehabCost(rehabCost); }, [rehabCost]);
+  useEffect(() => { if (isFinite(rent) && !isFinite(whatIfRent)) setWhatIfRent(rent); }, [rent]);
+  useEffect(() => { if (isFinite(interestRate) && !isFinite(whatIfInterestRate)) setWhatIfInterestRate(interestRate); }, [interestRate]);
 
   // Calculate flip profit with what-if values
   const calcWhatIfFlipProfit = () => {
@@ -73,29 +82,34 @@ export function WhatIfAnalysis({
     const agentPercent = localOverrides.agentCommissionPercent 
       ? parseFloat(localOverrides.agentCommissionPercent) / 100 
       : loanDefaults.agentCommissionPercent / 100;
-    const closingCosts = localOverrides.closingCostsDollar 
+    const pp  = safeN(whatIfPurchasePrice);
+    const av  = safeN(whatIfArv);
+    const reh = safeN(whatIfRehabCost);
+    const hm  = safeN(whatIfHoldingMonths) || 6;
+
+    const closingCosts = localOverrides.closingCostsDollar
       ? parseFloat(localOverrides.closingCostsDollar)
-      : whatIfPurchasePrice * closingPercent;
-    
+      : pp * closingPercent;
+
     // Holding costs with what-if months
-    const propertyTaxMonthly = localOverrides.propertyTaxMonthly 
-      ? parseFloat(localOverrides.propertyTaxMonthly) 
+    const propertyTaxMonthly = localOverrides.propertyTaxMonthly
+      ? parseFloat(localOverrides.propertyTaxMonthly)
       : (apiData.propertyTax ?? 0) / 12;
-    const insuranceMonthly = localOverrides.insuranceMonthly 
-      ? parseFloat(localOverrides.insuranceMonthly) 
+    const insuranceMonthly = localOverrides.insuranceMonthly
+      ? parseFloat(localOverrides.insuranceMonthly)
       : getEffectiveMonthlyInsurance(apiData.insurance);
-    const utilitiesMonthly = localOverrides.utilitiesMonthly 
-      ? parseFloat(localOverrides.utilitiesMonthly) 
+    const utilitiesMonthly = localOverrides.utilitiesMonthly
+      ? parseFloat(localOverrides.utilitiesMonthly)
       : 300;
     const monthlyHolding = propertyTaxMonthly + insuranceMonthly + utilitiesMonthly;
-    const whatIfHoldingCosts = monthlyHolding * whatIfHoldingMonths;
-    
-    const contingency = whatIfRehabCost * contingencyPercent;
-    const totalInvestment = whatIfPurchasePrice + closingCosts + whatIfRehabCost + contingency + whatIfHoldingCosts;
-    const agentCommission = whatIfArv * agentPercent;
+    const whatIfHoldingCosts = monthlyHolding * hm;
+
+    const contingency = reh * contingencyPercent;
+    const totalInvestment = pp + closingCosts + reh + contingency + whatIfHoldingCosts;
+    const agentCommission = av * agentPercent;
     const notaryFee = localOverrides.notaryFees ? parseFloat(localOverrides.notaryFees) : 500;
     const titleFee = localOverrides.titleFees ? parseFloat(localOverrides.titleFees) : 500;
-    const netProfit = whatIfArv - totalInvestment - agentCommission - (notaryFee * 2) - titleFee;
+    const netProfit = av - totalInvestment - agentCommission - (notaryFee * 2) - titleFee;
     const roi = totalInvestment > 0 ? (netProfit / totalInvestment) * 100 : 0;
     return { netProfit, roi, totalInvestment };
   };

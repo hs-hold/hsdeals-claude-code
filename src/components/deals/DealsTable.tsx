@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter, Zap, Loader2, Lock, X, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter, Zap, Loader2, Lock, X, CheckCircle2, AlertTriangle, Mail, Globe, Trash2, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { DealAgeFilter, AgeFilterType, applyDealAgeFilter } from '@/components/deals/DealAgeFilter';
@@ -51,10 +51,11 @@ interface DealsTableProps {
 }
 
 export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true, showAnalyzeButton = true }: DealsTableProps) {
-  const { analyzeDeal, updateDealStatus } = useDeals();
+  const { analyzeDeal, updateDealStatus, deleteDeal } = useDeals();
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [markingNotRelevantId, setMarkingNotRelevantId] = useState<string | null>(null);
   const [closingDealId, setClosingDealId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<DealStatus | 'all'>('all');
   const [lockedFilter, setLockedFilter] = useState<'all' | 'locked' | 'unlocked'>('all');
@@ -87,6 +88,19 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
       toast.error('Failed to update deal');
     } finally {
       setMarkingNotRelevantId(null);
+    }
+  };
+
+  const handleDeleteDeal = async (dealId: string) => {
+    setDeletingId(dealId);
+    try {
+      await deleteDeal(dealId);
+      toast.success('Deal deleted permanently');
+    } catch (error) {
+      console.error('Error deleting deal:', error);
+      toast.error('Failed to delete deal');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -275,14 +289,6 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
 
         <Input
           type="number"
-          placeholder="Min Cashflow $"
-          value={minCashflow}
-          onChange={e => setMinCashflow(e.target.value)}
-          className="w-[140px]"
-        />
-
-        <Input
-          type="number"
           placeholder="Min Yield %"
           value={minYield}
           onChange={e => setMinYield(e.target.value)}
@@ -313,14 +319,10 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                 <SortHeader field="equity">Equity</SortHeader>
               </TableHead>
               <TableHead className="text-right">
-                <SortHeader field="cashflow">Cashflow/mo</SortHeader>
-              </TableHead>
-              <TableHead className="text-right">
                 <SortHeader field="yield">CoC Return</SortHeader>
               </TableHead>
-              <TableHead className="text-right">
-                <SortHeader field="capRate">Cap Rate</SortHeader>
-              </TableHead>
+              <TableHead>Source</TableHead>
+              <TableHead>Seller / Agent</TableHead>
               <TableHead className="text-right">
                 <SortHeader field="created">Analyzed</SortHeader>
               </TableHead>
@@ -336,7 +338,6 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
               </TableRow>
             ) : (
               filteredAndSorted.map(deal => {
-                const cashflow = deal.financials?.monthlyCashflow ?? 0;
                 const cocReturn = deal.financials?.cashOnCashReturn ?? 0;
                 const equity = deal.financials?.equityAtPurchase ?? 0;
                 
@@ -390,9 +391,9 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                             {deal.apiData.grade}
                           </span>
                         )}
-                        {deal.financials.capRate > 0 && (
+                        {(deal.financials?.capRate ?? 0) > 0 && (
                           <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-muted text-muted-foreground">
-                            {(deal.financials.capRate * 100).toFixed(1)}%
+                            {((deal.financials?.capRate ?? 0) * 100).toFixed(1)}%
                           </span>
                         )}
                       </div>
@@ -425,19 +426,43 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                       {formatCurrency(equity)}
                     </TableCell>
                     <TableCell className={cn(
-                      "text-right font-medium",
-                      cashflow > 0 ? "text-success" : "text-destructive"
-                    )}>
-                      {formatCurrency(cashflow)}
-                    </TableCell>
-                    <TableCell className={cn(
                       "text-right font-semibold",
                       cocReturn >= 0.08 ? "text-success" : cocReturn > 0 ? "text-warning" : "text-destructive"
                     )}>
                       {formatPercent(cocReturn)}
                     </TableCell>
-                    <TableCell className="text-right">
-                      {formatPercent(deal.financials?.capRate ?? 0)}
+                    <TableCell>
+                      {deal.source === 'email' ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/20">
+                          <Mail className="w-3 h-3" />
+                          Off Market
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
+                          <Globe className="w-3 h-3" />
+                          Market
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground max-w-[140px]">
+                      {deal.source === 'email' ? (
+                        <span className="flex items-center gap-1">
+                          <span className="truncate">{deal.senderName || deal.senderEmail || '—'}</span>
+                          {deal.emailId && (
+                            <a
+                              href={`https://mail.google.com/mail/u/0/#all/${deal.emailId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={e => e.stopPropagation()}
+                              className="text-primary hover:text-primary/80 flex-shrink-0"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
+                        </span>
+                      ) : (
+                        deal.apiData?.agentName || deal.apiData?.brokerName || '—'
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="text-xs text-muted-foreground space-y-0.5">
@@ -547,6 +572,47 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                             </span>
                           </TooltipTrigger>
                           <TooltipContent>Mark as Not Relevant ✗</TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span>
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-8 px-2 bg-destructive/10 text-destructive hover:bg-destructive/20 border border-destructive/20"
+                                    disabled={deletingId === deal.id}
+                                  >
+                                    {deletingId === deal.id ? (
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="w-4 h-4" />
+                                    )}
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Delete Deal Permanently?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      This will permanently delete "{deal.address.street || 'this deal'}". This action cannot be undone.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction
+                                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                      onClick={() => handleDeleteDeal(deal.id)}
+                                    >
+                                      Delete
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>Delete permanently</TooltipContent>
                         </Tooltip>
                       </div>
                     </TableCell>

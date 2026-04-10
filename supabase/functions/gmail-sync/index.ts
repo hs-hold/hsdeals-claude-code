@@ -8,7 +8,7 @@ const corsHeaders = {
 
 const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1';
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
-const MAX_DEAL_PRICE = 300000; // Skip deals above this price
+const MAX_DEAL_PRICE = 1000000; // Skip deals above this price
 
 // List of portal/listing service domains to skip
 const PORTAL_DOMAINS = [
@@ -45,7 +45,7 @@ interface GmailMessage {
 
 interface SyncDetails {
   address: string;
-  action: 'created' | 'skipped_duplicate' | 'skipped_portal' | 'skipped_over_budget' | 'skipped_wrong_state' | 'updated_existing' | 'no_address' | 'error';
+  action: 'created' | 'skipped_duplicate' | 'skipped_portal' | 'skipped_over_budget' | 'skipped_wrong_state' | 'updated_existing' | 'no_address' | 'error' | 'message' | 'skipped_newsletter';
   dealId?: string;
   senderEmail?: string;
   senderName?: string;
@@ -57,6 +57,9 @@ interface SyncDetails {
   dealType?: string | null;
   extractedData?: Record<string, any>;
   emailSnippet?: string;
+  extractionSource?: 'ai' | 'regex';
+  isImportant?: boolean;
+  messagePreview?: string;
 }
 
 // Decode base64url encoded content from Gmail
@@ -75,10 +78,19 @@ function decodeBase64Url(data: string): string {
 /** Strip HTML tags and clean up whitespace for AI parsing */
 function stripHtml(html: string): string {
   return html
+    // Remove script/style blocks entirely
+    .replace(/<(script|style|head)[^>]*>[\s\S]*?<\/\1>/gi, '')
+    // Remove inline images (base64 or tracking pixels — keep nothing useful)
+    .replace(/<img[^>]+src=["']data:[^"']+["'][^>]*>/gi, '')
+    .replace(/<img[^>]*>/gi, '')
+    // Block-level elements → newlines
     .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/?(p|div|li|tr|td|th|h[1-6]|section|article)[^>]*>/gi, '\n')
-    .replace(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi, ' $1 ') // keep href text
+    .replace(/<\/?(p|div|li|tr|td|th|h[1-6]|section|article|table|tbody|thead|tfoot|blockquote)[^>]*>/gi, '\n')
+    // Keep href text for links (Google Drive, Dropbox, photo links)
+    .replace(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi, ' $1 ')
+    // Strip remaining tags
     .replace(/<[^>]+>/g, ' ')
+    // Decode HTML entities
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -86,6 +98,8 @@ function stripHtml(html: string): string {
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, ' ')
     .replace(/&#\d+;/g, ' ')
+    .replace(/&[a-z]+;/gi, ' ')
+    // Clean up whitespace
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -97,15 +111,20 @@ function extractEmailBody(message: GmailMessage): string {
   let htmlText  = '';
 
   if (message.payload?.body?.data) {
+    // Single-part message
     const raw = decodeBase64Url(message.payload.body.data);
-    plainText = raw.trim().startsWith('<') ? stripHtml(raw) : raw;
+    if (raw.trim().startsWith('<') || message.payload.mimeType === 'text/html') {
+      htmlText = stripHtml(raw);
+    } else {
+      plainText = raw;
+    }
   } else if (message.payload?.parts) {
+    // Multipart message — collect both plain and HTML from nested parts
     const walk = (parts: any[]) => {
       for (const part of parts ?? []) {
         if (part.mimeType === 'text/plain' && part.body?.data && !plainText) {
           plainText = decodeBase64Url(part.body.data);
-        }
-        if (part.mimeType === 'text/html' && part.body?.data && !htmlText) {
+        } else if (part.mimeType === 'text/html' && part.body?.data && !htmlText) {
           htmlText = stripHtml(decodeBase64Url(part.body.data));
         }
         if (part.parts) walk(part.parts);
@@ -114,9 +133,77 @@ function extractEmailBody(message: GmailMessage): string {
     walk(message.payload.parts);
   }
 
-  const body = plainText || htmlText || message.snippet || '';
-  // Limit to 10000 chars
-  return body.substring(0, 10000);
+  // Decide which source to use:
+  // Prefer HTML when:
+  //   1. plain text is very short (< 200 chars) — "view in browser" placeholder
+  //   2. plain text contains a browser-view hint
+  //   3. HTML is significantly longer than plain text (CRM email with rich HTML body)
+  const plainHasBrowserHint = /view (this |in |your )?((email|message) (in|on) )?(a |your )?(web)?browser/i.test(plainText);
+  const htmlIsRicher = htmlText.length > 0 && htmlText.length > plainText.length * 1.5;
+  const plainIsUseful = plainText.length > 200 && !plainHasBrowserHint && !htmlIsRicher;
+  console.log(`[extractBody] plain=${plainText.length} chars, html=${htmlText.length} chars, usingPlain=${plainIsUseful} (browserHint=${plainHasBrowserHint}, htmlIsRicher=${htmlIsRicher})`);
+  const body = (plainIsUseful ? plainText : (htmlText || plainText)) || message.snippet || '';
+  // Limit to 25000 chars (stripped HTML is dense; property details can appear late in CRM emails)
+  return body.substring(0, 25000);
+}
+
+// Extract raw HTML (un-stripped) from a Gmail message for link parsing
+function extractRawHtml(message: GmailMessage): string {
+  if (message.payload?.body?.data) {
+    const raw = decodeBase64Url(message.payload.body.data);
+    if (raw.trim().startsWith('<') || message.payload.mimeType === 'text/html') return raw;
+  }
+  if (message.payload?.parts) {
+    let html = '';
+    const walk = (parts: any[]) => {
+      for (const part of parts ?? []) {
+        if (part.mimeType === 'text/html' && part.body?.data && !html) {
+          html = decodeBase64Url(part.body.data);
+        }
+        if (part.parts) walk(part.parts);
+      }
+    };
+    walk(message.payload.parts);
+    return html;
+  }
+  return '';
+}
+
+// Extract labeled document links from raw HTML before it's stripped.
+// Handles patterns like:  Photos <a href="url">HERE</a>
+//                         <a href="url">House Sketch</a>
+function extractDocumentLinks(rawHtml: string): Array<{label: string; url: string}> {
+  if (!rawHtml) return [];
+  const results: Array<{label: string; url: string}> = [];
+  const seen = new Set<string>();
+
+  // Pattern 1: "Some Label <a href="url">HERE</a>"
+  const herePattern = /([A-Za-z][A-Za-z\s&;:#\-]{0,60}?)\s*<a[^>]+href=["'](https?:\/\/[^"']+)["'][^>]*>\s*HERE\s*<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = herePattern.exec(rawHtml)) !== null) {
+    const rawLabel = m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const url = m[2];
+    if (!url || seen.has(url)) continue;
+    // Take last meaningful segment (avoid trailing HTML noise)
+    const label = rawLabel.split(/[|•·\n\r>]+/).pop()?.trim() ?? rawLabel;
+    if (label && label.length >= 2 && label.length <= 60) {
+      seen.add(url);
+      results.push({ label: label.substring(0, 50), url });
+    }
+  }
+
+  // Pattern 2: links with descriptive anchor text
+  const descriptivePattern = /<a[^>]+href=["'](https?:\/\/[^"']+)["'][^>]*>\s*(Photos?|House\s*Sketch|Sold\s*Comps?|Rent\s*Comp|Closed\s*Rent|Property\s*Info|Active\s*Under\s*Contract[^<]*|Inspection[^<]*|Appraisal[^<]*|Flyer|Floor\s*Plan|Layout|Sketch)\s*<\/a>/gi;
+  while ((m = descriptivePattern.exec(rawHtml)) !== null) {
+    const url = m[1];
+    const label = m[2].replace(/\s+/g, ' ').trim();
+    if (!seen.has(url) && label.length >= 2) {
+      seen.add(url);
+      results.push({ label, url });
+    }
+  }
+
+  return results.slice(0, 15);
 }
 
 // Get header value from Gmail message
@@ -259,9 +346,104 @@ interface ExtractedDeal {
   source: 'ai' | 'regex';
 }
 
+/** Parse a price value that may come back as "$585,000", "585000", 585000, etc. */
+function parsePrice(val: any): number | null {
+  if (val === null || val === undefined || val === '') return null;
+  if (typeof val === 'number') return isNaN(val) ? null : Math.round(val);
+  const cleaned = String(val).replace(/[$,\s]/g, '');
+  const num = Number(cleaned);
+  return isNaN(num) || num <= 0 ? null : Math.round(num);
+}
+
+/** Parse a decimal number (bathrooms: "2.5", 2.5, etc.) */
+function parseDecimal(val: any): number | null {
+  if (val === null || val === undefined || val === '') return null;
+  if (typeof val === 'number') return isNaN(val) ? null : val;
+  const cleaned = String(val).replace(/[^0-9.]/g, '');
+  const num = Number(cleaned);
+  return isNaN(num) || num <= 0 ? null : num;
+}
+
+/** Parse an integer (bedrooms, sqft, yearBuilt, etc.) */
+function parseInteger(val: any): number | null {
+  const n = parseDecimal(val);
+  return n === null ? null : Math.round(n);
+}
+
 // Detect if a string looks like a US street address: "123 Main St, City, ST 12345"
 function looksLikeAddress(s: string): boolean {
   return /^\d+\s+[a-zA-Z0-9\s]+(?:st|ave|dr|blvd|rd|ln|ct|pl|way|cir|pkwy|hwy|sw|nw|se|ne)\b.*,\s*[a-zA-Z\s]+,\s*[a-zA-Z]{2}\s+\d{5}/i.test(s.trim());
+}
+
+interface NonDealClassification {
+  type: 'message' | 'newsletter';
+  isImportant: boolean;
+  preview: string;
+}
+
+/** Classify a non-deal email: personal message vs newsletter/spam */
+async function classifyNonDealEmail(emailContent: string, subject: string, senderEmail: string): Promise<NonDealClassification> {
+  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+  const preview = emailContent.substring(0, 300).replace(/\s+/g, ' ').trim();
+
+  if (!apiKey) {
+    return { type: 'newsletter', isImportant: false, preview };
+  }
+
+  const prompt = `You are classifying an email that does NOT contain real estate deal listings.
+
+From: ${senderEmail}
+Subject: ${subject}
+Content (first 600 chars): ${emailContent.substring(0, 600)}
+
+Classify this email:
+1. Is it a personal/business message (someone reaching out, replying, asking something, sharing info directly) OR a newsletter/marketing/automated email?
+2. If it's a personal message, is it important (requires attention or response)?
+
+Return JSON only:
+{
+  "type": "message" | "newsletter",
+  "isImportant": true | false,
+  "reason": "brief reason"
+}
+
+- "message": a real person wrote this specifically (not mass-sent), OR it contains important business information
+- "newsletter": automated, marketing, mass-mailed, subscription, notification, alert, digest, promotion
+- isImportant: true only for "message" type that seems to need attention`;
+
+  try {
+    const response = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 150,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      return { type: 'newsletter', isImportant: false, preview };
+    }
+
+    const data = await response.json();
+    const text = data.content?.[0]?.text?.trim() || '';
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return { type: 'newsletter', isImportant: false, preview };
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    return {
+      type: parsed.type === 'message' ? 'message' : 'newsletter',
+      isImportant: Boolean(parsed.isImportant),
+      preview,
+    };
+  } catch {
+    return { type: 'newsletter', isImportant: false, preview };
+  }
 }
 
 // Use Anthropic claude-haiku to extract ALL property addresses and deal info from email
@@ -290,22 +472,37 @@ ${emailContent}
 RULES:
 - Find ALL properties listed — wholesalers often list 2-10 properties per email
 - Each property needs a street number (e.g. "463 Main St"). City-only phrases are NOT addresses.
-- Common formats: "463 Voyles Drive, Riverdale, GA 30274", "Property: 456 Elm Dr, Atlanta GA 30311"
-- If the subject mentions a city/state and the body has street addresses, combine them
+- ALL numeric fields MUST be plain numbers — no $ signs, no commas. e.g. 162000 not "$162,000"
+- Extract EVERY available field. Never leave a field null if the data exists in the email.
+- "Total Interior Area", "Living Area", "Heated Sq Ft" etc. → use as sqft
+- "Budget", "Rehab Budget", "Repairs" → use as rehabCost
+- "Market Rent", "Rental Income" → use as rent
+- "FCFS" = First Come First Served (note in dealNotes)
+- Beds/Baths may appear as "3 Beds / 3 Baths", "3BD/2BA", "Bedrooms: 3", "3 bed 2 bath"
+- "Total Interior Area", "Second Floor Finished", "First Floor Finished" → sum for sqft if no single total given
 
 For each property, extract:
 - address: Full US address with street, city, state, ZIP (required)
-- purchasePrice: Asking price (NOT ARV, NOT rehab cost)
-- arv: After Repair Value
+- purchasePrice: Asking/offer/purchase price as plain number (NOT ARV, NOT rehab). e.g. 162000
+- arv: After Repair Value as plain number
 - dealType: Fix & Flip / Wholesale / Buy & Hold / BRRRR / Subject To / Seller Financing / Multifamily / Other / null
-- bedrooms, bathrooms, sqft, units, yearBuilt, lotSize
-- rehabCost, rent, capRate, cashFlow, downPayment
-- existingLoanBalance, monthlyPITI
+- bedrooms: number of bedrooms (integer)
+- bathrooms: number of bathrooms (decimal ok, e.g. 2.5)
+- sqft: total interior square footage (integer) — use any area field if explicit sqft not given
+- units, yearBuilt
+- lotSize: e.g. "0.52 acres" or "6500 sqft"
+- rehabCost: rehab/repair/budget cost as plain number
+- rent: monthly rent as plain number
+- capRate, cashFlow, downPayment, existingLoanBalance, monthlyPITI
 - propertyType: single_family / multi_family / condo / townhouse / duplex / triplex / fourplex / commercial / land / other
-- condition, occupancy
+- condition: e.g. "Good", "Fair", "Needs Work", "Occupied" — any condition descriptor
+- exterior: exterior material/style e.g. "Siding", "Brick", "Stucco" (null if not mentioned)
+- access: how to access the property e.g. "Appointment", "Lockbox", "Vacant" (null if not mentioned)
+- occupancy: e.g. "Occupied", "Vacant", "Tenant Occupied"
+- county, neighborhood
 - financingNotes, dealNotes
-- propertyDescription: 2-3 paragraph organized summary of all details (do not invent data)
-- photoLinks: Array of Google Drive / Dropbox / photo URLs found in email (empty array if none)
+- propertyDescription: organized summary of ALL details from the email — include floor breakdown, garage, access info, financing terms, FCFS, everything
+- photoLinks: array of any http/https URLs mentioned in the email (Google Drive, Dropbox, etc.)
 
 Return ONLY valid JSON, nothing else:
 {
@@ -330,6 +527,8 @@ Return ONLY valid JSON, nothing else:
       "monthlyPITI": null,
       "propertyType": "single_family",
       "condition": null,
+      "exterior": null,
+      "access": null,
       "occupancy": null,
       "financingNotes": null,
       "dealNotes": null,
@@ -342,7 +541,9 @@ Return ONLY valid JSON, nothing else:
 Return { "deals": [] } if no valid US property addresses with street numbers are found.`;
 
   try {
-    console.log('[extractDeals] Calling Claude Haiku...');
+    console.log('[extractDeals] Calling Claude Sonnet — body preview (first 800 chars):');
+    console.log(emailContent.substring(0, 800));
+    console.log('[extractDeals] Subject:', subject);
     const response = await fetch(ANTHROPIC_API_URL, {
       method: 'POST',
       headers: {
@@ -351,8 +552,8 @@ Return { "deals": [] } if no valid US property addresses with street numbers are
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5-20251001',
-        max_tokens: 4096,
+        model: 'claude-sonnet-4-6',
+        max_tokens: 8192,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
@@ -393,11 +594,29 @@ Return { "deals": [] } if no valid US property addresses with street numbers are
       .filter((d: any) => d.address && typeof d.address === 'string' && d.address.length > 10)
       .map((d: any) => {
         const { address, purchasePrice, dealType, ...rest } = d;
+        // Normalize all numeric fields so "$585,000" / "3 beds" etc. become proper numbers
+        const normalizedData: Record<string, any> = { ...rest };
+        if ('arv'              in normalizedData) normalizedData.arv          = parsePrice(normalizedData.arv);
+        if ('rehabCost'        in normalizedData) normalizedData.rehabCost    = parsePrice(normalizedData.rehabCost);
+        if ('rent'             in normalizedData) normalizedData.rent         = parsePrice(normalizedData.rent);
+        if ('cashFlow'         in normalizedData) normalizedData.cashFlow     = parsePrice(normalizedData.cashFlow);
+        if ('downPayment'      in normalizedData) normalizedData.downPayment  = parsePrice(normalizedData.downPayment);
+        if ('existingLoanBalance' in normalizedData) normalizedData.existingLoanBalance = parsePrice(normalizedData.existingLoanBalance);
+        if ('monthlyPITI'      in normalizedData) normalizedData.monthlyPITI  = parsePrice(normalizedData.monthlyPITI);
+        if ('bedrooms'         in normalizedData) normalizedData.bedrooms     = parseInteger(normalizedData.bedrooms);
+        if ('bathrooms'        in normalizedData) normalizedData.bathrooms    = parseDecimal(normalizedData.bathrooms);
+        if ('sqft'             in normalizedData) normalizedData.sqft         = parseInteger(normalizedData.sqft);
+        if ('units'            in normalizedData) normalizedData.units        = parseInteger(normalizedData.units);
+        if ('yearBuilt'        in normalizedData) normalizedData.yearBuilt    = parseInteger(normalizedData.yearBuilt);
+        if ('capRate'          in normalizedData) normalizedData.capRate      = parseDecimal(normalizedData.capRate);
+
+        const parsedPrice = parsePrice(purchasePrice);
+        console.log(`[extractDeals] deal="${address}" price=${parsedPrice} beds=${normalizedData.bedrooms} baths=${normalizedData.bathrooms} sqft=${normalizedData.sqft}`);
         return {
           address: address.trim(),
-          purchasePrice: purchasePrice ? Number(purchasePrice) : null,
+          purchasePrice: parsedPrice,
           dealType: dealType || null,
-          extractedData: rest,
+          extractedData: normalizedData,
           source: 'ai' as const,
         };
       });
@@ -423,11 +642,15 @@ Return { "deals": [] } if no valid US property addresses with street numbers are
 // Mark email as read in Gmail
 async function markEmailAsRead(accessToken: string, messageId: string): Promise<void> {
   try {
-    await fetch(`${GMAIL_API_BASE}/users/me/messages/${messageId}/modify`, {
+    const res = await fetch(`${GMAIL_API_BASE}/users/me/messages/${messageId}/modify`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ removeLabelIds: ['UNREAD'] }),
     });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.error(`markEmailAsRead ${messageId} → HTTP ${res.status}: ${errText}`);
+    }
   } catch (error) {
     console.error(`Failed to mark email ${messageId} as read:`, error);
   }
@@ -469,8 +692,10 @@ serve(async (req) => {
       include_read = false,
       target_state,
       mark_old_only = false,
-      mark_unread_recent = false,  // NEW: mark recent emails as unread for re-scanning
-      dry_run = false,             // NEW: extract but don't save to DB
+      mark_unread_recent = false,
+      dry_run = false,
+      force_rescan = false,        // DEBUG: skip already-processed check
+      message_ids,                 // Optional: pre-fetched message IDs to skip Gmail list API
     } = body;
 
     if (!access_token) {
@@ -553,29 +778,38 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Fetching emails... (since_days: ${since_days ?? 'all'}, include_read: ${include_read}, dry_run: ${dry_run})`);
+    console.log(`Fetching emails... (since_days: ${since_days ?? 'all'}, include_read: ${include_read}, dry_run: ${dry_run}, message_ids: ${message_ids ? message_ids.length : 'none'})`);
 
-    // Build Gmail search query
-    let query = include_read ? '' : 'is:unread';
-    if (since_days) query += `${query ? ' ' : ''}newer_than:${since_days}d`;
-    const encodedQuery = encodeURIComponent(query.trim());
+    let messages: Array<{ id: string }>;
 
-    const listResponse = await fetch(
-      `${GMAIL_API_BASE}/users/me/messages?maxResults=${max_results}&q=${encodedQuery}`,
-      { headers: { 'Authorization': `Bearer ${access_token}` } }
-    );
+    if (Array.isArray(message_ids) && message_ids.length > 0) {
+      // Caller already fetched the message list — skip Gmail list API
+      messages = message_ids.map((id: string) => ({ id }));
+      console.log(`Using provided ${messages.length} message IDs — skipping Gmail list API`);
+    } else {
+      // Build Gmail search query
+      let query = include_read ? '' : 'is:unread';
+      if (since_days) query += `${query ? ' ' : ''}newer_than:${since_days}d`;
+      const encodedQuery = encodeURIComponent(query.trim());
 
-    if (!listResponse.ok) {
-      const errorText = await listResponse.text();
-      console.error('Gmail API error:', listResponse.status, errorText);
-      return new Response(
-        JSON.stringify({ success: false, error: 'Failed to fetch emails', details: errorText }),
-        { status: listResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      const listResponse = await fetch(
+        `${GMAIL_API_BASE}/users/me/messages?maxResults=${max_results}&q=${encodedQuery}`,
+        { headers: { 'Authorization': `Bearer ${access_token}` } }
       );
+
+      if (!listResponse.ok) {
+        const errorText = await listResponse.text();
+        console.error('Gmail API error:', listResponse.status, errorText);
+        return new Response(
+          JSON.stringify({ success: false, error: 'Failed to fetch emails', details: errorText }),
+          { status: listResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const listData = await listResponse.json();
+      messages = listData.messages || [];
     }
 
-    const listData = await listResponse.json();
-    const messages = listData.messages || [];
     console.log(`Found ${messages.length} emails to process`);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -590,13 +824,28 @@ serve(async (req) => {
       id: d.id, address: d.address_full, deal: d,
     })) || [];
 
-    const syncDetails: SyncDetails[] = [];
-    const processedDeals: any[] = [];
-    const errors: string[] = [];
-    const skippedAddresses: string[] = [];
-    const portalEmails: string[] = [];
-    let dealsSkippedDuplicate = 0;
-    let dealsSkippedPortal = 0;
+    // Shared mutable state — all concurrent workers accumulate into this object
+    interface SharedState {
+      existingAddresses: Array<{ id: string; address: string; deal: any }>;
+      syncDetails: SyncDetails[];
+      processedDeals: any[];
+      errors: string[];
+      skippedAddresses: string[];
+      portalEmails: string[];
+      dealsSkippedDuplicate: number;
+      dealsSkippedPortal: number;
+    }
+
+    const sharedState: SharedState = {
+      existingAddresses,
+      syncDetails: [],
+      processedDeals: [],
+      errors: [],
+      skippedAddresses: [],
+      portalEmails: [],
+      dealsSkippedDuplicate: 0,
+      dealsSkippedPortal: 0,
+    };
 
     if (messages.length === 0) {
       return new Response(
@@ -605,15 +854,16 @@ serve(async (req) => {
       );
     }
 
-    for (const msg of messages) {
+    // Process one email message — accumulates into sharedState
+    async function processOneMessage(msg: { id: string }, state: SharedState): Promise<void> {
       try {
-        // Skip already-processed message IDs (unless dry_run or include_read)
-        if (!dry_run && !include_read) {
+        // Skip already-processed message IDs (unless dry_run, include_read, or force_rescan)
+        if (!dry_run && !include_read && !force_rescan) {
           const alreadyProcessed = existingDeals?.some(d => d.gmail_message_id === msg.id);
           if (alreadyProcessed) {
             console.log(`Email ${msg.id} already processed, skipping`);
             await markEmailAsRead(access_token, msg.id);
-            continue;
+            return;
           }
         }
 
@@ -624,7 +874,7 @@ serve(async (req) => {
         );
         if (!msgResponse.ok) {
           console.error(`Failed to fetch message ${msg.id}`);
-          continue;
+          return;
         }
 
         const fullMessage: GmailMessage = await msgResponse.json();
@@ -632,47 +882,82 @@ serve(async (req) => {
         const date    = getHeader(fullMessage, 'date');
         const from    = getHeader(fullMessage, 'from');
         const senderInfo = parseSenderInfo(from);
-        const body    = extractEmailBody(fullMessage);
+        const rawHtml = extractRawHtml(fullMessage);   // un-stripped, for link extraction
+        const body    = extractEmailBody(fullMessage); // stripped plain text for AI
+        const docLinks = extractDocumentLinks(rawHtml);
         const snippet = fullMessage.snippet || '';
 
         console.log(`Processing: from=${senderInfo.email} | subject="${subject}" | body_len=${body.length}`);
 
         // Skip portal emails — mark them as read immediately
         if (isPortalEmail(senderInfo.email)) {
-          portalEmails.push(`${senderInfo.email}: ${subject}`);
-          dealsSkippedPortal++;
-          syncDetails.push({ address: '', action: 'skipped_portal', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `Portal: ${senderInfo.email}`, messageId: msg.id, emailSnippet: snippet });
+          state.portalEmails.push(`${senderInfo.email}: ${subject}`);
+          state.dealsSkippedPortal++;
+          state.syncDetails.push({ address: '', action: 'skipped_portal', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `Portal: ${senderInfo.email}`, messageId: msg.id, emailSnippet: snippet });
           await markEmailAsRead(access_token, msg.id);
-          continue;
+          return;
         }
 
         // Extract deals (AI + regex fallback)
         const extractedDeals = await extractDealsWithAI(body, subject);
 
         if (extractedDeals.length === 0) {
-          console.log(`No addresses found in: "${subject}"`);
-          syncDetails.push({ address: '', action: 'no_address', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: 'No property address found (AI + regex both returned nothing)', messageId: msg.id, emailSnippet: snippet });
-          // ── KEY FIX: Do NOT mark as read — leave unread so it can be retried ──
-          continue;
+          console.log(`No addresses found in: "${subject}" — classifying email type`);
+          const classification = await classifyNonDealEmail(body, subject, senderInfo.email);
+          await markEmailAsRead(access_token, msg.id);
+
+          if (classification.type === 'message') {
+            console.log(`[classify] Personal message from ${senderInfo.email}, important=${classification.isImportant}`);
+            state.syncDetails.push({
+              address: '',
+              action: 'message',
+              senderEmail: senderInfo.email,
+              senderName: senderInfo.name,
+              subject,
+              messageId: msg.id,
+              emailSnippet: snippet,
+              isImportant: classification.isImportant,
+              messagePreview: classification.preview,
+            });
+          } else {
+            console.log(`[classify] Newsletter/automated from ${senderInfo.email} — marked read, skipping`);
+            state.syncDetails.push({
+              address: '',
+              action: 'skipped_newsletter',
+              senderEmail: senderInfo.email,
+              senderName: senderInfo.name,
+              subject,
+              messageId: msg.id,
+              emailSnippet: snippet,
+            });
+          }
+          return;
         }
 
         console.log(`Found ${extractedDeals.length} deal(s) in "${subject}"`);
 
         let dealsFromThisEmail = 0;
 
+        let emailWasProcessed = false; // any address extracted → mark as read regardless of outcome
+
         for (const dealInfo of extractedDeals) {
           const address = dealInfo.address;
           const emailPurchasePrice = dealInfo.purchasePrice;
           console.log(`  Deal: "${address}" price=$${emailPurchasePrice} source=${dealInfo.source}`);
 
+          // Any address found → email is considered "processed", mark as read after loop
+          emailWasProcessed = true;
+
           // Skip over-budget
           if (emailPurchasePrice && emailPurchasePrice > MAX_DEAL_PRICE) {
-            syncDetails.push({ address, action: 'skipped_over_budget', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `$${emailPurchasePrice.toLocaleString()} > $${MAX_DEAL_PRICE.toLocaleString()}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet });
+            state.syncDetails.push({ address, action: 'skipped_over_budget', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `$${emailPurchasePrice.toLocaleString()} > $${MAX_DEAL_PRICE.toLocaleString()}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
             continue;
           }
 
-          // Duplicate check
-          const duplicateMatch = existingAddresses.find(ea => addressesMatch(ea.address, address));
+          // Duplicate check — skip when force_rescan so we can see full extraction
+          // Note: existingAddresses is shared — within-batch dedup works because workers
+          // push to it immediately after creating a deal.
+          const duplicateMatch = force_rescan ? null : state.existingAddresses.find(ea => addressesMatch(ea.address, address));
           if (duplicateMatch) {
             const newDealData = { emailPurchasePrice, purchasePrice: emailPurchasePrice };
             if (!dry_run && isBetterDeal(newDealData, duplicateMatch.deal)) {
@@ -684,12 +969,12 @@ serve(async (req) => {
                 email_subject: subject,
                 email_date: date ? new Date(date).toISOString() : null,
               }).eq('id', duplicateMatch.id);
-              syncDetails.push({ address, action: 'updated_existing', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `Better price: $${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet });
+              state.syncDetails.push({ address, action: 'updated_existing', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `Better price: $${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
               dealsFromThisEmail++;
             } else {
-              skippedAddresses.push(address);
-              dealsSkippedDuplicate++;
-              syncDetails.push({ address, action: 'skipped_duplicate', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet });
+              state.skippedAddresses.push(address);
+              state.dealsSkippedDuplicate++;
+              state.syncDetails.push({ address, action: 'skipped_duplicate', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
             }
             continue;
           }
@@ -699,29 +984,33 @@ serve(async (req) => {
           const street   = addressParts[0] || address;
           const city     = addressParts[1] || '';
           const stateZip = addressParts[2] || '';
-          const [state, zip] = stateZip.split(' ').filter(Boolean);
+          const [state_code, zip] = stateZip.split(' ').filter(Boolean);
 
           // State filter
-          if (target_state && state) {
-            const normState = state.toUpperCase().trim();
+          if (target_state && state_code) {
+            const normState = state_code.toUpperCase().trim();
             const normTarget = target_state.toUpperCase().trim();
             if (normState !== normTarget) {
-              syncDetails.push({ address, action: 'skipped_wrong_state', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `State ${normState} != ${normTarget}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet });
+              state.syncDetails.push({ address, action: 'skipped_wrong_state', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `State ${normState} != ${normTarget}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
               continue;
             }
           }
 
-          // Merge image links
-          const regexImageLinks = extractImageLinks(body);
+          // Merge image links (use rawHtml so <img> tags are still present)
+          const regexImageLinks = extractImageLinks(rawHtml || body);
           const aiPhotoLinks: string[] = Array.isArray(dealInfo.extractedData?.photoLinks)
             ? dealInfo.extractedData.photoLinks : [];
           const allImageLinks = [...new Set([...aiPhotoLinks, ...regexImageLinks])].slice(0, 20);
-          const enrichedExtractedData = { ...dealInfo.extractedData, imageLinks: allImageLinks };
+          const enrichedExtractedData = {
+            ...dealInfo.extractedData,
+            imageLinks: allImageLinks,
+            documentLinks: docLinks.length > 0 ? docLinks : undefined,
+          };
 
           const dealData: Record<string, any> = {
             address_street: street,
             address_city: city,
-            address_state: state || '',
+            address_state: state_code || '',
             address_zip: zip || null,
             address_full: address,
             status: 'new',
@@ -738,11 +1027,21 @@ serve(async (req) => {
             email_extracted_data: Object.keys(enrichedExtractedData).length > 0 ? enrichedExtractedData : null,
           };
 
-          if (dry_run) {
-            // Don't save — just report
-            processedDeals.push({ ...dealData, dry_run: true, extractionSource: dealInfo.source });
-            syncDetails.push({ address, action: 'created', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `[DRY RUN] Would create. Source: ${dealInfo.source}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet });
-            existingAddresses.push({ id: 'dry-run', address, deal: dealData });
+          if (dry_run || force_rescan) {
+            // force_rescan: look up existing deal to return its ID for analysis
+            const existingMatch = force_rescan
+              ? state.existingAddresses.find(ea => addressesMatch(ea.address, address))
+              : null;
+            const existingId = existingMatch?.id && existingMatch.id !== 'dry-run' ? existingMatch.id : null;
+
+            state.processedDeals.push({ ...dealData, dry_run: true, extractionSource: dealInfo.source });
+            if (existingId) {
+              state.syncDetails.push({ address, action: 'updated_existing', existingDealId: existingId, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `[RESCAN] Source: ${dealInfo.source} price=${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
+            } else {
+              state.syncDetails.push({ address, action: 'created', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `[TEST] Source: ${dealInfo.source} price=${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
+            }
+            // Register address immediately so within-batch dedup works
+            state.existingAddresses.push({ id: existingId || 'dry-run', address, deal: dealData });
             dealsFromThisEmail++;
             continue;
           }
@@ -752,30 +1051,43 @@ serve(async (req) => {
 
           if (insertError) {
             console.error('Error inserting deal:', insertError);
-            errors.push(`Failed to save ${address}: ${insertError.message}`);
-            syncDetails.push({ address, action: 'error', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: insertError.message, messageId: msg.id, emailSnippet: snippet });
+            state.errors.push(`Failed to save ${address}: ${insertError.message}`);
+            state.syncDetails.push({ address, action: 'error', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: insertError.message, messageId: msg.id, emailSnippet: snippet });
             continue;
           }
 
-          existingAddresses.push({ id: newDeal.id, address: newDeal.address_full, deal: newDeal });
-          processedDeals.push(newDeal);
-          syncDetails.push({ address, action: 'created', dealId: newDeal.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet });
+          // Register immediately so subsequent parallel workers see this address
+          state.existingAddresses.push({ id: newDeal.id, address: newDeal.address_full, deal: newDeal });
+          state.processedDeals.push(newDeal);
+          state.syncDetails.push({ address, action: 'created', dealId: newDeal.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
           dealsFromThisEmail++;
           console.log(`  ✓ Created deal: ${address}`);
         }
 
-        // ── Mark as read only if we actually processed deals from this email ──
-        if (!dry_run && dealsFromThisEmail > 0) {
+        // Mark as read whenever any address was found (even if skipped/duplicate/over-budget).
+        // Only leave unread when no address was found at all (no_address → retry).
+        // force_rescan is also allowed to mark as read — it is used as "Reset & Rescan"
+        // which is a real scan, not a preview. Only dry_run (true preview) skips marking.
+        if (!dry_run && emailWasProcessed) {
           await markEmailAsRead(access_token, msg.id);
         }
-        // If no deals found from a non-portal email → leave unread for retry
 
       } catch (error) {
         console.error(`Error processing message ${msg.id}:`, error);
-        errors.push(`Error: ${error instanceof Error ? error.message : 'Unknown'}`);
-        syncDetails.push({ address: '', action: 'error', reason: error instanceof Error ? error.message : 'Unknown error' });
+        sharedState.errors.push(`Error: ${error instanceof Error ? error.message : 'Unknown'}`);
+        sharedState.syncDetails.push({ address: '', action: 'error', reason: error instanceof Error ? error.message : 'Unknown error' });
       }
     }
+
+    // Process messages in parallel batches of 4 to stay well within the 60s timeout
+    const CONCURRENCY = 4;
+    for (let i = 0; i < messages.length; i += CONCURRENCY) {
+      const batch = messages.slice(i, i + CONCURRENCY);
+      await Promise.allSettled(batch.map(msg => processOneMessage(msg, sharedState)));
+    }
+
+    // Extract from shared state for response building
+    const { syncDetails, processedDeals, errors, skippedAddresses, portalEmails, dealsSkippedDuplicate, dealsSkippedPortal } = sharedState;
 
     // Mark older unread emails as read if requested
     let olderMarkedRead = 0;

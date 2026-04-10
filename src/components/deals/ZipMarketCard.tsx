@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import {
   TrendingUp, TrendingDown, Minus, Loader2, RefreshCw,
   MapPin, Home, Clock, DollarSign, GraduationCap, ShieldCheck,
-  Briefcase, Star, AlertTriangle, CheckCircle2, Globe
+  Briefcase, Star, AlertTriangle, CheckCircle2, Globe, ChevronDown
 } from 'lucide-react';
 import { useZipMarketData, ZipMarketData } from '@/hooks/useZipMarketData';
 import { cn } from '@/lib/utils';
@@ -190,78 +191,89 @@ function MarketDataDisplay({ data, onRefresh, isRefreshing }: { data: ZipMarketD
 export function ZipMarketCard({ zipCode, city, state }: ZipMarketCardProps) {
   const { data, isLoading, error, fetchMarketData } = useZipMarketData(zipCode);
   const [hasFetched, setHasFetched] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
 
   const cleanZip = zipCode?.trim().substring(0, 5);
   if (!cleanZip || cleanZip.length < 5) return null;
 
   const handleFetch = async (forceRefresh = false) => {
     setHasFetched(true);
+    if (!isOpen) setIsOpen(true);
     await fetchMarketData(forceRefresh);
   };
 
   return (
-    <Card className="border border-indigo-500/30 bg-card/50">
-      <CardHeader className="pb-2 pt-3 px-4">
-        <CardTitle className="text-base flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Globe className="w-4 h-4 text-indigo-400" />
-            <span>Market Intelligence</span>
-            <Badge variant="outline" className="text-xs border-indigo-500/40 text-indigo-400">
-              ZIP {cleanZip}
-            </Badge>
-          </div>
-          {data && (
-            <Star className="w-4 h-4 text-indigo-400 fill-indigo-400/30" />
-          )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="px-4 pb-4">
-        {data ? (
-          <MarketDataDisplay
-            data={data}
-            onRefresh={() => handleFetch(true)}
-            isRefreshing={isLoading}
-          />
-        ) : isLoading ? (
-          <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
-            <Loader2 className="w-5 h-5 animate-spin" />
-            <span className="text-sm">Researching market data for {city || cleanZip}...</span>
-          </div>
-        ) : error ? (
-          <div className="py-4 space-y-3">
-            <p className="text-sm text-destructive flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4" />
-              {error}
-            </p>
-            <Button variant="outline" size="sm" onClick={() => handleFetch(false)}>
-              <RefreshCw className="w-3 h-3 mr-1" />
-              Try Again
-            </Button>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center gap-3 py-6">
-            <Globe className="w-8 h-8 text-indigo-400/50" />
-            <p className="text-sm text-muted-foreground text-center">
-              Real-time market intelligence for ZIP {cleanZip}
-              {city && ` (${city}${state ? `, ${state}` : ''})`}
-            </p>
-            <p className="text-xs text-muted-foreground text-center max-w-xs">
-              Powered by AI web search — median prices, DOM, rentals, demographics, school ratings, and investor insights.
-            </p>
-            <Button
-              onClick={() => handleFetch(false)}
-              disabled={isLoading}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white"
-            >
-              {isLoading ? (
-                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Researching...</>
-              ) : (
-                <><Globe className="w-4 h-4 mr-2" />Research This Market</>
-              )}
-            </Button>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+      <Card className="border border-indigo-500/30 bg-card/50">
+        <CollapsibleTrigger asChild>
+          <CardHeader className="pb-2 pt-3 px-4 cursor-pointer hover:bg-muted/30 transition-colors">
+            <CardTitle className="text-sm flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Globe className="w-4 h-4 text-indigo-400" />
+                <span>Market Intelligence</span>
+                <Badge variant="outline" className="text-xs border-indigo-500/40 text-indigo-400">
+                  ZIP {cleanZip}
+                </Badge>
+                {data && <Star className="w-3.5 h-3.5 text-indigo-400 fill-indigo-400/30" />}
+              </div>
+              <ChevronDown className={cn(
+                'w-4 h-4 text-muted-foreground transition-transform shrink-0',
+                isOpen && 'rotate-180'
+              )} />
+            </CardTitle>
+          </CardHeader>
+        </CollapsibleTrigger>
+
+        <CollapsibleContent>
+          <CardContent className="px-4 pb-4">
+            {data ? (
+              <MarketDataDisplay
+                data={data}
+                onRefresh={() => handleFetch(true)}
+                isRefreshing={isLoading}
+              />
+            ) : isLoading ? (
+              <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span className="text-sm">Researching market data for {city || cleanZip}...</span>
+              </div>
+            ) : error ? (
+              <div className="py-4 space-y-3">
+                <p className="text-sm text-destructive flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4" />
+                  {error}
+                </p>
+                <Button variant="outline" size="sm" onClick={() => handleFetch(false)}>
+                  <RefreshCw className="w-3 h-3 mr-1" />
+                  Try Again
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-3 py-6">
+                <Globe className="w-8 h-8 text-indigo-400/50" />
+                <p className="text-sm text-muted-foreground text-center">
+                  Real-time market intelligence for ZIP {cleanZip}
+                  {city && ` (${city}${state ? `, ${state}` : ''})`}
+                </p>
+                <p className="text-xs text-muted-foreground text-center max-w-xs">
+                  Powered by AI web search — median prices, DOM, rentals, demographics, school ratings, and investor insights.
+                </p>
+                <Button
+                  onClick={() => handleFetch(false)}
+                  disabled={isLoading}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                >
+                  {isLoading ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Researching...</>
+                  ) : (
+                    <><Globe className="w-4 h-4 mr-2" />Research This Market</>
+                  )}
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
   );
 }

@@ -14,6 +14,7 @@ interface DealsContextType {
   refetch: () => Promise<void>;
   toggleDealLock: (id: string) => Promise<void>;
   recalculateAllDealsFinancials: () => Promise<void>;
+  deleteDeal: (id: string) => Promise<void>;
 }
 
 const DealsContext = createContext<DealsContextType | undefined>(undefined);
@@ -31,6 +32,7 @@ export function DealsProvider({ children }: { children: React.ReactNode }) {
     refetch,
     toggleDealLock,
     recalculateAllDealsFinancials,
+    deleteDeal,
   } = useDealsFromDB();
 
   return (
@@ -46,6 +48,7 @@ export function DealsProvider({ children }: { children: React.ReactNode }) {
       refetch,
       toggleDealLock,
       recalculateAllDealsFinancials,
+      deleteDeal,
     }}>
       {children}
     </DealsContext.Provider>

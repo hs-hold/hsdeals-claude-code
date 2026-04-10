@@ -4,17 +4,18 @@ import { useDeals } from '@/context/DealsContext';
 import { isDealAnalyzed } from '@/utils/dealHelpers';
 import { formatCurrency, formatPercent } from '@/utils/financialCalculations';
 import { toast } from 'sonner';
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { RotateCcw, Loader2 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { RotateCcw, Loader2, Search } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { DealAgeFilter, AgeFilterType, applyDealAgeFilter } from '@/components/deals/DealAgeFilter';
 import { formatIL as format } from '@/utils/dateFormat';
@@ -23,11 +24,19 @@ export default function NotRelevantPage() {
   const { deals, updateDealStatus } = useDeals();
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [ageFilter, setAgeFilter] = useState<AgeFilterType>('month');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const notRelevantDeals = useMemo(() => {
     const base = deals.filter(d => d.status === 'not_relevant');
-    return applyDealAgeFilter(base, ageFilter);
-  }, [deals, ageFilter]);
+    const byAge = applyDealAgeFilter(base, ageFilter);
+    if (!searchQuery.trim()) return byAge;
+    const q = searchQuery.toLowerCase();
+    return byAge.filter(d =>
+      d.address.full.toLowerCase().includes(q) ||
+      d.address.street.toLowerCase().includes(q) ||
+      d.address.city.toLowerCase().includes(q)
+    );
+  }, [deals, ageFilter, searchQuery]);
 
   const handleRestore = async (id: string) => {
     const deal = deals.find(d => d.id === id);
@@ -57,7 +66,18 @@ export default function NotRelevantPage() {
             Deals that have been marked as not suitable for investment
           </p>
         </div>
-        <DealAgeFilter value={ageFilter} onChange={setAgeFilter} className="mt-1" />
+        <div className="flex items-center gap-2 mt-1">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <Input
+              placeholder="Search by address..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="pl-8 h-8 w-52 text-sm"
+            />
+          </div>
+          <DealAgeFilter value={ageFilter} onChange={setAgeFilter} />
+        </div>
       </div>
 
       {/* Table */}

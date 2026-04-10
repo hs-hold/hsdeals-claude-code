@@ -35,9 +35,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { 
-  ArrowLeft, 
-  Zap, 
-  XCircle, 
+  ArrowLeft,
+  Zap,
+  XCircle,
+  Trash2,
+  MessageSquare,
+  Send,
   MapPin,
   Calendar,
   Mail,
@@ -103,6 +106,7 @@ import { RentalAnalysisCard } from '@/components/deals/RentalAnalysisCard';
 import { BrrrrAnalysisCard } from '@/components/deals/BrrrrAnalysisCard';
 import { DealInvestorsManager } from '@/components/deals/DealInvestorsManager';
 import { ZipMarketCard } from '@/components/deals/ZipMarketCard';
+import { useDealMessages } from '@/hooks/useDealMessages';
 
 export default function DealDetailPage() {
   const { id } = useParams();
@@ -112,7 +116,7 @@ export default function DealDetailPage() {
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const { settings } = useSettings();
   const loanDefaults = settings.loanDefaults;
-  const { getDeal, updateDealStatus, updateDealOverrides, updateDealNotes, refreshDealFromApi, refetch, isLoading, toggleDealLock } = useDeals();
+  const { getDeal, updateDealStatus, updateDealOverrides, updateDealNotes, refreshDealFromApi, refetch, isLoading, toggleDealLock, deleteDeal } = useDeals();
 
   const arvOverrideRef = useRef<HTMLInputElement>(null);
   const rehabOverrideRef = useRef<HTMLInputElement>(null);
@@ -135,6 +139,7 @@ export default function DealDetailPage() {
   }, [id]);
   
   const deal = getDeal(id || '');
+  const { messages: smsMessages, sending: smsSending, sendSms } = useDealMessages(deal?.id);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [localOverrides, setLocalOverrides] = useState({
     arv: deal?.overrides?.arv?.toString() || '',
@@ -210,6 +215,9 @@ export default function DealDetailPage() {
   const [olderCompsOpen, setOlderCompsOpen] = useState(false);
   const [isLoiDialogOpen, setIsLoiDialogOpen] = useState(false);
   const [isExportSummaryDialogOpen, setIsExportSummaryDialogOpen] = useState(false);
+  const [isSmsDialogOpen, setIsSmsDialogOpen] = useState(false);
+  const [smsPhone, setSmsPhone] = useState('');
+  const [smsBody, setSmsBody] = useState('');
   
   // Collapsible section states - all closed by default for clean initial view
   const [modifiedAssumptionsOpen, setModifiedAssumptionsOpen] = useState(false);
@@ -805,24 +813,26 @@ export default function DealDetailPage() {
   }, [localOverrides, apiData, liveFinancials, loanDefaults]);
   
   // Destructure for easy access (with defaults for when derivedValues is null)
-  const purchasePrice = derivedValues?.purchasePrice ?? 0;
-  const arv = derivedValues?.arv ?? 0;
-  const rehabCost = derivedValues?.rehabCost ?? 0;
-  const rent = derivedValues?.rent ?? 0;
-  const propertyTaxMonthly = derivedValues?.propertyTaxMonthly ?? 0;
-  const insuranceMonthly = derivedValues?.insuranceMonthly ?? 0;
-  const monthlyHoldingCost = derivedValues?.monthlyHoldingCost ?? 0;
-  const rehabMonths = derivedValues?.rehabMonths ?? 6;
-  const totalHoldingCosts = derivedValues?.totalHoldingCosts ?? 0;
-  const closingCostsBuy = derivedValues?.closingCostsBuy ?? 0;
+  // Use (val || 0) instead of (val ?? 0) to also guard against NaN from calc errors
+  const safeNum = (v: number | null | undefined) => (v != null && isFinite(v) ? v : 0);
+  const purchasePrice = safeNum(derivedValues?.purchasePrice);
+  const arv           = safeNum(derivedValues?.arv);
+  const rehabCost     = safeNum(derivedValues?.rehabCost);
+  const rent          = safeNum(derivedValues?.rent);
+  const propertyTaxMonthly  = safeNum(derivedValues?.propertyTaxMonthly);
+  const insuranceMonthly    = safeNum(derivedValues?.insuranceMonthly);
+  const monthlyHoldingCost  = safeNum(derivedValues?.monthlyHoldingCost);
+  const rehabMonths         = safeNum(derivedValues?.rehabMonths) || 6;
+  const totalHoldingCosts   = safeNum(derivedValues?.totalHoldingCosts);
+  const closingCostsBuy     = safeNum(derivedValues?.closingCostsBuy);
   // Strategy summary metrics
-  const flipNetProfit = derivedValues?.flipNetProfit ?? 0;
-  const flipRoi = derivedValues?.flipRoi ?? 0;
-  const rentalMonthlyCashflow = derivedValues?.rentalMonthlyCashflow ?? 0;
-  const rentalCapRate = derivedValues?.rentalCapRate ?? 0;
-  const brrrrCashLeftInDeal = derivedValues?.brrrrCashLeftInDeal ?? 0;
-  const brrrrMonthlyCashflow = derivedValues?.brrrrMonthlyCashflow ?? 0;
-  const brrrrEquity = derivedValues?.brrrrEquity ?? 0;
+  const flipNetProfit        = safeNum(derivedValues?.flipNetProfit);
+  const flipRoi              = safeNum(derivedValues?.flipRoi);
+  const rentalMonthlyCashflow= safeNum(derivedValues?.rentalMonthlyCashflow);
+  const rentalCapRate        = safeNum(derivedValues?.rentalCapRate);
+  const brrrrCashLeftInDeal  = safeNum(derivedValues?.brrrrCashLeftInDeal);
+  const brrrrMonthlyCashflow = safeNum(derivedValues?.brrrrMonthlyCashflow);
+  const brrrrEquity          = safeNum(derivedValues?.brrrrEquity);
 
   // Build display-default map: what shows in each input when override is empty
   const fieldDisplayDefaults = useMemo((): Record<string, string> => {
@@ -1409,6 +1419,34 @@ export default function DealDetailPage() {
     toast.success(deal.isLocked ? 'Deal unlocked' : 'Deal locked');
   };
 
+  const handleDeleteDeal = async () => {
+    if (!deal) return;
+    await deleteDeal(deal.id);
+    toast.success('Deal deleted permanently');
+    navigate(-1);
+  };
+
+  const openSmsDialog = (phone: string) => {
+    if (!deal) return;
+    const agentName = deal.apiData.agentName || deal.senderName || '';
+    const price = deal.overrides.purchasePrice ?? deal.apiData.purchasePrice ?? null;
+    const priceStr = price ? `$${Math.round(price).toLocaleString()}` : '[PRICE]';
+    const defaultMsg = `Hi${agentName ? ` ${agentName.split(' ')[0]}` : ''}, I'm interested in ${deal.address.street}. I'd like to make a cash offer of ${priceStr}. Can we discuss? Thank you`;
+    setSmsPhone(phone);
+    setSmsBody(defaultMsg);
+    setIsSmsDialogOpen(true);
+  };
+
+  const handleSendSms = async () => {
+    try {
+      await sendSms(smsPhone, smsBody);
+      toast.success('SMS sent successfully');
+      setSmsBody('');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to send SMS');
+    }
+  };
+
   const handleStatusChange = (status: DealStatus) => {
     if (status === 'not_relevant') {
       updateDealStatus(deal.id, status, rejectionReason || 'Not specified');
@@ -1631,6 +1669,40 @@ export default function DealDetailPage() {
         </div>
       )}
 
+      {/* From Email banner — shows when deal was imported from an email */}
+      {deal.source === 'email' && !bannerDismissed && (
+        <div className="flex flex-wrap items-center gap-3 p-3 rounded-lg bg-blue-500/10 border border-blue-500/30 text-sm mb-3">
+          <Mail className="w-4 h-4 text-blue-400 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <span className="font-semibold text-blue-400">From Email · </span>
+            <span className="text-muted-foreground">
+              {deal.senderName && `${deal.senderName} `}
+              {deal.senderEmail && <span className="font-mono text-xs">{deal.senderEmail}</span>}
+              {deal.emailSubject && <> · <em>&ldquo;{deal.emailSubject}&rdquo;</em></>}
+            </span>
+          </div>
+          {/* Photo links */}
+          {Array.isArray((deal.emailExtractedData as any)?.photoLinks) &&
+            (deal.emailExtractedData as any).photoLinks.slice(0, 3).map((url: string, i: number) => (
+              <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+                className="text-[10px] px-1.5 py-0.5 rounded border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:text-blue-300">
+                📷 Photos{i > 0 ? ` ${i + 1}` : ''}
+              </a>
+            ))
+          }
+          {/* Document links */}
+          {Array.isArray((deal.emailExtractedData as any)?.documentLinks) &&
+            (deal.emailExtractedData as any).documentLinks.slice(0, 4).map((dl: any, i: number) => (
+              <a key={i} href={dl.url} target="_blank" rel="noopener noreferrer"
+                className="text-[10px] px-1.5 py-0.5 rounded border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:text-indigo-300">
+                {dl.label}
+              </a>
+            ))
+          }
+          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setBannerDismissed(true)}>✕</Button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between">
         <div className="flex items-start gap-4">
@@ -1757,13 +1829,13 @@ export default function DealDetailPage() {
           
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button 
-                variant={deal.isLocked ? "default" : "outline"} 
+              <Button
+                variant={deal.isLocked ? "default" : "outline"}
                 size="icon"
                 onClick={handleToggleLock}
                 className={cn(
-                  deal.isLocked 
-                    ? "bg-amber-500 hover:bg-amber-600 text-black" 
+                  deal.isLocked
+                    ? "bg-amber-500 hover:bg-amber-600 text-black"
                     : "border-muted-foreground/30"
                 )}
               >
@@ -1774,10 +1846,113 @@ export default function DealDetailPage() {
               {deal.isLocked ? 'Unlock deal to allow edits' : 'Lock deal to prevent changes'}
             </TooltipContent>
           </Tooltip>
+
+          <AlertDialog>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" size="icon" className="border-destructive/30 text-destructive hover:bg-destructive/10">
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </AlertDialogTrigger>
+              </TooltipTrigger>
+              <TooltipContent>Delete deal permanently</TooltipContent>
+            </Tooltip>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete Deal Permanently?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete "{deal.address.street || 'this deal'}". This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={handleDeleteDeal}
+                >
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          {/* SMS Conversation Dialog */}
+          <Dialog open={isSmsDialogOpen} onOpenChange={setIsSmsDialogOpen}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4" />
+                  SMS — {deal?.address.street}
+                </DialogTitle>
+                <DialogDescription>
+                  Send and receive text messages with the agent/seller
+                </DialogDescription>
+              </DialogHeader>
+
+              {/* Message History */}
+              {smsMessages.length > 0 && (
+                <div className="border rounded-lg p-3 max-h-52 overflow-y-auto space-y-2 bg-muted/20">
+                  {smsMessages.map(msg => (
+                    <div
+                      key={msg.id}
+                      className={cn('flex flex-col max-w-[85%] gap-0.5', msg.direction === 'outbound' ? 'ml-auto items-end' : 'items-start')}
+                    >
+                      <div className={cn(
+                        'rounded-2xl px-3 py-2 text-sm',
+                        msg.direction === 'outbound'
+                          ? 'bg-primary text-primary-foreground rounded-br-sm'
+                          : 'bg-muted text-foreground rounded-bl-sm'
+                      )}>
+                        {msg.body}
+                      </div>
+                      <span className="text-[10px] text-muted-foreground px-1">
+                        {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {msg.direction === 'outbound' && ` · ${msg.status}`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Compose */}
+              <div className="space-y-3">
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">To (phone number)</Label>
+                  <Input
+                    value={smsPhone}
+                    onChange={e => setSmsPhone(e.target.value)}
+                    placeholder="+14045551234"
+                    className="font-mono text-sm"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">Message</Label>
+                  <Textarea
+                    value={smsBody}
+                    onChange={e => setSmsBody(e.target.value)}
+                    rows={4}
+                    placeholder="Type your message..."
+                    className="text-sm resize-none"
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1 text-right">{smsBody.length} chars</p>
+                </div>
+              </div>
+
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsSmsDialogOpen(false)}>Cancel</Button>
+                <Button onClick={handleSendSms} disabled={smsSending || !smsPhone.trim() || !smsBody.trim()}>
+                  {smsSending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
+                  Send SMS
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           <Dialog open={isExportSummaryDialogOpen} onOpenChange={setIsExportSummaryDialogOpen}>
             <DialogTrigger asChild>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 disabled={!liveFinancials}
                 className="border-primary/50 text-primary hover:bg-primary/10"
               >
@@ -2646,18 +2821,25 @@ BRRRR STRATEGY:
                       
                       {/* Phone */}
                       {phone && (
-                        <div 
-                          className="flex items-center justify-between gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded transition-colors"
-                          onClick={() => {
-                            navigator.clipboard.writeText(phone);
-                            toast.success('Phone copied');
-                          }}
-                        >
-                          <span className="text-muted-foreground">Phone</span>
-                          <div className="flex items-center gap-1.5">
+                        <div className="flex items-center justify-between gap-2 p-1.5 rounded">
+                          <div
+                            className="flex items-center gap-1.5 cursor-pointer hover:bg-muted/50 flex-1 rounded transition-colors p-1"
+                            onClick={() => {
+                              navigator.clipboard.writeText(phone);
+                              toast.success('Phone copied');
+                            }}
+                          >
+                            <span className="text-muted-foreground">Phone</span>
                             <span className="text-primary">{phone}</span>
                             <Copy className="w-3 h-3 text-muted-foreground" />
                           </div>
+                          <button
+                            className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                            onClick={() => openSmsDialog(phone)}
+                          >
+                            <MessageSquare className="w-3 h-3" />
+                            SMS
+                          </button>
                         </div>
                       )}
                       
@@ -2783,7 +2965,7 @@ BRRRR STRATEGY:
                       
                       {/* Email Subject */}
                       {deal.emailSubject && (
-                        <div 
+                        <div
                           className="flex items-start gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded transition-colors"
                           onClick={() => {
                             navigator.clipboard.writeText(deal.emailSubject!);
@@ -2797,9 +2979,38 @@ BRRRR STRATEGY:
                           </div>
                         </div>
                       )}
+
+                      {/* Open in Gmail link */}
+                      {deal.emailId && (
+                        <>
+                          <Separator className="my-2" />
+                          <a
+                            href={`https://mail.google.com/mail/u/0/#all/${deal.emailId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2 text-primary hover:underline text-xs p-1.5"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            Open original email in Gmail
+                          </a>
+                        </>
+                      )}
                     </div>
                   </HoverCardContent>
                 </HoverCard>
+              )}
+
+              {/* Open Email button — visible shortcut for email-sourced deals */}
+              {deal.source === 'email' && deal.emailId && (
+                <a
+                  href={`https://mail.google.com/mail/u/0/#all/${deal.emailId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors border border-border/50 rounded px-2.5 py-1 hover:bg-muted/50"
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  Open Email
+                </a>
               )}
 
               {/* Notes Button */}
@@ -3097,12 +3308,12 @@ BRRRR STRATEGY:
             )}
 
             {/* Email / Off-Market Info Card */}
-            {deal.isOffMarket && deal.emailExtractedData && (
-              <Card className="border border-amber-500/30 bg-amber-500/5">
+            {(deal.isOffMarket || deal.source === 'email') && deal.emailExtractedData && (
+              <Card className="border border-blue-500/30 bg-blue-500/5">
                 <CardHeader className="pb-2 pt-3 px-4">
-                  <CardTitle className="text-sm font-medium flex items-center gap-2 text-amber-400">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2 text-blue-400">
                     <Mail className="w-4 h-4" />
-                    Off-Market Email Details
+                    Email Data
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="px-4 pb-4 space-y-4">
@@ -3154,6 +3365,26 @@ BRRRR STRATEGY:
                       </div>
                     </div>
                   )}
+                  {/* Document links */}
+                  {Array.isArray(deal.emailExtractedData.documentLinks) && deal.emailExtractedData.documentLinks.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Documents</p>
+                      <div className="flex flex-wrap gap-2">
+                        {(deal.emailExtractedData.documentLinks as Array<{label: string; url: string}>).map((dl, idx) => (
+                          <Button
+                            key={idx}
+                            variant="outline"
+                            size="sm"
+                            className="text-xs h-7 gap-1.5 border-blue-500/40 text-blue-400 hover:bg-blue-500/10"
+                            onClick={() => window.open(dl.url, '_blank', 'noopener,noreferrer')}
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            {dl.label}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Property Description from AI */}
                   {deal.emailExtractedData.propertyDescription && (
@@ -3168,35 +3399,87 @@ BRRRR STRATEGY:
                   {/* Additional extracted info */}
                   {(() => {
                     const ed = deal.emailExtractedData;
-                    const infoRows: { label: string; value: string }[] = [];
-                    if (ed.occupancy) infoRows.push({ label: 'Occupancy', value: ed.occupancy });
-                    if (ed.condition) infoRows.push({ label: 'Condition', value: ed.condition });
-                    if (ed.yearBuilt) infoRows.push({ label: 'Year Built', value: String(ed.yearBuilt) });
-                    if (ed.lotSize) infoRows.push({ label: 'Lot Size', value: String(ed.lotSize) });
-                    if (ed.units) infoRows.push({ label: 'Units', value: String(ed.units) });
-                    if (ed.capRate) infoRows.push({ label: 'Cap Rate', value: `${ed.capRate}%` });
-                    if (ed.cashFlow) infoRows.push({ label: 'Cash Flow', value: `$${Number(ed.cashFlow).toLocaleString()}/mo` });
+                    const infoRows: { label: string; value: string; source?: string }[] = [];
+                    // Seller-reported factual fields (from email)
+                    if (ed.bedrooms)   infoRows.push({ label: 'Beds',      value: String(ed.bedrooms),   source: 'email' });
+                    if (ed.bathrooms)  infoRows.push({ label: 'Baths',     value: String(ed.bathrooms),  source: 'email' });
+                    if (ed.sqft)       infoRows.push({ label: 'Sqft',      value: Number(ed.sqft).toLocaleString(), source: 'email' });
+                    if (ed.yearBuilt)  infoRows.push({ label: 'Year Built', value: String(ed.yearBuilt), source: 'email' });
+                    if (ed.lotSize)    infoRows.push({ label: 'Lot Size',  value: String(ed.lotSize),    source: 'email' });
+                    if (ed.rehabCost)  infoRows.push({ label: 'Seller Rehab', value: `$${Number(ed.rehabCost).toLocaleString()}`, source: 'email' });
+                    // Seller valuations — shown for reference, NOT used in analysis
+                    if (ed.arv)        infoRows.push({ label: 'Seller ARV ⚠', value: `$${Number(ed.arv).toLocaleString()}`, source: 'seller' });
+                    if (ed.rent)       infoRows.push({ label: 'Seller Rent ⚠', value: `$${Number(ed.rent).toLocaleString()}/mo`, source: 'seller' });
+                    // Other extracted fields
+                    if (ed.occupancy)  infoRows.push({ label: 'Occupancy', value: ed.occupancy });
+                    if (ed.condition)  infoRows.push({ label: 'Condition', value: ed.condition });
+                    if (ed.exterior)   infoRows.push({ label: 'Exterior',  value: ed.exterior });
+                    if (ed.access)     infoRows.push({ label: 'Access',    value: ed.access });
+                    if (ed.county)     infoRows.push({ label: 'County',    value: ed.county });
+                    if (ed.neighborhood) infoRows.push({ label: 'Area',   value: ed.neighborhood });
+                    if (ed.units)      infoRows.push({ label: 'Units',     value: String(ed.units) });
+                    if (ed.capRate)    infoRows.push({ label: 'Cap Rate',  value: `${ed.capRate}%` });
+                    if (ed.cashFlow)   infoRows.push({ label: 'Cash Flow', value: `$${Number(ed.cashFlow).toLocaleString()}/mo` });
                     if (ed.existingLoanBalance) infoRows.push({ label: 'Existing Loan', value: `$${Number(ed.existingLoanBalance).toLocaleString()}` });
                     if (ed.monthlyPITI) infoRows.push({ label: 'Monthly PITI', value: `$${Number(ed.monthlyPITI).toLocaleString()}` });
                     if (ed.financingNotes) infoRows.push({ label: 'Financing', value: ed.financingNotes });
                     if (ed.dealNotes) infoRows.push({ label: 'Deal Notes', value: ed.dealNotes });
                     if (infoRows.length === 0) return null;
                     return (
-                      <div className="space-y-2">
-                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Additional Info from Email</p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                          {infoRows.map((row, i) => (
-                            <div key={i} className="flex items-start gap-2 p-2 rounded bg-muted/30 text-sm">
-                              <span className="text-muted-foreground shrink-0 min-w-[90px]">{row.label}:</span>
-                              <span className="font-medium">{row.value}</span>
-                            </div>
-                          ))}
-                        </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {infoRows.map(({ label, value, source }) => (
+                          <div key={label} className="text-sm">
+                            <span className="text-muted-foreground text-xs">{label}: </span>
+                            <span className={`font-medium ${source === 'seller' ? 'text-amber-400/70 line-through' : ''}`}>{value}</span>
+                            {source === 'seller' && <span className="ml-1 text-[10px] text-amber-500/60">not used</span>}
+                          </div>
+                        ))}
                       </div>
                     );
                   })()}
                 </CardContent>
               </Card>
+            )}
+
+            {/* Email Details Card — fallback when no structured email data available */}
+            {deal.source === 'email' && !deal.emailExtractedData && deal.emailSnippet && (
+              <Collapsible>
+                <Card className="border-border/50 bg-card/50">
+                  <CollapsibleTrigger asChild>
+                    <CardHeader className="pb-2 pt-3 px-4 cursor-pointer hover:bg-muted/30 transition-colors">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                          <Mail className="w-4 h-4" />
+                          Email Details
+                        </CardTitle>
+                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                      </div>
+                    </CardHeader>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <CardContent className="px-4 pb-4 space-y-3">
+                      <div className="flex flex-wrap gap-4 text-sm">
+                        {deal.senderName && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-muted-foreground">From:</span>
+                            <span className="font-medium">{deal.senderName}</span>
+                            {deal.senderEmail && <span className="text-muted-foreground text-xs">({deal.senderEmail})</span>}
+                          </div>
+                        )}
+                        {deal.emailSubject && (
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-muted-foreground shrink-0">Subject:</span>
+                            <span className="text-xs truncate max-w-xs">{deal.emailSubject}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-3 bg-muted/30 rounded text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                        {deal.emailSnippet}
+                      </div>
+                    </CardContent>
+                  </CollapsibleContent>
+                </Card>
+              </Collapsible>
             )}
 
             {/* Primary Metrics Card - Editable - Collapsible */}
