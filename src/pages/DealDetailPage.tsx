@@ -3000,6 +3000,19 @@ BRRRR STRATEGY:
                 </HoverCard>
               )}
 
+              {/* Open Email button — visible shortcut for email-sourced deals */}
+              {deal.source === 'email' && deal.emailId && (
+                <a
+                  href={`https://mail.google.com/mail/u/0/#all/${deal.emailId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors border border-border/50 rounded px-2.5 py-1 hover:bg-muted/50"
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  Open Email
+                </a>
+              )}
+
               {/* Notes Button */}
               <Dialog open={isNotesDialogOpen} onOpenChange={setIsNotesDialogOpen}>
                 <DialogTrigger asChild>
