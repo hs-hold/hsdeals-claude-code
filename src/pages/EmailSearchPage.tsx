@@ -612,7 +612,7 @@ export default function EmailSearchPage() {
     startAnalyzeList,
   } = useSyncAnalyze();
 
-  const [scanCount, setScanCount] = useState<ScanCount>(20);
+  const [scanCount, setScanCount] = useState<ScanCount>(100);
   // Current scan results (always starts empty — no auto-restore)
   const [results, setResults] = useState<EmailResultItem[]>([]);
   // Historical sessions (persisted in localStorage)
