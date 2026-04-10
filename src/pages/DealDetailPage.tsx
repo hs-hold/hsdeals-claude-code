@@ -39,6 +39,8 @@ import {
   Zap,
   XCircle,
   Trash2,
+  MessageSquare,
+  Send,
   MapPin,
   Calendar,
   Mail,
@@ -104,6 +106,7 @@ import { RentalAnalysisCard } from '@/components/deals/RentalAnalysisCard';
 import { BrrrrAnalysisCard } from '@/components/deals/BrrrrAnalysisCard';
 import { DealInvestorsManager } from '@/components/deals/DealInvestorsManager';
 import { ZipMarketCard } from '@/components/deals/ZipMarketCard';
+import { useDealMessages } from '@/hooks/useDealMessages';
 
 export default function DealDetailPage() {
   const { id } = useParams();
@@ -136,6 +139,7 @@ export default function DealDetailPage() {
   }, [id]);
   
   const deal = getDeal(id || '');
+  const { messages: smsMessages, sending: smsSending, sendSms } = useDealMessages(deal?.id);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [localOverrides, setLocalOverrides] = useState({
     arv: deal?.overrides?.arv?.toString() || '',
@@ -211,6 +215,9 @@ export default function DealDetailPage() {
   const [olderCompsOpen, setOlderCompsOpen] = useState(false);
   const [isLoiDialogOpen, setIsLoiDialogOpen] = useState(false);
   const [isExportSummaryDialogOpen, setIsExportSummaryDialogOpen] = useState(false);
+  const [isSmsDialogOpen, setIsSmsDialogOpen] = useState(false);
+  const [smsPhone, setSmsPhone] = useState('');
+  const [smsBody, setSmsBody] = useState('');
   
   // Collapsible section states - all closed by default for clean initial view
   const [modifiedAssumptionsOpen, setModifiedAssumptionsOpen] = useState(false);
@@ -1419,6 +1426,27 @@ export default function DealDetailPage() {
     navigate(-1);
   };
 
+  const openSmsDialog = (phone: string) => {
+    if (!deal) return;
+    const agentName = deal.apiData.agentName || deal.senderName || '';
+    const price = deal.overrides.purchasePrice ?? deal.apiData.purchasePrice ?? null;
+    const priceStr = price ? `$${Math.round(price).toLocaleString()}` : '[PRICE]';
+    const defaultMsg = `Hi${agentName ? ` ${agentName.split(' ')[0]}` : ''}, I'm interested in ${deal.address.street}. I'd like to make a cash offer of ${priceStr}. Can we discuss? Thank you`;
+    setSmsPhone(phone);
+    setSmsBody(defaultMsg);
+    setIsSmsDialogOpen(true);
+  };
+
+  const handleSendSms = async () => {
+    try {
+      await sendSms(smsPhone, smsBody);
+      toast.success('SMS sent successfully');
+      setSmsBody('');
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to send SMS');
+    }
+  };
+
   const handleStatusChange = (status: DealStatus) => {
     if (status === 'not_relevant') {
       updateDealStatus(deal.id, status, rejectionReason || 'Not specified');
@@ -1849,10 +1877,82 @@ export default function DealDetailPage() {
             </AlertDialogContent>
           </AlertDialog>
 
+          {/* SMS Conversation Dialog */}
+          <Dialog open={isSmsDialogOpen} onOpenChange={setIsSmsDialogOpen}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4" />
+                  SMS — {deal?.address.street}
+                </DialogTitle>
+                <DialogDescription>
+                  Send and receive text messages with the agent/seller
+                </DialogDescription>
+              </DialogHeader>
+
+              {/* Message History */}
+              {smsMessages.length > 0 && (
+                <div className="border rounded-lg p-3 max-h-52 overflow-y-auto space-y-2 bg-muted/20">
+                  {smsMessages.map(msg => (
+                    <div
+                      key={msg.id}
+                      className={cn('flex flex-col max-w-[85%] gap-0.5', msg.direction === 'outbound' ? 'ml-auto items-end' : 'items-start')}
+                    >
+                      <div className={cn(
+                        'rounded-2xl px-3 py-2 text-sm',
+                        msg.direction === 'outbound'
+                          ? 'bg-primary text-primary-foreground rounded-br-sm'
+                          : 'bg-muted text-foreground rounded-bl-sm'
+                      )}>
+                        {msg.body}
+                      </div>
+                      <span className="text-[10px] text-muted-foreground px-1">
+                        {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {msg.direction === 'outbound' && ` · ${msg.status}`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Compose */}
+              <div className="space-y-3">
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">To (phone number)</Label>
+                  <Input
+                    value={smsPhone}
+                    onChange={e => setSmsPhone(e.target.value)}
+                    placeholder="+14045551234"
+                    className="font-mono text-sm"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">Message</Label>
+                  <Textarea
+                    value={smsBody}
+                    onChange={e => setSmsBody(e.target.value)}
+                    rows={4}
+                    placeholder="Type your message..."
+                    className="text-sm resize-none"
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1 text-right">{smsBody.length} chars</p>
+                </div>
+              </div>
+
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsSmsDialogOpen(false)}>Cancel</Button>
+                <Button onClick={handleSendSms} disabled={smsSending || !smsPhone.trim() || !smsBody.trim()}>
+                  {smsSending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
+                  Send SMS
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           <Dialog open={isExportSummaryDialogOpen} onOpenChange={setIsExportSummaryDialogOpen}>
             <DialogTrigger asChild>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 disabled={!liveFinancials}
                 className="border-primary/50 text-primary hover:bg-primary/10"
               >
@@ -2721,18 +2821,25 @@ BRRRR STRATEGY:
                       
                       {/* Phone */}
                       {phone && (
-                        <div 
-                          className="flex items-center justify-between gap-2 cursor-pointer hover:bg-muted/50 p-1.5 rounded transition-colors"
-                          onClick={() => {
-                            navigator.clipboard.writeText(phone);
-                            toast.success('Phone copied');
-                          }}
-                        >
-                          <span className="text-muted-foreground">Phone</span>
-                          <div className="flex items-center gap-1.5">
+                        <div className="flex items-center justify-between gap-2 p-1.5 rounded">
+                          <div
+                            className="flex items-center gap-1.5 cursor-pointer hover:bg-muted/50 flex-1 rounded transition-colors p-1"
+                            onClick={() => {
+                              navigator.clipboard.writeText(phone);
+                              toast.success('Phone copied');
+                            }}
+                          >
+                            <span className="text-muted-foreground">Phone</span>
                             <span className="text-primary">{phone}</span>
                             <Copy className="w-3 h-3 text-muted-foreground" />
                           </div>
+                          <button
+                            className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                            onClick={() => openSmsDialog(phone)}
+                          >
+                            <MessageSquare className="w-3 h-3" />
+                            SMS
+                          </button>
                         </div>
                       )}
                       
