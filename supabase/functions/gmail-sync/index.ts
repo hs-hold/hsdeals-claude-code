@@ -541,7 +541,7 @@ Return ONLY valid JSON, nothing else:
 Return { "deals": [] } if no valid US property addresses with street numbers are found.`;
 
   try {
-    console.log('[extractDeals] Calling Claude Sonnet — body preview (first 800 chars):');
+    console.log('[extractDeals] Calling Claude Haiku — body preview (first 800 chars):');
     console.log(emailContent.substring(0, 800));
     console.log('[extractDeals] Subject:', subject);
     const response = await fetch(ANTHROPIC_API_URL, {
@@ -552,7 +552,7 @@ Return { "deals": [] } if no valid US property addresses with street numbers are
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 8192,
         messages: [{ role: 'user', content: prompt }],
       }),
