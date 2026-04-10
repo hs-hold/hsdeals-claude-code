@@ -2752,17 +2752,22 @@ BRRRR STRATEGY:
           return (
             <div className="flex items-center gap-3">
               {/* Zillow Link */}
-              {apiData.detailUrl && (
-                <a 
-                  href={apiData.detailUrl} 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 text-primary hover:text-primary/80 transition-colors"
-                >
-                  <ZillowIcon className="w-4 h-4" />
-                  <span className="text-sm underline underline-offset-2">View on Zillow</span>
-                </a>
-              )}
+              {(() => {
+                const zillowHref = apiData.detailUrl
+                  ? (apiData.detailUrl.startsWith('http') ? apiData.detailUrl : `https://www.zillow.com${apiData.detailUrl}`)
+                  : `https://www.zillow.com/homes/${encodeURIComponent(deal.address.full)}/`;
+                return (
+                  <a
+                    href={zillowHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 text-primary hover:text-primary/80 transition-colors"
+                  >
+                    <ZillowIcon className="w-4 h-4" />
+                    <span className="text-sm underline underline-offset-2">View on Zillow</span>
+                  </a>
+                );
+              })()}
 
               {email && (
                 <HoverCard>
