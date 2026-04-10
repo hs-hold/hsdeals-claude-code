@@ -1055,30 +1055,31 @@ export default function EmailSearchPage() {
                 Marks all unread emails older than 7 days as read.
               </TooltipContent>
             </Tooltip>
-            {sessions.length > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="gap-1.5">
-                    <History className="h-4 w-4" />
-                    History
-                    <ChevronDown className="h-3 w-3 text-muted-foreground" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-64">
-                  <DropdownMenuLabel className="text-xs text-muted-foreground">Last 30 days</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {sessions.map(s => (
-                    <DropdownMenuItem
-                      key={s.id}
-                      onClick={() => { setViewingSessionId(s.id); setSelected(new Set()); }}
-                      className={viewingSessionId === s.id ? 'bg-muted' : ''}
-                    >
-                      <span className="text-xs">{sessionLabel(s)}</span>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-1.5" disabled={sessions.length === 0}>
+                  <History className="h-4 w-4" />
+                  History
+                  {sessions.length > 0 && (
+                    <span className="ml-0.5 text-[10px] font-semibold text-muted-foreground">({sessions.length})</span>
+                  )}
+                  <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuLabel className="text-xs text-muted-foreground">Last 30 days</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {sessions.map(s => (
+                  <DropdownMenuItem
+                    key={s.id}
+                    onClick={() => { setViewingSessionId(s.id); setSelected(new Set()); }}
+                    className={viewingSessionId === s.id ? 'bg-muted' : ''}
+                  >
+                    <span className="text-xs">{sessionLabel(s)}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button variant="ghost" size="sm" onClick={disconnect} className="text-muted-foreground">Disconnect</Button>
           </div>
         </div>
@@ -1103,6 +1104,21 @@ export default function EmailSearchPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2 sm:ml-auto">
+                {/* If results are visible, show a "New Scan" button to clear and start fresh */}
+                {results.length > 0 && !isViewingHistory && !isSyncing && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      saveCurrentToHistory(results);
+                      setResults([]);
+                      setSelected(new Set());
+                    }}
+                    className="gap-1.5 border-dashed"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    New Scan
+                  </Button>
+                )}
                 <Button onClick={handleScan} disabled={isSyncing || isAnalyzing}>
                   {isSyncing
                     ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Scanning...</>
