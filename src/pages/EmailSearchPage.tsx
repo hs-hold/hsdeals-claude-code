@@ -718,6 +718,15 @@ export default function EmailSearchPage() {
       const batchIds = msgIds.slice(i, i + BATCH_SIZE);
       const result = await syncBatch(accessToken, batchIds, options);
 
+      // Client-side mark-as-read: ensures emails are marked even if the edge function fails.
+      // Mark all processed messages as read directly via Gmail API using the client token.
+      if (result?.syncDetails) {
+        const idsToMark: string[] = result.syncDetails
+          .filter((d: any) => d.messageId && d.action !== 'error')
+          .map((d: any) => d.messageId);
+        await Promise.allSettled(idsToMark.map(id => markMessageRead(accessToken, id)));
+      }
+
       if (result?.syncDetails) {
         const scannedAt = new Date().toISOString();
         const newItems: EmailResultItem[] = result.syncDetails
