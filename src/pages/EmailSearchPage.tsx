@@ -21,8 +21,16 @@ import {
   Mail, Loader2, CheckCircle, CheckCircle2,
   Zap, MapPin, MailOpen, AlertCircle, Trash2,
   ExternalLink, Pencil, RotateCcw, Bed, Bath,
-  Square, Image,
+  Square, Image, History, ChevronDown, ArrowLeft,
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Deal } from '@/types/deal';
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -84,6 +92,35 @@ interface EmailResultItem {
 
 const SCAN_COUNTS = [10, 20, 40, 60, 100] as const;
 type ScanCount = typeof SCAN_COUNTS[number];
+
+// ── Session history ──────────────────────────────────────────────────────────
+
+interface ScanSession {
+  id: string;
+  startedAt: string;
+  results: EmailResultItem[];
+}
+
+const SESSIONS_KEY = 'email_scan_sessions_v3';
+const SESSION_MAX_DAYS = 30;
+
+function loadSessions(): ScanSession[] {
+  try {
+    const saved = localStorage.getItem(SESSIONS_KEY);
+    if (!saved) return [];
+    const all: ScanSession[] = JSON.parse(saved);
+    const cutoff = Date.now() - SESSION_MAX_DAYS * 24 * 60 * 60 * 1000;
+    return all.filter(s => new Date(s.startedAt).getTime() > cutoff);
+  } catch { return []; }
+}
+
+function sessionLabel(s: ScanSession): string {
+  const d = new Date(s.startedAt);
+  const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  const count = s.results.filter(r => isActionable(r.action)).length;
+  return `${date} • ${time} — ${count} deals`;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -536,23 +573,25 @@ export default function EmailSearchPage() {
   } = useSyncAnalyze();
 
   const [scanCount, setScanCount] = useState<ScanCount>(20);
-  const [results, setResults] = useState<EmailResultItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('email_scan_results_v2');
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
+  // Current scan results (always starts empty — no auto-restore)
+  const [results, setResults] = useState<EmailResultItem[]>([]);
+  // Historical sessions (persisted in localStorage)
+  const [sessions, setSessions] = useState<ScanSession[]>(loadSessions);
+  // Which historical session is being viewed (null = current scan)
+  const [viewingSessionId, setViewingSessionId] = useState<string | null>(null);
+
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [filter, setFilter] = useState<'all' | 'deals' | 'suspects' | 'skipped'>('suspects');
+  const [filter, setFilter] = useState<'all' | 'deals' | 'readyToAnalyze' | 'skipped'>('readyToAnalyze');
   const [maxPrice, setMaxPrice] = useState<number>(220000);
   const [minPrice, setMinPrice] = useState<number>(0);
   const [minSqft,  setMinSqft]  = useState<number>(0);
   const [minBeds,  setMinBeds]  = useState<number>(0);
 
-  // Persist results to localStorage
-  useEffect(() => {
-    try { localStorage.setItem('email_scan_results_v2', JSON.stringify(results)); } catch {}
-  }, [results]);
+  // Derived: what's actually shown (current scan or historical session)
+  const isViewingHistory = viewingSessionId !== null;
+  const displayResults = isViewingHistory
+    ? (sessions.find(s => s.id === viewingSessionId)?.results ?? [])
+    : results;
 
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editAddr, setEditAddr] = useState('');
@@ -565,11 +604,30 @@ export default function EmailSearchPage() {
 
   // ── Batched scan: fetch message IDs from Gmail API, then process in batches of 8 ──
 
+  const saveCurrentToHistory = useCallback((items: EmailResultItem[]) => {
+    if (items.length === 0) return;
+    const session: ScanSession = { id: crypto.randomUUID(), startedAt: new Date().toISOString(), results: items };
+    setSessions(prev => {
+      const cutoff = Date.now() - SESSION_MAX_DAYS * 24 * 60 * 60 * 1000;
+      const updated = [session, ...prev].filter(s => new Date(s.startedAt).getTime() > cutoff);
+      try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated)); } catch {}
+      return updated;
+    });
+  }, []);
+
   const handleBatchedScan = useCallback(async (includeRead: boolean, forceRescan = false) => {
     if (!tokens?.access_token || isSyncing) return;
 
     const accessToken = await getValidToken();
     if (!accessToken) return;
+
+    // Save current results to history before starting a new scan
+    if (results.length > 0 && !forceRescan) {
+      saveCurrentToHistory(results);
+    }
+    setResults([]);
+    setViewingSessionId(null);
+    setSelected(new Set());
 
     const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
     const headers = { 'Authorization': `Bearer ${accessToken}` };
@@ -644,17 +702,14 @@ export default function EmailSearchPage() {
         setResults(prev => {
           const existingKeys = new Set(prev.map(i => i.key));
           const toAdd = newItems.filter(i => !existingKeys.has(i.key));
-          const updated = [...toAdd, ...prev];
-          // Persist incrementally after each batch
-          try { localStorage.setItem('email_scan_results_v2', JSON.stringify(updated)); } catch {}
-          return updated;
+          return [...toAdd, ...prev];
         });
       }
     }
 
     setBatchProgress(null);
     await refetch();
-  }, [tokens, isSyncing, syncBatch, scanCount, selectedState, refetch, getValidToken]);
+  }, [tokens, isSyncing, syncBatch, scanCount, selectedState, refetch, getValidToken, results, saveCurrentToHistory]);
 
   const handleScan        = useCallback(() => handleBatchedScan(false), [handleBatchedScan]);
   const handleRescan      = useCallback(() => handleBatchedScan(true),  [handleBatchedScan]);
@@ -662,7 +717,7 @@ export default function EmailSearchPage() {
   // DEBUG: clear session results + force-rescan (bypasses already-processed check)
   const handleForceRescan = useCallback(() => {
     setResults([]);
-    localStorage.removeItem('email_scan_results_v2');
+    setViewingSessionId(null);
     handleBatchedScan(true, true);
   }, [handleBatchedScan]);
 
@@ -684,8 +739,8 @@ export default function EmailSearchPage() {
 
   // actionableItems — all created/updated deals, with OR without dealId
   const actionableItems = useMemo(
-    () => results.filter(r => isActionable(r.action)),
-    [results]
+    () => displayResults.filter(r => isActionable(r.action)),
+    [displayResults]
   );
 
   const unanalyzedActionable = useMemo(() => {
@@ -710,17 +765,16 @@ export default function EmailSearchPage() {
     });
   }, [minSqft, minBeds, minPrice]);
 
-  // Suspects = actionable deals with valid address AND known price ≤ maxPrice
-  // Requires price > 0 — no-price deals are not actionable suspects
-  const suspectsItems = useMemo(
-    () => applyExtraFilters(results.filter(r => {
+  // Ready to Analyze = actionable deals with valid address AND known price ≤ maxPrice
+  const readyToAnalyzeItems = useMemo(
+    () => applyExtraFilters(displayResults.filter(r => {
       if (!isActionable(r.action)) return false;
       if (!hasStreetNumber(r.address)) return false;
       const price = r.purchasePrice != null ? Number(r.purchasePrice) : null;
-      if (price == null || isNaN(price) || price <= 0) return false; // must have a known price
+      if (price == null || isNaN(price) || price <= 0) return false;
       return price <= maxPrice;
     })),
-    [results, maxPrice, applyExtraFilters]
+    [displayResults, maxPrice, applyExtraFilters]
   );
 
   const selectedActionable = useMemo(
@@ -858,10 +912,10 @@ export default function EmailSearchPage() {
   // ── Filtered list ─────────────────────────────────────────────────────────
 
   const filtered = useMemo(() => {
-    let list = results.filter(r => r.action !== 'skipped_portal');
+    let list = displayResults.filter(r => r.action !== 'skipped_portal');
     if (filter === 'deals')   list = list.filter(r => isActionable(r.action));
     else if (filter === 'skipped') list = list.filter(r => !isActionable(r.action));
-    else if (filter === 'suspects') list = list.filter(r => {
+    else if (filter === 'readyToAnalyze') list = list.filter(r => {
       if (!isActionable(r.action)) return false;
       if (!hasStreetNumber(r.address)) return false;
       const price = r.purchasePrice != null ? Number(r.purchasePrice) : null;
@@ -869,7 +923,7 @@ export default function EmailSearchPage() {
       return price <= maxPrice;
     });
     return applyExtraFilters(list);
-  }, [results, filter, maxPrice, applyExtraFilters]);
+  }, [displayResults, filter, maxPrice, applyExtraFilters]);
 
   // ── Analysis progress ─────────────────────────────────────────────────────
 
@@ -902,6 +956,8 @@ export default function EmailSearchPage() {
 
   const allActionableSelected = actionableItems.length > 0 &&
     actionableItems.every(r => selected.has(r.key));
+
+  const viewingSession = viewingSessionId ? sessions.find(s => s.id === viewingSessionId) : null;
 
   return (
     <TooltipProvider>
@@ -951,6 +1007,30 @@ export default function EmailSearchPage() {
                 Marks all unread emails older than 7 days as read.
               </TooltipContent>
             </Tooltip>
+            {sessions.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-1.5">
+                    <History className="h-4 w-4" />
+                    History
+                    <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64">
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">Last 30 days</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {sessions.map(s => (
+                    <DropdownMenuItem
+                      key={s.id}
+                      onClick={() => { setViewingSessionId(s.id); setSelected(new Set()); }}
+                      className={viewingSessionId === s.id ? 'bg-muted' : ''}
+                    >
+                      <span className="text-xs">{sessionLabel(s)}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             <Button variant="ghost" size="sm" onClick={disconnect} className="text-muted-foreground">Disconnect</Button>
           </div>
         </div>
@@ -1014,6 +1094,25 @@ export default function EmailSearchPage() {
           </CardContent>
         </Card>
 
+        {/* ── History banner ────────────────────────────────────────────── */}
+        {isViewingHistory && viewingSession && (
+          <div className="flex items-center justify-between px-4 py-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 text-sm">
+            <div className="flex items-center gap-2 text-amber-400">
+              <History className="w-4 h-4" />
+              <span>Viewing past scan: <strong>{sessionLabel(viewingSession)}</strong></span>
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-xs gap-1.5 text-amber-400 hover:text-amber-300"
+              onClick={() => { setViewingSessionId(null); setSelected(new Set()); }}
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              Back to current scan
+            </Button>
+          </div>
+        )}
+
         {/* ── Batch scan progress ───────────────────────────────────────── */}
         {batchProgress && (
           <Card className="border-blue-500/30 bg-card/50">
@@ -1052,27 +1151,27 @@ export default function EmailSearchPage() {
         )}
 
         {/* ── Results ───────────────────────────────────────────────────── */}
-        {results.length > 0 && (
+        {displayResults.length > 0 && (
           <>
             {/* Toolbar */}
             <div className="flex flex-wrap items-center gap-3">
               {/* Filter tabs */}
               <div className="flex gap-1 items-center">
-                {(['suspects', 'deals', 'all', 'skipped'] as const).map(f => (
+                {(['readyToAnalyze', 'deals', 'all', 'skipped'] as const).map(f => (
                   <button key={f} onClick={() => setFilter(f)}
                     className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                      f === 'suspects'
-                        ? filter === 'suspects'
+                      f === 'readyToAnalyze'
+                        ? filter === 'readyToAnalyze'
                           ? 'bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/40'
                           : 'text-emerald-500/70 hover:text-emerald-400 hover:bg-emerald-500/10'
                         : filter === f
                           ? 'bg-muted text-foreground'
                           : 'text-muted-foreground hover:text-foreground'
                     }`}>
-                    {f === 'suspects' ? `Suspects (${suspectsItems.length})` :
-                     f === 'all'      ? `All (${results.filter(r => r.action !== 'skipped_portal').length})` :
-                     f === 'deals'    ? `Deals (${actionableItems.length})` :
-                     `Skipped (${results.filter(r => !isActionable(r.action) && r.action !== 'skipped_portal').length})`}
+                    {f === 'readyToAnalyze' ? `Ready to Analyze (${readyToAnalyzeItems.length})` :
+                     f === 'all'            ? `All (${displayResults.filter(r => r.action !== 'skipped_portal').length})` :
+                     f === 'deals'          ? `Deals (${actionableItems.length})` :
+                     `Skipped (${displayResults.filter(r => !isActionable(r.action) && r.action !== 'skipped_portal').length})`}
                   </button>
                 ))}
                 {/* Max price filter */}
@@ -1159,11 +1258,10 @@ export default function EmailSearchPage() {
                       onClick={async () => {
                         const inScope = unanalyzedActionable.filter(r => {
                           if (!hasStreetNumber(r.address)) return false;
-                          if (filter !== 'suspects') return true;
+                          if (filter !== 'readyToAnalyze') return true;
                           const p = r.purchasePrice != null ? Number(r.purchasePrice) : null;
                           return p == null || isNaN(p) || p <= maxPrice;
                         });
-                        // Items without dealId → create+analyze; with dealId → batch
                         const needCreate = inScope.filter(r => !r.dealId);
                         const hasId = inScope.filter(r => !!r.dealId);
                         for (const item of needCreate) {
@@ -1176,7 +1274,7 @@ export default function EmailSearchPage() {
                       <Zap className="w-3.5 h-3.5 mr-1.5" />
                       Analyze All ({unanalyzedActionable.filter(r => {
                         if (!hasStreetNumber(r.address)) return false;
-                        if (filter !== 'suspects') return true;
+                        if (filter !== 'readyToAnalyze') return true;
                         const p = r.purchasePrice != null ? Number(r.purchasePrice) : null;
                         return p == null || isNaN(p) || p <= maxPrice;
                       }).length})
@@ -1188,12 +1286,24 @@ export default function EmailSearchPage() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button size="sm" variant="ghost"
-                    onClick={() => { setResults([]); setSelected(new Set()); try { localStorage.removeItem('email_scan_results_v2'); } catch {} }}
+                    onClick={() => {
+                      if (isViewingHistory && viewingSessionId) {
+                        setSessions(prev => {
+                          const updated = prev.filter(s => s.id !== viewingSessionId);
+                          try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated)); } catch {}
+                          return updated;
+                        });
+                        setViewingSessionId(null);
+                      } else {
+                        setResults([]);
+                        setSelected(new Set());
+                      }
+                    }}
                     className="text-muted-foreground ml-auto sm:ml-0">
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Clear all results</TooltipContent>
+                <TooltipContent>{isViewingHistory ? 'Delete this session from history' : 'Clear current scan results'}</TooltipContent>
               </Tooltip>
             </div>
 
@@ -1256,15 +1366,16 @@ export default function EmailSearchPage() {
         )}
 
         {/* Empty state */}
-        {results.length === 0 && !isSyncing && (
+        {displayResults.length === 0 && !isSyncing && (
           <Card className="border-border/50 bg-card/50">
-            <CardContent className="py-12 text-center">
-              <Mail className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
-              <p className="text-muted-foreground text-sm">
-                No results yet — choose how many emails to scan and click <strong>Scan Unread</strong>
+            <CardContent className="py-16 text-center">
+              <Mail className="w-12 h-12 text-muted-foreground/20 mx-auto mb-4" />
+              <p className="text-lg font-medium mb-1">Ready for a new scan</p>
+              <p className="text-sm text-muted-foreground mb-6">
+                Choose how many emails to scan and click <strong>Scan Unread</strong>
               </p>
-              <p className="text-xs text-muted-foreground/60 mt-1">
-                AI will extract deals from wholesaler emails · Portal emails are auto-marked as read
+              <p className="text-xs text-muted-foreground/50">
+                AI extracts deals from wholesaler emails · Each scan starts fresh · Previous scans saved in History
               </p>
             </CardContent>
           </Card>
