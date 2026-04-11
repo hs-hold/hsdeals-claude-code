@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter, Zap, Loader2, Lock, X, CheckCircle2, AlertTriangle, Mail, Globe, Trash2, ExternalLink } from 'lucide-react';
+import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter, Zap, Loader2, Lock, X, CheckCircle2, AlertTriangle, Mail, Globe, Trash2, ExternalLink, ScanLine } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { DealAgeFilter, AgeFilterType, applyDealAgeFilter } from '@/components/deals/DealAgeFilter';
@@ -59,6 +59,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<DealStatus | 'all'>('all');
   const [lockedFilter, setLockedFilter] = useState<'all' | 'locked' | 'unlocked'>('all');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'email' | 'scout' | 'manual'>('all');
   const [minCashflow, setMinCashflow] = useState<string>('');
   const [minYield, setMinYield] = useState<string>('');
   const [sortField, setSortField] = useState<SortField>('created');
@@ -132,6 +133,15 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
     // Status filter
     if (statusFilter !== 'all') {
       result = result.filter(d => d.status === statusFilter);
+    }
+
+    // Source filter
+    if (sourceFilter === 'email') {
+      result = result.filter(d => d.source === 'email');
+    } else if (sourceFilter === 'scout') {
+      result = result.filter(d => d.source === 'scout' || d.source === 'manual');
+    } else if (sourceFilter === 'manual') {
+      result = result.filter(d => d.source === 'manual');
     }
 
     // Locked filter
@@ -218,7 +228,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
     });
 
     return result;
-  }, [deals, search, statusFilter, lockedFilter, minCashflow, minYield, ageFilter, sortField, sortDirection, excludeStatuses]);
+  }, [deals, search, statusFilter, lockedFilter, sourceFilter, minCashflow, minYield, ageFilter, sortField, sortDirection, excludeStatuses]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -272,6 +282,18 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
             <SelectItem value="all">All Deals</SelectItem>
             <SelectItem value="locked">Locked Only</SelectItem>
             <SelectItem value="unlocked">Unlocked Only</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v as 'all' | 'email' | 'scout' | 'manual')}>
+          <SelectTrigger className="w-[150px]">
+            <Globe className="w-4 h-4 mr-2" />
+            <SelectValue placeholder="Source" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Sources</SelectItem>
+            <SelectItem value="scout">Market Scan</SelectItem>
+            <SelectItem value="email">Off Market (Email)</SelectItem>
           </SelectContent>
         </Select>
 
@@ -440,6 +462,11 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                         <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/20">
                           <Mail className="w-3 h-3" />
                           Off Market
+                        </span>
+                      ) : deal.source === 'scout' ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">
+                          <ScanLine className="w-3 h-3" />
+                          Scout
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
