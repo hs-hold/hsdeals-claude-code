@@ -25,6 +25,7 @@ interface SyncAnalyzeContextType extends SyncAnalyzeState {
   startAnalyzeUnanalyzed: () => Promise<void>;
   startAnalyzeList: (dealIds: { id: string; address: string }[]) => Promise<void>;
   reset: () => void;
+  stop: () => void;
 }
 
 const SyncAnalyzeContext = createContext<SyncAnalyzeContextType | undefined>(undefined);
@@ -324,11 +325,21 @@ export function SyncAnalyzeProvider({ children }: { children: React.ReactNode })
 
   const reset = useCallback(() => {
     abortRef.current = true;
+    isRunningRef.current = false;
+    isAnalyzeListRunningRef.current = false;
     setState(initialState);
   }, []);
 
+  // Stop: abort the running operation and mark as done (keeps results visible)
+  const stop = useCallback(() => {
+    abortRef.current = true;
+    isRunningRef.current = false;
+    isAnalyzeListRunningRef.current = false;
+    setState(prev => ({ ...prev, isRunning: false, phase: 'done' }));
+  }, []);
+
   return (
-    <SyncAnalyzeContext.Provider value={{ ...state, startSyncAndAnalyze, startScanAllAndAnalyze, startAnalyzeUnanalyzed, startAnalyzeList, reset }}>
+    <SyncAnalyzeContext.Provider value={{ ...state, startSyncAndAnalyze, startScanAllAndAnalyze, startAnalyzeUnanalyzed, startAnalyzeList, reset, stop }}>
       {children}
     </SyncAnalyzeContext.Provider>
   );
