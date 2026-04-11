@@ -40,7 +40,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 
-type SortField = 'address' | 'status' | 'arv' | 'acquisition' | 'equity' | 'cashflow' | 'yield' | 'capRate' | 'created';
+type SortField = 'address' | 'status' | 'arv' | 'acquisition' | 'equity' | 'cashflow' | 'yield' | 'capRate' | 'created' | 'analyzedAt';
 type SortDirection = 'asc' | 'desc';
 
 interface DealsTableProps {
@@ -157,8 +157,8 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
       }
     }
 
-    // Age filter (based on updatedAt; hide stale analyzed deals by default)
-    result = applyDealAgeFilter(result, ageFilter);
+    // Age filter — based on analyzedAt (when the deal was actually analyzed)
+    result = applyDealAgeFilter(result, ageFilter, { dateField: 'analyzedAt' });
 
     // Sort
     result.sort((a, b) => {
@@ -201,6 +201,10 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
         case 'created':
           aVal = new Date(a.updatedAt).getTime();
           bVal = new Date(b.updatedAt).getTime();
+          break;
+        case 'analyzedAt':
+          aVal = a.analyzedAt ? new Date(a.analyzedAt).getTime() : 0;
+          bVal = b.analyzedAt ? new Date(b.analyzedAt).getTime() : 0;
           break;
       }
 
@@ -324,7 +328,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
               <TableHead>Source</TableHead>
               <TableHead>Seller / Agent</TableHead>
               <TableHead className="text-right">
-                <SortHeader field="created">Analyzed</SortHeader>
+                <SortHeader field="analyzedAt">Analyzed</SortHeader>
               </TableHead>
               <TableHead className="w-[100px]">Actions</TableHead>
             </TableRow>
