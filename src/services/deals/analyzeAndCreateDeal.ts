@@ -204,12 +204,13 @@ async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: Prope
       address_city: city,
       address_state: state || '',
       address_zip: zip || null,
-      source: 'manual',
+      source: scoutAiData ? 'scout' : 'manual',
       status: 'new',
       api_data: apiData,
       financials: financials,
       created_by: currentUser?.id || null,
       scout_ai_data: scoutAiData || null,
+      analyzed_at: new Date().toISOString(),
     };
 
     const { data: insertedDeal, error } = await supabase
