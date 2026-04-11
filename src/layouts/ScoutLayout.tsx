@@ -62,11 +62,11 @@ export function ScoutLayout({ children }: { children: ReactNode }) {
             </Link>
             <Link to="/scout/deal-scanner" className={cn(
               'flex items-center gap-1.5 text-xs px-2.5 py-1 rounded transition-colors',
-              location.pathname === '/scout/deal-scanner'
+              location.pathname.startsWith('/scout/deal-scanner')
                 ? 'bg-emerald-500/15 text-emerald-400'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
             )}>
-              <ScanLine className="w-3.5 h-3.5" /> Deal Scanner
+              <ScanLine className="w-3.5 h-3.5" /> Pipeline
             </Link>
           </nav>
         </div>

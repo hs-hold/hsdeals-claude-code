@@ -818,11 +818,17 @@ serve(async (req) => {
 
     const { data: existingDeals } = await supabase
       .from('deals')
-      .select('id, address_full, gmail_message_id, overrides, api_data');
+      .select('id, address_full, gmail_message_id, gmail_thread_id, overrides, api_data, sender_email, email_subject, email_extracted_data');
 
     const existingAddresses = existingDeals?.map(d => ({
       id: d.id, address: d.address_full, deal: d,
     })) || [];
+
+    // Build a map of threadId → deal for fast reply detection
+    const threadIdToDeal = new Map<string, any>();
+    for (const d of existingDeals || []) {
+      if (d.gmail_thread_id) threadIdToDeal.set(d.gmail_thread_id, d);
+    }
 
     // Shared mutable state — all concurrent workers accumulate into this object
     interface SharedState {
@@ -888,6 +894,46 @@ serve(async (req) => {
         const snippet = fullMessage.snippet || '';
 
         console.log(`Processing: from=${senderInfo.email} | subject="${subject}" | body_len=${body.length}`);
+
+        // ── Thread reply detection ────────────────────────────────────────────
+        // If this email belongs to a thread we already have a deal for, store it
+        // as a reply on that deal instead of creating a new one.
+        const existingDealForThread = fullMessage.threadId ? threadIdToDeal.get(fullMessage.threadId) : null;
+        if (existingDealForThread && existingDealForThread.gmail_message_id !== msg.id) {
+          console.log(`Thread reply detected — deal ${existingDealForThread.id}, thread ${fullMessage.threadId}`);
+          if (!dry_run) {
+            const prevData = existingDealForThread.email_extracted_data || {};
+            const prevMessages: any[] = Array.isArray(prevData.threadMessages) ? prevData.threadMessages : [];
+            // Only append if this messageId isn't already stored
+            if (!prevMessages.some((m: any) => m.messageId === msg.id)) {
+              prevMessages.push({
+                messageId: msg.id,
+                direction: 'inbound',
+                from: senderInfo.email,
+                senderName: senderInfo.name,
+                subject,
+                body: body.slice(0, 4000),
+                date: date || new Date().toISOString(),
+              });
+              await supabase.from('deals').update({
+                email_extracted_data: { ...prevData, threadMessages: prevMessages },
+              }).eq('id', existingDealForThread.id);
+            }
+          }
+          await markEmailAsRead(access_token, msg.id);
+          state.syncDetails.push({
+            address: existingDealForThread.address_full || '',
+            action: 'thread_reply',
+            existingDealId: existingDealForThread.id,
+            senderEmail: senderInfo.email,
+            senderName: senderInfo.name,
+            subject,
+            messageId: msg.id,
+            emailSnippet: snippet,
+          });
+          return;
+        }
+        // ─────────────────────────────────────────────────────────────────────
 
         // Skip portal emails — mark them as read immediately
         if (isPortalEmail(senderInfo.email)) {
@@ -1020,6 +1066,7 @@ serve(async (req) => {
             email_subject: subject,
             email_date: date ? new Date(date).toISOString() : null,
             gmail_message_id: msg.id,
+            gmail_thread_id: fullMessage.threadId || null,
             sender_name: senderInfo.name,
             sender_email: senderInfo.email,
             email_snippet: snippet,

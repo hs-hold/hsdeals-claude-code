@@ -1,4 +1,6 @@
 import { ReactNode } from 'react';
+import { AutoScanBanner } from '@/components/layout/AutoScanBanner';
+import { GlobalScanProgress } from '@/components/layout/GlobalScanProgress';
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
@@ -452,6 +454,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </main>
         </div>
       </div>
+      {/* Global floating components — visible from any page */}
+      <AutoScanBanner />
+      <GlobalScanProgress />
     </SidebarProvider>
   );
 }

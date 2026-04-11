@@ -22,6 +22,7 @@ interface DBDeal {
   email_subject: string | null;
   email_date: string | null;
   gmail_message_id: string | null;
+  gmail_thread_id: string | null;
   sender_name: string | null;
   sender_email: string | null;
   email_snippet: string | null;
@@ -138,6 +139,7 @@ function mapDBDealToDeal(dbDeal: DBDeal, loanDefaults?: ReturnType<typeof import
     emailSubject: dbDeal.email_subject,
     emailDate: dbDeal.email_date,
     emailId: dbDeal.gmail_message_id,
+    gmailThreadId: dbDeal.gmail_thread_id || null,
     senderName: dbDeal.sender_name,
     senderEmail: dbDeal.sender_email,
     emailSnippet: dbDeal.email_snippet,
@@ -525,6 +527,7 @@ export function useDealsFromDB() {
     const apiData = {
       // Core property values from AI analysis metrics
       arv: arv,
+      sellerArv: null as number | null, // Populated below from emailExtractedData if available
       purchasePrice: analysis.asking_price || analysis.price || property.price || property.asking_price || null,
       rent: metrics.monthly_rent || property.monthly_rent || null,
       rehabCost: metrics.rehab_cost || property.rehab_cost || null,
@@ -636,6 +639,8 @@ export function useDealsFromDB() {
       if (!apiData.yearBuilt  && trusted.yearBuilt)   apiData.yearBuilt   = trusted.yearBuilt;
       if (!apiData.lotSize    && trusted.lotSize)     apiData.lotSize     = trusted.lotSize;
       if (!apiData.propertyType && trusted.propertyType) apiData.propertyType = trusted.propertyType;
+      // Seller ARV is stored separately — used as a cap in financialCalculations
+      if (trusted.arv) apiData.sellerArv = trusted.arv;
     }
 
     // Verify purchasePrice override from email is preserved
