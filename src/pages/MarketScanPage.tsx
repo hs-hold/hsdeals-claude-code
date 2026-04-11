@@ -403,6 +403,15 @@ export default function MarketScanPage() {
 
   // ── Toggle helpers ────────────────────────────────────────────────────────
 
+  // Re-apply strict filter to current results without rescanning
+  const reFilter = useCallback(() => {
+    const before = results.length;
+    const strict = results.filter(r => r.zestimate && r.margin >= 0.20);
+    setResults(strict);
+    const removed = before - strict.length;
+    toast.success(`Re-filtered: kept ${strict.length} (removed ${removed} with no ARV or margin < 20%)`);
+  }, [results]);
+
   const toggleExclude = useCallback((zpid: string) => {
     setResults(prev => prev.map(r => r.zpid === zpid ? { ...r, excluded: !r.excluded } : r));
   }, []);
@@ -486,6 +495,19 @@ export default function MarketScanPage() {
               <><ScanLine className="w-3.5 h-3.5" /> {stage === 0 ? 'Configure & Scan' : 'Re-scan'}</>
             )}
           </Button>
+
+          {/* Re-filter button — applies stricter filter to existing results without rescanning */}
+          {stage >= 2 && results.some(r => !r.zestimate || r.margin < 0.20) && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs gap-1.5 border-violet-500/40 text-violet-400 hover:bg-violet-500/10"
+              onClick={reFilter}
+              disabled={aiRunning || dbRunning || scanInProgress}
+            >
+              <Filter className="w-3.5 h-3.5" /> Re-filter (no rescan)
+            </Button>
+          )}
 
           {/* AI screen button */}
           {stage >= 2 && stage !== 5 && (
