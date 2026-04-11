@@ -3321,154 +3321,165 @@ BRRRR STRATEGY:
               </Card>
             )}
 
-            {/* Email / Off-Market Info Card */}
-            {(deal.isOffMarket || deal.source === 'email') && deal.emailExtractedData && (
-              <Card className="border border-blue-500/30 bg-blue-500/5">
-                <CardHeader className="pb-2 pt-3 px-4">
-                  <CardTitle className="text-sm font-medium flex items-center gap-2 text-blue-400">
-                    <Mail className="w-4 h-4" />
-                    Email Data
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="px-4 pb-4 space-y-4">
-                  {/* Sender + Date row */}
-                  <div className="flex flex-wrap gap-4 text-sm">
-                    {deal.senderName && (
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-muted-foreground">From:</span>
-                        <span className="font-medium">{deal.senderName}</span>
-                        {deal.senderEmail && (
-                          <span className="text-muted-foreground">({deal.senderEmail})</span>
-                        )}
+            {/* Email Data + Thread Chat — unified collapsible card */}
+            {(deal.isOffMarket || deal.source === 'email') && (deal.emailExtractedData || deal.senderEmail || deal.gmailThreadId) && (
+              <Collapsible defaultOpen>
+                <Card className="border border-blue-500/30 bg-blue-500/5">
+                  {/* Header — always visible, click to toggle */}
+                  <CollapsibleTrigger asChild>
+                    <CardHeader className="pb-2 pt-3 px-4 cursor-pointer hover:bg-blue-500/5 transition-colors select-none">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-sm font-medium flex items-center gap-2 text-blue-400">
+                          <Mail className="w-4 h-4" />
+                          Email Data
+                          {deal.senderName && (
+                            <span className="text-muted-foreground font-normal text-xs hidden sm:inline">
+                              · {deal.senderName}
+                              {deal.emailDate && (
+                                <> · {new Date(deal.emailDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</>
+                              )}
+                            </span>
+                          )}
+                        </CardTitle>
+                        <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform duration-200 [[data-state=open]_&]:rotate-180" />
                       </div>
-                    )}
-                    {deal.emailDate && (
-                      <div className="flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
-                        <span className="text-muted-foreground">Received:</span>
-                        <span className="font-medium">
-                          {new Date(deal.emailDate).toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })}
-                        </span>
-                      </div>
-                    )}
-                    {deal.emailSubject && (
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-muted-foreground shrink-0">Subject:</span>
-                        <span className="text-xs truncate max-w-xs">{deal.emailSubject}</span>
-                      </div>
-                    )}
-                  </div>
+                    </CardHeader>
+                  </CollapsibleTrigger>
 
-                  {/* Photo / Gallery links */}
-                  {Array.isArray(deal.emailExtractedData.imageLinks) && deal.emailExtractedData.imageLinks.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Photos / Gallery</p>
-                      <div className="flex flex-wrap gap-2">
-                        {(deal.emailExtractedData.imageLinks as string[]).map((link: string, idx: number) => (
-                          <Button
-                            key={idx}
-                            variant="outline"
-                            size="sm"
-                            className="text-xs h-7 gap-1.5 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
-                            onClick={() => window.open(link, '_blank', 'noopener,noreferrer')}
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                            {idx === 0 ? 'View Photos' : `Photo Link ${idx + 1}`}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {/* Document links */}
-                  {Array.isArray(deal.emailExtractedData.documentLinks) && deal.emailExtractedData.documentLinks.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Documents</p>
-                      <div className="flex flex-wrap gap-2">
-                        {(deal.emailExtractedData.documentLinks as Array<{label: string; url: string}>).map((dl, idx) => (
-                          <Button
-                            key={idx}
-                            variant="outline"
-                            size="sm"
-                            className="text-xs h-7 gap-1.5 border-blue-500/40 text-blue-400 hover:bg-blue-500/10"
-                            onClick={() => window.open(dl.url, '_blank', 'noopener,noreferrer')}
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                            {dl.label}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Property Description from AI */}
-                  {deal.emailExtractedData.propertyDescription && (
-                    <div className="space-y-2">
-                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Property Description</p>
-                      <div className="p-3 rounded-lg bg-muted/30 text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
-                        {deal.emailExtractedData.propertyDescription}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Additional extracted info */}
-                  {(() => {
-                    const ed = deal.emailExtractedData;
-                    const infoRows: { label: string; value: string; source?: string }[] = [];
-                    // Seller-reported factual fields (from email)
-                    if (ed.bedrooms)   infoRows.push({ label: 'Beds',      value: String(ed.bedrooms),   source: 'email' });
-                    if (ed.bathrooms)  infoRows.push({ label: 'Baths',     value: String(ed.bathrooms),  source: 'email' });
-                    if (ed.sqft)       infoRows.push({ label: 'Sqft',      value: Number(ed.sqft).toLocaleString(), source: 'email' });
-                    if (ed.yearBuilt)  infoRows.push({ label: 'Year Built', value: String(ed.yearBuilt), source: 'email' });
-                    if (ed.lotSize)    infoRows.push({ label: 'Lot Size',  value: String(ed.lotSize),    source: 'email' });
-                    if (ed.rehabCost)  infoRows.push({ label: 'Seller Rehab', value: `$${Number(ed.rehabCost).toLocaleString()}`, source: 'email' });
-                    // Seller valuations — shown for reference, NOT used in analysis
-                    if (ed.arv)        infoRows.push({ label: 'Seller ARV ⚠', value: `$${Number(ed.arv).toLocaleString()}`, source: 'seller' });
-                    if (ed.rent)       infoRows.push({ label: 'Seller Rent ⚠', value: `$${Number(ed.rent).toLocaleString()}/mo`, source: 'seller' });
-                    // Other extracted fields
-                    if (ed.occupancy)  infoRows.push({ label: 'Occupancy', value: ed.occupancy });
-                    if (ed.condition)  infoRows.push({ label: 'Condition', value: ed.condition });
-                    if (ed.exterior)   infoRows.push({ label: 'Exterior',  value: ed.exterior });
-                    if (ed.access)     infoRows.push({ label: 'Access',    value: ed.access });
-                    if (ed.county)     infoRows.push({ label: 'County',    value: ed.county });
-                    if (ed.neighborhood) infoRows.push({ label: 'Area',   value: ed.neighborhood });
-                    if (ed.units)      infoRows.push({ label: 'Units',     value: String(ed.units) });
-                    if (ed.capRate)    infoRows.push({ label: 'Cap Rate',  value: `${ed.capRate}%` });
-                    if (ed.cashFlow)   infoRows.push({ label: 'Cash Flow', value: `$${Number(ed.cashFlow).toLocaleString()}/mo` });
-                    if (ed.existingLoanBalance) infoRows.push({ label: 'Existing Loan', value: `$${Number(ed.existingLoanBalance).toLocaleString()}` });
-                    if (ed.monthlyPITI) infoRows.push({ label: 'Monthly PITI', value: `$${Number(ed.monthlyPITI).toLocaleString()}` });
-                    if (ed.financingNotes) infoRows.push({ label: 'Financing', value: ed.financingNotes });
-                    if (ed.dealNotes) infoRows.push({ label: 'Deal Notes', value: ed.dealNotes });
-                    if (infoRows.length === 0) return null;
-                    return (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {infoRows.map(({ label, value, source }) => (
-                          <div key={label} className="text-sm">
-                            <span className="text-muted-foreground text-xs">{label}: </span>
-                            <span className={`font-medium ${source === 'seller' ? 'text-amber-400/70 line-through' : ''}`}>{value}</span>
-                            {source === 'seller' && <span className="ml-1 text-[10px] text-amber-500/60">not used</span>}
+                  <CollapsibleContent>
+                    <CardContent className="px-4 pb-4 space-y-4">
+                      {/* Sender + Date row */}
+                      {deal.emailExtractedData && <div className="flex flex-wrap gap-4 text-sm">
+                        {deal.senderName && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-muted-foreground">From:</span>
+                            <span className="font-medium">{deal.senderName}</span>
+                            {deal.senderEmail && (
+                              <span className="text-muted-foreground">({deal.senderEmail})</span>
+                            )}
                           </div>
-                        ))}
-                      </div>
-                    );
-                  })()}
-                </CardContent>
-              </Card>
-            )}
+                        )}
+                        {deal.emailDate && (
+                          <div className="flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+                            <span className="text-muted-foreground">Received:</span>
+                            <span className="font-medium">
+                              {new Date(deal.emailDate).toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })}
+                            </span>
+                          </div>
+                        )}
+                        {deal.emailSubject && (
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-muted-foreground shrink-0">Subject:</span>
+                            <span className="text-xs truncate max-w-xs">{deal.emailSubject}</span>
+                          </div>
+                        )}
+                      </div>}
 
-            {/* Email Thread Chat — show for any email deal with a known sender */}
-            {deal.source === 'email' && (deal.senderEmail || deal.gmailThreadId) && (
-              <Card className="border border-primary/20 bg-primary/5">
-                <CardHeader className="pb-2 pt-3 px-4">
-                  <CardTitle className="text-sm font-medium flex items-center gap-2 text-primary">
-                    <Mail className="w-4 h-4" />
-                    שרשור מייל
-                    {deal.senderName && <span className="text-muted-foreground font-normal text-xs">— {deal.senderName}</span>}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <EmailThreadChat deal={deal} />
-                </CardContent>
-              </Card>
+                      {/* Photo / Gallery links */}
+                      {deal.emailExtractedData && Array.isArray(deal.emailExtractedData.imageLinks) && deal.emailExtractedData.imageLinks.length > 0 && (
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Photos / Gallery</p>
+                          <div className="flex flex-wrap gap-2">
+                            {(deal.emailExtractedData.imageLinks as string[]).map((link: string, idx: number) => (
+                              <Button
+                                key={idx}
+                                variant="outline"
+                                size="sm"
+                                className="text-xs h-7 gap-1.5 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+                                onClick={() => window.open(link, '_blank', 'noopener,noreferrer')}
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                {idx === 0 ? 'View Photos' : `Photo Link ${idx + 1}`}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Document links */}
+                      {deal.emailExtractedData && Array.isArray(deal.emailExtractedData.documentLinks) && deal.emailExtractedData.documentLinks.length > 0 && (
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Documents</p>
+                          <div className="flex flex-wrap gap-2">
+                            {(deal.emailExtractedData.documentLinks as Array<{label: string; url: string}>).map((dl, idx) => (
+                              <Button
+                                key={idx}
+                                variant="outline"
+                                size="sm"
+                                className="text-xs h-7 gap-1.5 border-blue-500/40 text-blue-400 hover:bg-blue-500/10"
+                                onClick={() => window.open(dl.url, '_blank', 'noopener,noreferrer')}
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                {dl.label}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Property Description from AI */}
+                      {deal.emailExtractedData?.propertyDescription && (
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Property Description</p>
+                          <div className="p-3 rounded-lg bg-muted/30 text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
+                            {deal.emailExtractedData.propertyDescription}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Additional extracted info */}
+                      {deal.emailExtractedData && (() => {
+                        const ed = deal.emailExtractedData;
+                        const infoRows: { label: string; value: string; source?: string }[] = [];
+                        if (ed.bedrooms)   infoRows.push({ label: 'Beds',      value: String(ed.bedrooms),   source: 'email' });
+                        if (ed.bathrooms)  infoRows.push({ label: 'Baths',     value: String(ed.bathrooms),  source: 'email' });
+                        if (ed.sqft)       infoRows.push({ label: 'Sqft',      value: Number(ed.sqft).toLocaleString(), source: 'email' });
+                        if (ed.yearBuilt)  infoRows.push({ label: 'Year Built', value: String(ed.yearBuilt), source: 'email' });
+                        if (ed.lotSize)    infoRows.push({ label: 'Lot Size',  value: String(ed.lotSize),    source: 'email' });
+                        if (ed.rehabCost)  infoRows.push({ label: 'Seller Rehab', value: `$${Number(ed.rehabCost).toLocaleString()}`, source: 'email' });
+                        if (ed.arv)        infoRows.push({ label: 'Seller ARV ⚠', value: `$${Number(ed.arv).toLocaleString()}`, source: 'seller' });
+                        if (ed.rent)       infoRows.push({ label: 'Seller Rent ⚠', value: `$${Number(ed.rent).toLocaleString()}/mo`, source: 'seller' });
+                        if (ed.occupancy)  infoRows.push({ label: 'Occupancy', value: ed.occupancy });
+                        if (ed.condition)  infoRows.push({ label: 'Condition', value: ed.condition });
+                        if (ed.exterior)   infoRows.push({ label: 'Exterior',  value: ed.exterior });
+                        if (ed.access)     infoRows.push({ label: 'Access',    value: ed.access });
+                        if (ed.county)     infoRows.push({ label: 'County',    value: ed.county });
+                        if (ed.neighborhood) infoRows.push({ label: 'Area',   value: ed.neighborhood });
+                        if (ed.units)      infoRows.push({ label: 'Units',     value: String(ed.units) });
+                        if (ed.capRate)    infoRows.push({ label: 'Cap Rate',  value: `${ed.capRate}%` });
+                        if (ed.cashFlow)   infoRows.push({ label: 'Cash Flow', value: `$${Number(ed.cashFlow).toLocaleString()}/mo` });
+                        if (ed.existingLoanBalance) infoRows.push({ label: 'Existing Loan', value: `$${Number(ed.existingLoanBalance).toLocaleString()}` });
+                        if (ed.monthlyPITI) infoRows.push({ label: 'Monthly PITI', value: `$${Number(ed.monthlyPITI).toLocaleString()}` });
+                        if (ed.financingNotes) infoRows.push({ label: 'Financing', value: ed.financingNotes });
+                        if (ed.dealNotes) infoRows.push({ label: 'Deal Notes', value: ed.dealNotes });
+                        if (infoRows.length === 0) return null;
+                        return (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            {infoRows.map(({ label, value, source }) => (
+                              <div key={label} className="text-sm">
+                                <span className="text-muted-foreground text-xs">{label}: </span>
+                                <span className={`font-medium ${source === 'seller' ? 'text-amber-400/70 line-through' : ''}`}>{value}</span>
+                                {source === 'seller' && <span className="ml-1 text-[10px] text-amber-500/60">not used</span>}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
+
+                      {/* Email Thread / Reply */}
+                      {deal.source === 'email' && (deal.senderEmail || deal.gmailThreadId) && (
+                        <div className="border-t border-blue-500/20 pt-4 space-y-2">
+                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                            {deal.gmailThreadId ? 'שרשור מייל' : 'שלח מייל למוכר'}
+                          </p>
+                          <EmailThreadChat deal={deal} />
+                        </div>
+                      )}
+                    </CardContent>
+                  </CollapsibleContent>
+                </Card>
+              </Collapsible>
             )}
 
             {/* Email Details Card — fallback when no structured email data available */}
