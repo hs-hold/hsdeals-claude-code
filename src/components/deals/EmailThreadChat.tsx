@@ -161,13 +161,16 @@ export function EmailThreadChat({ deal }: EmailThreadChatProps) {
 
       const raw = buildRawEmail(toAddress, subject, replyBody, msgIdHeader);
 
+      const sendBody: Record<string, string> = { raw };
+      if (threadId) sendBody.threadId = threadId;  // only thread if we have the ID
+
       const res = await fetch(`${GMAIL}/messages/send`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ raw, threadId }),
+        body: JSON.stringify(sendBody),
       });
       if (!res.ok) throw new Error(`Send failed: ${res.status}`);
 
@@ -197,19 +200,13 @@ export function EmailThreadChat({ deal }: EmailThreadChatProps) {
     }
   };
 
-  if (!threadId) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground p-4">
-        <Mail className="w-4 h-4" />
-        <span>אין שרשור מייל לעסקה זו</span>
-      </div>
-    );
-  }
+  // No threadId — compose-only mode (new email to the sender, not a reply in thread)
+  const composeOnly = !threadId;
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0" style={{ maxHeight: '420px' }}>
+      {/* Messages (only when we have a real thread) */}
+      {!composeOnly && <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0" style={{ maxHeight: '420px' }}>
         {loading && messages.length === 0 && (
           <div className="flex justify-center py-8">
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
@@ -239,14 +236,19 @@ export function EmailThreadChat({ deal }: EmailThreadChatProps) {
           </div>
         ))}
         <div ref={bottomRef} />
-      </div>
+      </div>}
 
-      {/* Reply box */}
-      <div className="border-t border-border p-3 space-y-2">
+      {/* Reply / compose box */}
+      <div className={cn('p-3 space-y-2', !composeOnly && 'border-t border-border')}>
+        {composeOnly && (
+          <p className="text-xs text-muted-foreground pb-1">
+            שלח מייל ל-<span className="font-medium text-foreground">{deal.senderEmail}</span>
+          </p>
+        )}
         <Textarea
           value={replyBody}
           onChange={e => setReplyBody(e.target.value)}
-          placeholder={`השב ל-${deal.senderName || deal.senderEmail || 'המוכר'}...`}
+          placeholder={`${composeOnly ? 'כתוב הודעה ל' : 'השב ל-'}${deal.senderName || deal.senderEmail || 'המוכר'}...`}
           rows={3}
           className="text-sm resize-none"
           onKeyDown={e => {
@@ -254,14 +256,16 @@ export function EmailThreadChat({ deal }: EmailThreadChatProps) {
           }}
         />
         <div className="flex items-center justify-between">
-          <button
-            onClick={fetchThread}
-            disabled={loading}
-            className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
-          >
-            <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
-            רענן
-          </button>
+          {!composeOnly ? (
+            <button
+              onClick={fetchThread}
+              disabled={loading}
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+            >
+              <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
+              רענן
+            </button>
+          ) : <span />}
           <Button size="sm" onClick={handleSend} disabled={sending || !replyBody.trim()}>
             {sending ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1" />}
             שלח

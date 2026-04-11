@@ -3455,8 +3455,8 @@ BRRRR STRATEGY:
               </Card>
             )}
 
-            {/* Email Thread Chat */}
-            {deal.source === 'email' && deal.gmailThreadId && (
+            {/* Email Thread Chat — show for any email deal with a known sender */}
+            {deal.source === 'email' && (deal.senderEmail || deal.gmailThreadId) && (
               <Card className="border border-primary/20 bg-primary/5">
                 <CardHeader className="pb-2 pt-3 px-4">
                   <CardTitle className="text-sm font-medium flex items-center gap-2 text-primary">
