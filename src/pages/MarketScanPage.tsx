@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -180,19 +180,44 @@ function PipelineStep({
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
+const STORAGE_KEY = 'market_scan_session';
+
+function loadSavedSession(): { results: ScoredListing[]; stage: Stage; totalScanned: number; dbDone: number } | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+
+function saveSession(results: ScoredListing[], stage: Stage, totalScanned: number, dbDone: number) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ results, stage, totalScanned, dbDone }));
+  } catch { /* storage full — ignore */ }
+}
+
 export default function MarketScanPage() {
   const navigate = useNavigate();
 
-  const [stage, setStage] = useState<Stage>(0);
-  const [results, setResults] = useState<ScoredListing[]>([]);
+  const saved = loadSavedSession();
+
+  const [stage, setStage] = useState<Stage>(saved?.stage ?? 0);
+  const [results, setResults] = useState<ScoredListing[]>(saved?.results ?? []);
   const [scanProgress, setScanProgress] = useState<{ current: number; total: number; zip: string } | null>(null);
   const [aiProgress, setAiProgress] = useState<{ current: number; total: number } | null>(null);
   const [dbProgress, setDbProgress] = useState<{ current: number; total: number; address: string } | null>(null);
-  const [dbDone, setDbDone] = useState(0);
-  const [totalScanned, setTotalScanned] = useState(0);
+  const [dbDone, setDbDone] = useState(saved?.dbDone ?? 0);
+  const [totalScanned, setTotalScanned] = useState(saved?.totalScanned ?? 0);
 
   const aiAbortRef = useRef(false);
   const dbAbortRef = useRef(false);
+
+  // Persist to localStorage whenever results/stage change
+  useEffect(() => {
+    if (results.length > 0 || stage > 0) {
+      saveSession(results, stage, totalScanned, dbDone);
+    }
+  }, [results, stage, totalScanned, dbDone]);
 
   // ── Derived state ─────────────────────────────────────────────────────────
 
@@ -209,6 +234,8 @@ export default function MarketScanPage() {
     setResults([]);
     setScanProgress(null);
     setDbDone(0);
+    setTotalScanned(0);
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
     aiAbortRef.current = false;
     dbAbortRef.current = false;
 
