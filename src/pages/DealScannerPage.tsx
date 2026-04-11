@@ -544,23 +544,30 @@ export default function DealScannerPage() {
 
     setDbProgress({ current: 0, total: toAnalyze.length, address: '' });
 
-    let successCount = 0;
+    let newCount = 0;
+    let skippedCount = 0;
     for (let i = 0; i < toAnalyze.length; i++) {
       if (dbAbortRef.current) break;
       const r = toAnalyze[i];
       const fullAddress = [r.address, r.city, r.state, r.zipcode].filter(Boolean).join(', ');
       setDbProgress({ current: i + 1, total: toAnalyze.length, address: r.address });
 
-      const { dealId } = await analyzeAndCreateDeal(fullAddress);
-      if (dealId) successCount++;
+      const { dealId, alreadyExists } = await analyzeAndCreateDeal(fullAddress);
+      if (dealId) {
+        if (alreadyExists) skippedCount++;
+        else newCount++;
+      }
 
       if (i < toAnalyze.length - 1) await new Promise(r => setTimeout(r, 800));
     }
 
     setDbRunning(false);
     setDbProgress(null);
-    setDbDone(successCount);
-    toast.success(`${successCount} deals analyzed and added to Hot Deals`, {
+    setDbDone(newCount + skippedCount);
+    const msg = skippedCount > 0
+      ? `${newCount} new deals added · ${skippedCount} already existed`
+      : `${newCount} deals analyzed and added to Hot Deals`;
+    toast.success(msg, {
       action: { label: 'View Deals', onClick: () => navigate('/deals') },
     });
   }, [session, topNInput, navigate]);
