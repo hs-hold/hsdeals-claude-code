@@ -400,22 +400,12 @@ export default function MarketScanPage() {
   const sendToDealBeast = useCallback(async () => {
     const candidates = aiPassed.length > 0 ? aiPassed : nonDupeResults;
 
-    // Only send properties that have complete data — no point paying for an analysis with no numbers
-    const toAnalyze = candidates.filter(r =>
-      r.price > 0 &&
-      r.zestimate && r.zestimate > 0 &&
-      r.rentZestimate && r.rentZestimate > 0 &&
-      r.margin >= 0.20
-    );
+    // DealBeast fetches all data from the address itself — only require a valid address + price
+    const toAnalyze = candidates.filter(r => r.price > 0 && r.address);
 
     if (!toAnalyze.length) {
-      toast.error('No properties with complete data to analyze (need ARV + rent + margin ≥ 20%)');
+      toast.error('No properties with a valid address to analyze');
       return;
-    }
-
-    const skippedIncomplete = candidates.length - toAnalyze.length;
-    if (skippedIncomplete > 0) {
-      toast.info(`Skipping ${skippedIncomplete} properties with missing ARV or rent data`);
     }
 
     dbAbortRef.current = false;
