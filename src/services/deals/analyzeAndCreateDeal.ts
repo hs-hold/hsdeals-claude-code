@@ -229,8 +229,20 @@ async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: Prope
   }
 }
 
-export async function analyzeAndCreateDeal(address: string): Promise<{ dealId: string | null; error?: string }> {
+export async function analyzeAndCreateDeal(address: string): Promise<{ dealId: string | null; error?: string; alreadyExists?: boolean }> {
   try {
+    // Dedup check — skip if this address was already analyzed
+    const { data: existing } = await supabase
+      .from('deals')
+      .select('id')
+      .ilike('address_full', address.trim())
+      .limit(1)
+      .maybeSingle();
+
+    if (existing?.id) {
+      return { dealId: existing.id, alreadyExists: true };
+    }
+
     const { data, error } = await supabase.functions.invoke('analyze-property', {
       body: {
         address: address.trim(),
