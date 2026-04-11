@@ -1,13 +1,14 @@
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PropertyAnalyzer } from '@/components/deals/PropertyAnalyzer';
 import { MarketSearch } from '@/components/deals/MarketSearch';
-import { MapPin, Search } from 'lucide-react';
+import { MapPin, Search, ScanLine } from 'lucide-react';
 
 export default function AnalyzePage() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const prefilledAddress = searchParams.get('address') || '';
-  
+
   const defaultTab = 'address';
 
   return (
@@ -21,7 +22,7 @@ export default function AnalyzePage() {
       </div>
 
       <Tabs defaultValue={defaultTab} className="space-y-6">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
+        <TabsList className="grid w-full max-w-lg grid-cols-3">
           <TabsTrigger value="address" className="flex items-center gap-2">
             <MapPin className="w-4 h-4" />
             By Address
@@ -29,6 +30,10 @@ export default function AnalyzePage() {
           <TabsTrigger value="market" className="flex items-center gap-2">
             <Search className="w-4 h-4" />
             Market Search
+          </TabsTrigger>
+          <TabsTrigger value="scan" className="flex items-center gap-2" onClick={() => navigate('/analyze/market-scan')}>
+            <ScanLine className="w-4 h-4" />
+            Market Scan
           </TabsTrigger>
         </TabsList>
 
@@ -38,6 +43,10 @@ export default function AnalyzePage() {
 
         <TabsContent value="market">
           <MarketSearch />
+        </TabsContent>
+
+        <TabsContent value="scan">
+          {/* Navigates away via the tab trigger click */}
         </TabsContent>
       </Tabs>
     </div>

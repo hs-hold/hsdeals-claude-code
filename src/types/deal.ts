@@ -241,6 +241,7 @@ export interface Deal {
   isOffMarket: boolean;
   dealType: string | null;
   emailExtractedData: Record<string, any> | null;
+  scoutAiData: Record<string, any> | null;
 }
 
 export const DEAL_STATUS_CONFIG: Record<DealStatus, { label: string; color: string }> = {

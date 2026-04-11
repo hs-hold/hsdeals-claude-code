@@ -184,7 +184,7 @@ function mapToDealApiData(analysis: PropertyAnalysis, property?: PropertyData): 
   };
 }
 
-async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: PropertyData): Promise<string | null> {
+async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: PropertyData, scoutAiData?: Record<string, any>): Promise<string | null> {
   try {
     const addressParts = analysisData.address?.split(',').map((s) => s.trim()) || [];
     const street = addressParts[0] || analysisData.address || '';
@@ -209,6 +209,7 @@ async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: Prope
       api_data: apiData,
       financials: financials,
       created_by: currentUser?.id || null,
+      scout_ai_data: scoutAiData || null,
     };
 
     const { data: insertedDeal, error } = await supabase
@@ -229,7 +230,7 @@ async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: Prope
   }
 }
 
-export async function analyzeAndCreateDeal(address: string): Promise<{ dealId: string | null; error?: string; alreadyExists?: boolean }> {
+export async function analyzeAndCreateDeal(address: string, scoutAiData?: Record<string, any>): Promise<{ dealId: string | null; error?: string; alreadyExists?: boolean }> {
   try {
     // Dedup check — skip if this address was already analyzed
     const { data: existing } = await supabase
@@ -260,7 +261,7 @@ export async function analyzeAndCreateDeal(address: string): Promise<{ dealId: s
       return { dealId: null, error: apiResponse?.error || 'Analysis failed' };
     }
 
-    const dealId = await saveDealToDb(apiResponse.data.analysis, apiResponse.data.property);
+    const dealId = await saveDealToDb(apiResponse.data.analysis, apiResponse.data.property, scoutAiData);
     if (!dealId) return { dealId: null, error: 'Property analyzed but failed to save' };
 
     return { dealId };

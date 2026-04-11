@@ -241,6 +241,7 @@ export type Database = {
           notes: string | null
           overrides: Json | null
           rejection_reason: string | null
+          scout_ai_data: Json | null
           sender_email: string | null
           sender_name: string | null
           source: string
@@ -271,6 +272,7 @@ export type Database = {
           notes?: string | null
           overrides?: Json | null
           rejection_reason?: string | null
+          scout_ai_data?: Json | null
           sender_email?: string | null
           sender_name?: string | null
           source?: string
@@ -301,6 +303,7 @@ export type Database = {
           notes?: string | null
           overrides?: Json | null
           rejection_reason?: string | null
+          scout_ai_data?: Json | null
           sender_email?: string | null
           sender_name?: string | null
           source?: string

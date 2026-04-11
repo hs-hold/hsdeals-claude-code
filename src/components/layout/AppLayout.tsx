@@ -67,6 +67,7 @@ const analyzeSubItems = [
   { to: '/analyze/address', label: 'By Address', icon: MapPin },
   { to: '/analyze/market', label: 'Market Search', icon: Search },
   { to: '/analyze/email', label: 'Email Search', icon: Mail },
+  { to: '/analyze/market-scan', label: 'Market Scan', icon: ScanSearch },
 ];
 
 const hotDealsSubItems = [

@@ -33,6 +33,7 @@ import ScoutAiDealsPage from "./pages/ScoutAiDealsPage";
 import ScoutFavoritesPage from "./pages/ScoutFavoritesPage";
 import ScoutNotRelevantPage from "./pages/ScoutNotRelevantPage";
 import DealScannerPage from "./pages/DealScannerPage";
+import MarketScanPage from "./pages/MarketScanPage";
 import DealScannerQueuePage from "./pages/DealScannerQueuePage";
 import { ScoutLayout } from "./layouts/ScoutLayout";
 import SyncProgressPage from "./pages/SyncProgressPage";
@@ -66,6 +67,7 @@ const App = () => (
                   <Route path="/analyze/address" element={<ProtectedRoute><AppLayout><AddressSearchPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/analyze/market" element={<ProtectedRoute><AppLayout><MarketSearchPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/analyze/email" element={<ProtectedRoute><AppLayout><EmailSearchPage /></AppLayout></ProtectedRoute>} />
+                  <Route path="/analyze/market-scan" element={<ProtectedRoute><AppLayout><MarketScanPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/email-preview/:id" element={<ProtectedRoute><AppLayout><EmailDealPreviewPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/market-search-results" element={<ProtectedRoute><AppLayout><MarketSearchResultsPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/new-deals" element={<ProtectedRoute><AppLayout><NewDealsPage /></AppLayout></ProtectedRoute>} />

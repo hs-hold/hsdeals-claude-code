@@ -33,6 +33,7 @@ interface DBDeal {
   is_off_market: boolean;
   deal_type: string | null;
   email_extracted_data: any;
+  scout_ai_data: Record<string, any> | null;
 }
 
 function mapDBDealToDeal(dbDeal: DBDeal, loanDefaults?: ReturnType<typeof import('@/context/SettingsContext').useSettings>['settings']['loanDefaults']): Deal {
@@ -152,6 +153,7 @@ function mapDBDealToDeal(dbDeal: DBDeal, loanDefaults?: ReturnType<typeof import
     isOffMarket: dbDeal.is_off_market || false,
     dealType: dbDeal.deal_type || null,
     emailExtractedData: dbDeal.email_extracted_data || null,
+    scoutAiData: dbDeal.scout_ai_data || null,
     _jobId: (dbDeal as any).job_id || null,
   };
   return result as Deal;
