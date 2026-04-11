@@ -312,8 +312,19 @@ export default function MarketScanPage() {
   // ── AI Screen ─────────────────────────────────────────────────────────────
 
   const runAiScreen = useCallback(async () => {
-    const toCheck = results.filter(r => !r.excluded && (!r.alreadyAnalyzed || r.includeAnyway));
-    if (!toCheck.length) return;
+    // Only send to AI if we have the minimum required data
+    const toCheck = results.filter(r =>
+      !r.excluded &&
+      (!r.alreadyAnalyzed || r.includeAnyway) &&
+      r.price > 0 &&
+      r.zestimate && r.zestimate > 0 &&
+      r.rentZestimate && r.rentZestimate > 0 &&
+      r.margin >= 0.20
+    );
+    if (!toCheck.length) {
+      toast.error('No properties with complete data (ARV + rent + margin ≥ 20%) to screen');
+      return;
+    }
 
     aiAbortRef.current = false;
     setStage(3);
@@ -387,11 +398,25 @@ export default function MarketScanPage() {
   // ── Send to DealBeast ─────────────────────────────────────────────────────
 
   const sendToDealBeast = useCallback(async () => {
-    const toAnalyze = aiPassed.length > 0
-      ? aiPassed
-      : nonDupeResults;
+    const candidates = aiPassed.length > 0 ? aiPassed : nonDupeResults;
 
-    if (!toAnalyze.length) return;
+    // Only send properties that have complete data — no point paying for an analysis with no numbers
+    const toAnalyze = candidates.filter(r =>
+      r.price > 0 &&
+      r.zestimate && r.zestimate > 0 &&
+      r.rentZestimate && r.rentZestimate > 0 &&
+      r.margin >= 0.20
+    );
+
+    if (!toAnalyze.length) {
+      toast.error('No properties with complete data to analyze (need ARV + rent + margin ≥ 20%)');
+      return;
+    }
+
+    const skippedIncomplete = candidates.length - toAnalyze.length;
+    if (skippedIncomplete > 0) {
+      toast.info(`Skipping ${skippedIncomplete} properties with missing ARV or rent data`);
+    }
 
     dbAbortRef.current = false;
     setStage(5);
