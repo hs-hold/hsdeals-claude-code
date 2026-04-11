@@ -100,7 +100,8 @@ function filterListings(raw: RawListing[]): ScoredListing[] {
     if (l.price < MIN_PRICE || l.price > MAX_PRICE) continue;
     if (l.propertyType && l.propertyType !== 'SINGLE_FAMILY') continue;
     if (!l.rentZestimate) continue;
-    if (l.zestimate && l.price / l.zestimate > MAX_PRICE_RATIO) continue;
+    if (!l.zestimate) continue;                               // must have ARV to evaluate margin
+    if (l.price / l.zestimate > MAX_PRICE_RATIO) continue;   // margin must be ≥ 20%
     if (l.yearBuilt && l.yearBuilt < MIN_YEAR) continue;
     if (l.sqft && (l.sqft < MIN_SQFT || l.sqft > MAX_SQFT)) continue;
     if (l.bedrooms !== null && l.bedrooms < MIN_BEDS) continue;

@@ -113,7 +113,8 @@ function filterListings(listings: RawListing[]): PassedListing[] {
     if (l.price < MIN_PRICE || l.price > MAX_PRICE) continue;
     if (l.propertyType && l.propertyType !== 'SINGLE_FAMILY') continue;
     if (!l.rentZestimate) continue;
-    if (l.zestimate && l.price / l.zestimate > MAX_PRICE_RATIO) continue;
+    if (!l.zestimate) continue;
+    if (l.price / l.zestimate > MAX_PRICE_RATIO) continue;
     // Year built — only filter if we have the value
     if (l.yearBuilt && l.yearBuilt < MIN_YEAR) continue;
     // Sqft — only filter if we have the value
