@@ -22,6 +22,7 @@ interface DBDeal {
   email_subject: string | null;
   email_date: string | null;
   gmail_message_id: string | null;
+  gmail_thread_id: string | null;
   sender_name: string | null;
   sender_email: string | null;
   email_snippet: string | null;
@@ -138,6 +139,7 @@ function mapDBDealToDeal(dbDeal: DBDeal, loanDefaults?: ReturnType<typeof import
     emailSubject: dbDeal.email_subject,
     emailDate: dbDeal.email_date,
     emailId: dbDeal.gmail_message_id,
+    gmailThreadId: dbDeal.gmail_thread_id || null,
     senderName: dbDeal.sender_name,
     senderEmail: dbDeal.sender_email,
     emailSnippet: dbDeal.email_snippet,

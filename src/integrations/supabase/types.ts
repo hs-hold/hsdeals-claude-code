@@ -234,6 +234,7 @@ export type Database = {
           email_subject: string | null
           financials: Json | null
           gmail_message_id: string | null
+          gmail_thread_id: string | null
           id: string
           is_locked: boolean
           job_id: string | null
@@ -263,6 +264,7 @@ export type Database = {
           email_subject?: string | null
           financials?: Json | null
           gmail_message_id?: string | null
+          gmail_thread_id?: string | null
           id?: string
           is_locked?: boolean
           job_id?: string | null
@@ -292,6 +294,7 @@ export type Database = {
           email_subject?: string | null
           financials?: Json | null
           gmail_message_id?: string | null
+          gmail_thread_id?: string | null
           id?: string
           is_locked?: boolean
           job_id?: string | null

@@ -107,6 +107,7 @@ import { BrrrrAnalysisCard } from '@/components/deals/BrrrrAnalysisCard';
 import { DealInvestorsManager } from '@/components/deals/DealInvestorsManager';
 import { ZipMarketCard } from '@/components/deals/ZipMarketCard';
 import { useDealMessages } from '@/hooks/useDealMessages';
+import { EmailThreadChat } from '@/components/deals/EmailThreadChat';
 
 export default function DealDetailPage() {
   const { id } = useParams();
@@ -3450,6 +3451,22 @@ BRRRR STRATEGY:
                       </div>
                     );
                   })()}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Email Thread Chat */}
+            {deal.source === 'email' && deal.gmailThreadId && (
+              <Card className="border border-primary/20 bg-primary/5">
+                <CardHeader className="pb-2 pt-3 px-4">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2 text-primary">
+                    <Mail className="w-4 h-4" />
+                    שרשור מייל
+                    {deal.senderName && <span className="text-muted-foreground font-normal text-xs">— {deal.senderName}</span>}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <EmailThreadChat deal={deal} />
                 </CardContent>
               </Card>
             )}

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "hsdeals",
+      "runtimeExecutable": "/opt/homebrew/Cellar/node/25.8.2/bin/node",
+      "runtimeArgs": ["/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js", "run", "dev"],
+      "port": 5173
+    }
+  ]
+}

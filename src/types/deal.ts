@@ -227,6 +227,7 @@ export interface Deal {
   emailSubject: string | null;
   emailDate: string | null;
   emailId: string | null;
+  gmailThreadId: string | null;
   // Sender info from email import
   senderName: string | null;
   senderEmail: string | null;
