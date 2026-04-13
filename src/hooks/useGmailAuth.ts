@@ -41,7 +41,7 @@ export function useGmailAuth() {
       const urlParams = new URLSearchParams(window.location.search);
       const code = urlParams.get('code');
       
-      if (code && !tokens) {
+      if (code && !tokens && !localStorage.getItem(STORAGE_KEY)) {
         setIsLoading(true);
         try {
           const redirectUri = window.location.origin;
