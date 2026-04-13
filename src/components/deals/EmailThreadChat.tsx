@@ -95,7 +95,7 @@ export function EmailThreadChat({ deal }: EmailThreadChatProps) {
   const fetchThread = useCallback(async () => {
     if (!threadId) return;
     const token = await getValidToken();
-    if (!token) { setError('Gmail non connesso'); return; }
+    if (!token) { setError('Gmail not connected'); return; }
 
     setLoading(true);
     setError(null);
@@ -134,7 +134,7 @@ export function EmailThreadChat({ deal }: EmailThreadChatProps) {
       });
       setMessages(parsed);
     } catch (e: any) {
-      setError(e.message || 'שגיאה בטעינת השרשור');
+      setError(e.message || 'Error loading thread');
     } finally {
       setLoading(false);
     }
@@ -194,7 +194,7 @@ export function EmailThreadChat({ deal }: EmailThreadChatProps) {
       // Refresh thread from Gmail
       await fetchThread();
     } catch (e: any) {
-      setError(e.message || 'שגיאה בשליחת המייל');
+      setError(e.message || 'Error sending email');
     } finally {
       setSending(false);
     }
@@ -229,9 +229,9 @@ export function EmailThreadChat({ deal }: EmailThreadChatProps) {
               {msg.body || msg.snippet}
             </div>
             <span className="text-[10px] text-muted-foreground px-1">
-              {msg.direction === 'inbound' ? (deal.senderName || msg.from.split('<')[0].trim()) : 'אני'}
+              {msg.direction === 'inbound' ? (deal.senderName || msg.from.split('<')[0].trim()) : 'Me'}
               {' · '}
-              {msg.date ? new Date(msg.date).toLocaleDateString('he-IL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}
+              {msg.date ? new Date(msg.date).toLocaleDateString('en-US', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}
             </span>
           </div>
         ))}
@@ -242,13 +242,13 @@ export function EmailThreadChat({ deal }: EmailThreadChatProps) {
       <div className={cn('p-3 space-y-2', !composeOnly && 'border-t border-border')}>
         {composeOnly && (
           <p className="text-xs text-muted-foreground pb-1">
-            שלח מייל ל-<span className="font-medium text-foreground">{deal.senderEmail}</span>
+            Send email to <span className="font-medium text-foreground">{deal.senderEmail}</span>
           </p>
         )}
         <Textarea
           value={replyBody}
           onChange={e => setReplyBody(e.target.value)}
-          placeholder={`${composeOnly ? 'כתוב הודעה ל' : 'השב ל-'}${deal.senderName || deal.senderEmail || 'המוכר'}...`}
+          placeholder={`${composeOnly ? 'Write a message to ' : 'Reply to '}${deal.senderName || deal.senderEmail || 'seller'}...`}
           rows={3}
           className="text-sm resize-none"
           onKeyDown={e => {
@@ -263,12 +263,12 @@ export function EmailThreadChat({ deal }: EmailThreadChatProps) {
               className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
             >
               <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
-              רענן
+              Refresh
             </button>
           ) : <span />}
           <Button size="sm" onClick={handleSend} disabled={sending || !replyBody.trim()}>
             {sending ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Send className="w-3.5 h-3.5 mr-1" />}
-            שלח
+            Send
           </Button>
         </div>
       </div>

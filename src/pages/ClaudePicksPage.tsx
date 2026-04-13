@@ -19,32 +19,32 @@ const CLAUDE_PICKS: {
     id: '8b7a1a56-54ba-4780-997f-91fd3405b4df',
     marketStatus: 'active',
     priority: 'high',
-    marketNote: 'Active — מחיר עלה ל-$204,900 (מ-$194,900)',
-    analysisNote: 'Grade A עם Cap 13.8% — הנכס הכי חזק. Spread של $105K עם Rehab $47.7K. הגש הצעה.',
+    marketNote: 'Active — price raised to $204,900 (from $194,900)',
+    analysisNote: 'Grade A with Cap 13.8% — strongest property on the list. Spread $105K with Rehab $47.7K. Submit offer.',
     checkedAt: '28.3.2026',
   },
   {
     id: '7ee432a6-3e3e-449b-aca2-8b71a07f2773',
     marketStatus: 'active',
     priority: 'medium',
-    marketNote: 'Active — הוזל מ-$240K ל-$204,750, רשומה מחדש כמה פעמים',
-    analysisNote: 'Grade B, Cap 10.1%, Rehab נמוך $35K. המוכר רוצה לצאת — יש כוח מיקוח.',
+    marketNote: 'Active — reduced from $240K to $204,750, relisted several times',
+    analysisNote: 'Grade B, Cap 10.1%, low Rehab $35K. Seller wants out — good negotiating leverage.',
     checkedAt: '28.3.2026',
   },
   {
     id: '5db0bfed-f753-4132-ac0d-5bb78457fc7a',
     marketStatus: 'pending',
     priority: 'medium',
-    marketNote: 'Pending — תחת חוזה מ-19.1.2026 (~42 ימים)',
-    analysisNote: 'Cap 14.1% — הגבוה ביותר בכל הרשימה. שווה לעקוב אם ייפול מחוזה.',
+    marketNote: 'Pending — under contract since 1/19/2026 (~42 days)',
+    analysisNote: 'Cap 14.1% — highest on the entire list. Worth monitoring if it falls out of contract.',
     checkedAt: '28.3.2026',
   },
   {
     id: '5ee058c4-7d44-4f3f-940c-e75edcaee8d6',
     marketStatus: 'off-market',
     priority: 'low',
-    marketNote: 'Off Market — הפך לנכס שכירות (FirstKey Homes)',
-    analysisNote: 'Cap 12.2%, Grade A. יצא מהשוק אך שווה לבדוק ישירות עם הבעלים.',
+    marketNote: 'Off Market — became a rental property (FirstKey Homes)',
+    analysisNote: 'Cap 12.2%, Grade A. Off market but worth reaching out to owner directly.',
     checkedAt: '28.3.2026',
   },
 ];
@@ -56,9 +56,9 @@ const statusConfig = {
 };
 
 const priorityConfig = {
-  high: { label: 'הגש הצעה', className: 'bg-green-500/20 text-green-400 border-green-400/30' },
-  medium: { label: 'עקוב', className: 'bg-yellow-500/20 text-yellow-400 border-yellow-400/30' },
-  low: { label: 'בדוק ידנית', className: 'bg-red-500/20 text-red-400 border-red-400/30' },
+  high: { label: 'Submit Offer', className: 'bg-green-500/20 text-green-400 border-green-400/30' },
+  medium: { label: 'Monitor', className: 'bg-yellow-500/20 text-yellow-400 border-yellow-400/30' },
+  low: { label: 'Check Manually', className: 'bg-red-500/20 text-red-400 border-red-400/30' },
 };
 
 export default function ClaudePicksPage() {
@@ -80,7 +80,7 @@ export default function ClaudePicksPage() {
           <Badge className="bg-blue-500/20 text-blue-400 border-blue-400/30">AI Research</Badge>
         </div>
         <p className="text-muted-foreground text-sm">
-          עסקאות שנחקרו ידנית ב-{CLAUDE_PICKS[0].checkedAt} — כולל בדיקת סטטוס שוק בזמן אמת
+          Manually researched on {CLAUDE_PICKS[0].checkedAt} — including real-time market status check
         </p>
       </div>
 
@@ -141,7 +141,7 @@ export default function ClaudePicksPage() {
 
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div className="bg-muted/30 rounded-lg px-3 py-2">
-                    <p className="text-[10px] text-muted-foreground">מחיר</p>
+                    <p className="text-[10px] text-muted-foreground">Price</p>
                     <p className="font-semibold">{formatCurrency(price)}</p>
                   </div>
                   <div className="bg-muted/30 rounded-lg px-3 py-2">
@@ -163,7 +163,7 @@ export default function ClaudePicksPage() {
                 </div>
 
                 <Link to={`/deals/${deal.id}`} className="flex items-center gap-2 text-sm text-blue-400 hover:text-blue-300 transition-colors font-medium">
-                  <ExternalLink className="w-4 h-4" /> פתח ניתוח מלא
+                  <ExternalLink className="w-4 h-4" /> Open Full Analysis
                 </Link>
               </CardContent>
             </Card>

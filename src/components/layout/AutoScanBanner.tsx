@@ -60,15 +60,15 @@ export function AutoScanBanner() {
           <Mail className="h-4 w-4 text-primary" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium leading-tight">יש מיילים חדשים לסרוק</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">לסרוק ולנתח עסקאות חדשות?</p>
+          <p className="text-sm font-medium leading-tight">New emails to scan</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Scan and analyze for new deals?</p>
           <div className="mt-2 flex gap-2">
             <Button size="sm" className="h-7 text-xs px-3" onClick={handleScan} disabled={starting}>
               {starting ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
-              כן, סרוק
+              Scan now
             </Button>
             <Button size="sm" variant="ghost" className="h-7 text-xs px-3" onClick={dismiss}>
-              אחר כך
+              Later
             </Button>
           </div>
         </div>

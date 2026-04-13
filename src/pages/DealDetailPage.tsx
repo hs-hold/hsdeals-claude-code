@@ -3471,7 +3471,7 @@ BRRRR STRATEGY:
                       {deal.source === 'email' && (deal.senderEmail || deal.gmailThreadId) && (
                         <div className="border-t border-blue-500/20 pt-4 space-y-2">
                           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                            {deal.gmailThreadId ? 'שרשור מייל' : 'שלח מייל למוכר'}
+                            {deal.gmailThreadId ? 'Email Thread' : 'Send Email to Seller'}
                           </p>
                           <EmailThreadChat deal={deal} />
                         </div>

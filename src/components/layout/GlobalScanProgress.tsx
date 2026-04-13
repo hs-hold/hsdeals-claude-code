@@ -17,9 +17,9 @@ export function GlobalScanProgress() {
   const progress = totalToAnalyze > 0 ? ((doneCount + errorCount) / totalToAnalyze) * 100 : 0;
 
   const phaseLabel =
-    phase === 'syncing'   ? 'סורק מיילים...' :
-    phase === 'analyzing' ? `מנתח עסקה ${currentIndex + 1} מתוך ${totalToAnalyze}...` :
-    phase === 'done'      ? `הושלם — ${doneCount} עסקאות נותחו` :
+    phase === 'syncing'   ? 'Scanning emails...' :
+    phase === 'analyzing' ? `Analyzing deal ${currentIndex + 1} of ${totalToAnalyze}...` :
+    phase === 'done'      ? `Done — ${doneCount} deals analyzed` :
     '';
 
   const currentAddress = phase === 'analyzing' && analyzedDeals[currentIndex]
@@ -77,15 +77,15 @@ export function GlobalScanProgress() {
             {phase === 'syncing' && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Mail className="h-3.5 w-3.5" />
-                <span>מחפש מיילים חדשים...</span>
+                <span>Fetching new emails...</span>
               </div>
             )}
 
             {/* Done summary */}
             {phase === 'done' && analyzedDeals.length > 0 && (
               <div className="flex gap-3 text-xs">
-                <span className="text-emerald-400">{doneCount} הצליחו</span>
-                {errorCount > 0 && <span className="text-destructive">{errorCount} נכשלו</span>}
+                <span className="text-emerald-400">{doneCount} succeeded</span>
+                {errorCount > 0 && <span className="text-destructive">{errorCount} failed</span>}
               </div>
             )}
 
@@ -97,7 +97,7 @@ export function GlobalScanProgress() {
                 className={cn("h-7 w-full text-xs border-destructive/40 text-destructive hover:bg-destructive/10")}
                 onClick={stop}
               >
-                עצור
+                Stop
               </Button>
             )}
           </div>
