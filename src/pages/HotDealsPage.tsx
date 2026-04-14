@@ -13,7 +13,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Flame, DollarSign, Inbox, Calendar, CalendarDays, Star, CheckSquare, Square, ChevronDown, X } from 'lucide-react';
+import { Flame, DollarSign, Inbox, Calendar, CalendarDays, Star, CheckSquare, Square, ChevronDown, X, Filter, Check } from 'lucide-react';
 import { Deal, DealStatus, DEAL_STATUS_CONFIG } from '@/types/deal';
 
 const MAX_PRICE = 300000;
@@ -216,39 +216,39 @@ export default function HotDealsPage() {
         <DealAgeFilter value={ageFilter} onChange={setAgeFilter} />
       </div>
 
-      {/* Status Filter */}
-      {presentStatuses.length > 1 && (
-        <div className="flex flex-wrap gap-2 items-center">
-          <span className="text-xs text-muted-foreground">Status:</span>
-          <button
-            onClick={() => setStatusFilter('all')}
-            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors border ${
-              statusFilter === 'all'
-                ? 'bg-primary text-primary-foreground border-primary'
-                : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
-            }`}
-          >
-            All ({hotDeals.length})
-          </button>
-          {presentStatuses.map(st => {
-            const count = hotDeals.filter(d => d.deal.status === st).length;
-            const cfg = DEAL_STATUS_CONFIG[st];
-            return (
-              <button
-                key={st}
-                onClick={() => setStatusFilter(st === statusFilter ? 'all' : st)}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors border ${
-                  statusFilter === st
-                    ? `${cfg.color} border-current`
-                    : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
-                }`}
-              >
-                {cfg.label} ({count})
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {/* Status Filter Dropdown */}
+      <div className="flex flex-wrap items-center gap-3">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-2 h-8 text-sm">
+              <Filter className="w-3.5 h-3.5" />
+              {statusFilter === 'all' ? 'All Statuses' : DEAL_STATUS_CONFIG[statusFilter].label}
+              <ChevronDown className="w-3.5 h-3.5 opacity-60" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-48">
+            <DropdownMenuItem onClick={() => setStatusFilter('all')} className="gap-2">
+              {statusFilter === 'all' && <Check className="w-3.5 h-3.5 text-primary" />}
+              <span className={statusFilter !== 'all' ? 'pl-5' : ''}>All Statuses</span>
+            </DropdownMenuItem>
+            {presentStatuses.map(st => {
+              const count = hotDeals.filter(d => d.deal.status === st).length;
+              const cfg = DEAL_STATUS_CONFIG[st];
+              return (
+                <DropdownMenuItem key={st} onClick={() => setStatusFilter(st)} className="gap-2 justify-between">
+                  <div className="flex items-center gap-2">
+                    {statusFilter === st
+                      ? <Check className="w-3.5 h-3.5 text-primary shrink-0" />
+                      : <span className="w-3.5" />}
+                    {cfg.label}
+                  </div>
+                  <span className="text-xs text-muted-foreground">{count}</span>
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
       {/* Stats + Select All */}
       <div className="flex items-center gap-2 flex-wrap">
