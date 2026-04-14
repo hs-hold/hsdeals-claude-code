@@ -216,8 +216,30 @@ export default function HotDealsPage() {
         <DealAgeFilter value={ageFilter} onChange={setAgeFilter} />
       </div>
 
-      {/* Status Filter Dropdown */}
-      <div className="flex flex-wrap items-center gap-3">
+      {/* Status Filter */}
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Quick pills for New & Offer Sent */}
+        {(['new', 'offer_sent'] as DealStatus[]).map(st => {
+          const count = hotDeals.filter(d => d.deal.status === st).length;
+          if (count === 0) return null;
+          const isActive = statusFilter === st;
+          return (
+            <button
+              key={st}
+              onClick={() => setStatusFilter(isActive ? 'all' : st)}
+              className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                isActive
+                  ? st === 'new'
+                    ? 'bg-primary/20 text-primary border-primary/50'
+                    : 'bg-purple-500/20 text-purple-400 border-purple-500/50'
+                  : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground'
+              }`}
+            >
+              {DEAL_STATUS_CONFIG[st].label} {count}
+            </button>
+          );
+        })}
+
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" className="gap-2 h-8 text-sm">
