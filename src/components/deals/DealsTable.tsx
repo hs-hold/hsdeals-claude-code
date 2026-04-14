@@ -79,6 +79,25 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
     }
   };
 
+  // Returns missing fields for deals from email or that went through DealBeast
+  const getMissingFields = (deal: Deal): string[] => {
+    const isEmail = deal.source === 'email';
+    const wentThroughDealBeast = !!(deal.apiData?.grade || deal.apiData?.rawResponse);
+    if (!isEmail && !wentThroughDealBeast) return [];
+
+    const missing: string[] = [];
+    const arv = deal.overrides?.arv ?? deal.apiData?.arv;
+    const price = deal.overrides?.purchasePrice ?? deal.apiData?.purchasePrice;
+    const rent = deal.overrides?.rent ?? deal.apiData?.rent;
+
+    if (!arv || arv === 0) missing.push('ARV');
+    if (!price || price === 0) missing.push('Price');
+    if (!rent || rent === 0) missing.push('Rent');
+    if (!deal.apiData?.bedrooms) missing.push('Beds');
+    if (!deal.apiData?.sqft) missing.push('Sqft');
+    return missing;
+  };
+
   const handleMarkNotRelevant = async (dealId: string) => {
     setMarkingNotRelevantId(dealId);
     try {
@@ -335,6 +354,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
               <TableHead className="w-[120px]">
                 <SortHeader field="status">Status</SortHeader>
               </TableHead>
+              <TableHead className="w-[90px] text-center text-xs text-muted-foreground">Missing</TableHead>
               <TableHead className="text-right">
                 <SortHeader field="arv">ARV</SortHeader>
               </TableHead>
@@ -358,7 +378,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
           <TableBody>
             {filteredAndSorted.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
+                <TableCell colSpan={11} className="h-32 text-center text-muted-foreground">
                   No deals found
                 </TableCell>
               </TableRow>
@@ -435,6 +455,21 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                     </TableCell>
                     <TableCell>
                       <DealStatusBadge status={deal.status} />
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {(() => {
+                        const missing = getMissingFields(deal);
+                        if (missing.length === 0) return null;
+                        return (
+                          <div className="flex flex-wrap gap-0.5 justify-center">
+                            {missing.map(field => (
+                              <span key={field} className="px-1 py-0.5 rounded text-[10px] font-medium bg-red-500/15 text-red-400 border border-red-500/20">
+                                {field}
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell className="text-right font-medium">
                       <span className={cn(hasSuspiciousArv && "text-orange-500 font-bold")}>
