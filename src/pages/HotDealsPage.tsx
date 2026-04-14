@@ -228,21 +228,27 @@ export default function HotDealsPage() {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-48">
             <DropdownMenuItem onClick={() => setStatusFilter('all')} className="gap-2">
-              {statusFilter === 'all' && <Check className="w-3.5 h-3.5 text-primary" />}
-              <span className={statusFilter !== 'all' ? 'pl-5' : ''}>All Statuses</span>
+              {statusFilter === 'all'
+                ? <Check className="w-3.5 h-3.5 text-primary shrink-0" />
+                : <span className="w-3.5 shrink-0" />}
+              All Statuses
             </DropdownMenuItem>
-            {presentStatuses.map(st => {
+            {FILTERABLE_STATUSES.map(st => {
               const count = hotDeals.filter(d => d.deal.status === st).length;
-              const cfg = DEAL_STATUS_CONFIG[st];
               return (
-                <DropdownMenuItem key={st} onClick={() => setStatusFilter(st)} className="gap-2 justify-between">
+                <DropdownMenuItem
+                  key={st}
+                  onClick={() => setStatusFilter(st)}
+                  className="gap-2 justify-between"
+                  disabled={count === 0}
+                >
                   <div className="flex items-center gap-2">
                     {statusFilter === st
                       ? <Check className="w-3.5 h-3.5 text-primary shrink-0" />
-                      : <span className="w-3.5" />}
-                    {cfg.label}
+                      : <span className="w-3.5 shrink-0" />}
+                    {DEAL_STATUS_CONFIG[st].label}
                   </div>
-                  <span className="text-xs text-muted-foreground">{count}</span>
+                  {count > 0 && <span className="text-xs text-muted-foreground">{count}</span>}
                 </DropdownMenuItem>
               );
             })}
