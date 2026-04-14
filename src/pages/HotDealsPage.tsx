@@ -6,11 +6,15 @@ import { DealAgeFilter, AgeFilterType, applyDealAgeFilter } from '@/components/d
 import { formatCurrency, getEffectiveMonthlyInsurance } from '@/utils/financialCalculations';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { DealStatusBadge } from '@/components/deals/DealStatusBadge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Flame, DollarSign, Inbox, Calendar, CalendarDays, Star } from 'lucide-react';
-import { Deal } from '@/types/deal';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Flame, DollarSign, Inbox, Calendar, CalendarDays, Star, CheckSquare, Square, ChevronDown, X } from 'lucide-react';
+import { Deal, DealStatus, DEAL_STATUS_CONFIG } from '@/types/deal';
 
 const MAX_PRICE = 300000;
 
@@ -22,12 +26,8 @@ function calculateFlipScore(deal: Deal, loanDefaults: any) {
   const purchasePrice = deal.overrides?.purchasePrice ?? apiData.purchasePrice ?? 0;
   if (purchasePrice > MAX_PRICE || purchasePrice <= 0) return null;
 
-  // Use validated ARV from financials (cross-checked against comps), then fall back to raw API ARV.
-  // User ARV overrides always take priority.
   const arv = deal.overrides?.arv ?? financials.arv ?? apiData.arv ?? 0;
 
-  // Include layout rehab (target bedroom/bathroom additions) so this matches the
-  // full rehabCost shown on the deal detail page.
   const baseRehabCost = deal.overrides?.rehabCost ?? apiData.rehabCost ?? 0;
   const bedroomsAdded = deal.overrides?.targetBedrooms != null
     ? Math.max(0, deal.overrides.targetBedrooms - (apiData.bedrooms ?? 0))
@@ -75,21 +75,26 @@ const filterConfig: Record<FilterType, { label: string; icon: typeof Flame; desc
   top: { label: 'Top Rated', icon: Star, description: 'Elite deals with flip score 9/10+' },
 };
 
+// Statuses that can appear in Hot Deals (non-buyable are already filtered)
+const FILTERABLE_STATUSES: DealStatus[] = ['new', 'under_analysis', 'qualified', 'offer_sent', 'under_contract'];
+
 export default function HotDealsPage() {
-  const { deals, isLoading } = useDeals();
+  const { deals, isLoading, updateDealStatus } = useDeals();
   const { settings } = useSettings();
   const loanDefaults = settings.loanDefaults;
   const [searchParams, setSearchParams] = useSearchParams();
   const [ageFilter, setAgeFilter] = useState<AgeFilterType>('month');
+  const [statusFilter, setStatusFilter] = useState<DealStatus | 'all'>('all');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const filter = (searchParams.get('filter') as FilterType) || 'all';
 
   const hotDeals = useMemo(() => {
     const NON_BUYABLE = ['not_relevant', 'filtered_out', 'closed', 'under_contract', 'pending_other'];
     const activeDeals = deals.filter(d => !NON_BUYABLE.includes(d.status));
-    
+
     const minScore = filter === 'top' ? 9 : 8;
-    
+
     const now = new Date();
     const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -98,8 +103,7 @@ export default function HotDealsPage() {
       .map(deal => {
         const result = calculateFlipScore(deal, loanDefaults);
         if (!result || result.score < minScore) return null;
-        
-        // Time filter
+
         if (filter === 'today') {
           const created = new Date(deal.createdAt);
           if (created < oneDayAgo) return null;
@@ -107,13 +111,12 @@ export default function HotDealsPage() {
           const created = new Date(deal.createdAt);
           if (created < oneWeekAgo) return null;
         }
-        
+
         return { deal, ...result };
       })
       .filter(Boolean)
       .sort((a, b) => b!.score - a!.score || b!.flipRoi - a!.flipRoi)
       .filter(item => {
-        // Apply age filter: pass the deal for filtering
         const filtered = applyDealAgeFilter([item!.deal], ageFilter);
         return filtered.length > 0;
       }) as {
@@ -128,12 +131,44 @@ export default function HotDealsPage() {
       }[];
   }, [deals, loanDefaults, filter, ageFilter]);
 
+  // Statuses actually present in results
+  const presentStatuses = useMemo(() => {
+    const s = new Set(hotDeals.map(d => d.deal.status));
+    return FILTERABLE_STATUSES.filter(st => s.has(st));
+  }, [hotDeals]);
+
+  // Apply status filter
+  const filteredDeals = useMemo(() => {
+    if (statusFilter === 'all') return hotDeals;
+    return hotDeals.filter(d => d.deal.status === statusFilter);
+  }, [hotDeals, statusFilter]);
+
   const handleFilterChange = (value: string) => {
-    if (value === 'all') {
-      setSearchParams({});
-    } else {
-      setSearchParams({ filter: value });
-    }
+    if (value === 'all') setSearchParams({});
+    else setSearchParams({ filter: value });
+    setSelectedIds(new Set());
+  };
+
+  const toggleSelect = (id: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    setSelectedIds(new Set(filteredDeals.map(d => d.deal.id)));
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const bulkUpdateStatus = async (status: DealStatus) => {
+    await Promise.all([...selectedIds].map(id => updateDealStatus(id, status)));
+    clearSelection();
   };
 
   const config = filterConfig[filter];
@@ -150,7 +185,7 @@ export default function HotDealsPage() {
   }
 
   return (
-    <div className="p-4 md:p-6 space-y-6 animate-fade-in">
+    <div className="p-4 md:p-6 space-y-6 animate-fade-in pb-24">
       {/* Header */}
       <div>
         <div className="flex items-center gap-3 mb-1">
@@ -160,130 +195,230 @@ export default function HotDealsPage() {
         <p className="text-muted-foreground">{config.description}</p>
       </div>
 
-
       {/* Filter Tabs + Age Filter */}
       <div className="flex flex-wrap items-center gap-3">
-      <Tabs value={filter} onValueChange={handleFilterChange}>
-        <TabsList>
-          <TabsTrigger value="all" className="gap-1.5">
-            <Flame className="w-3.5 h-3.5" /> All
-          </TabsTrigger>
-          <TabsTrigger value="today" className="gap-1.5">
-            <Calendar className="w-3.5 h-3.5" /> Today
-          </TabsTrigger>
-          <TabsTrigger value="week" className="gap-1.5">
-            <CalendarDays className="w-3.5 h-3.5" /> Week
-          </TabsTrigger>
-          <TabsTrigger value="top" className="gap-1.5">
-            <Star className="w-3.5 h-3.5" /> Top (9+)
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
-      <DealAgeFilter value={ageFilter} onChange={setAgeFilter} />
+        <Tabs value={filter} onValueChange={handleFilterChange}>
+          <TabsList>
+            <TabsTrigger value="all" className="gap-1.5">
+              <Flame className="w-3.5 h-3.5" /> All
+            </TabsTrigger>
+            <TabsTrigger value="today" className="gap-1.5">
+              <Calendar className="w-3.5 h-3.5" /> Today
+            </TabsTrigger>
+            <TabsTrigger value="week" className="gap-1.5">
+              <CalendarDays className="w-3.5 h-3.5" /> Week
+            </TabsTrigger>
+            <TabsTrigger value="top" className="gap-1.5">
+              <Star className="w-3.5 h-3.5" /> Top (9+)
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <DealAgeFilter value={ageFilter} onChange={setAgeFilter} />
       </div>
 
-      {/* Stats */}
-      <div className="flex gap-2">
+      {/* Status Filter */}
+      {presentStatuses.length > 1 && (
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-xs text-muted-foreground">Status:</span>
+          <button
+            onClick={() => setStatusFilter('all')}
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors border ${
+              statusFilter === 'all'
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
+            }`}
+          >
+            All ({hotDeals.length})
+          </button>
+          {presentStatuses.map(st => {
+            const count = hotDeals.filter(d => d.deal.status === st).length;
+            const cfg = DEAL_STATUS_CONFIG[st];
+            return (
+              <button
+                key={st}
+                onClick={() => setStatusFilter(st === statusFilter ? 'all' : st)}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors border ${
+                  statusFilter === st
+                    ? `${cfg.color} border-current`
+                    : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
+                }`}
+              >
+                {cfg.label} ({count})
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Stats + Select All */}
+      <div className="flex items-center gap-2 flex-wrap">
         <Badge variant="outline" className="text-orange-400 border-orange-400/40">
           Min Score: {filter === 'top' ? '9/10' : '8/10'}
         </Badge>
         <Badge variant="outline" className="text-muted-foreground">
-          {hotDeals.length} deal{hotDeals.length !== 1 ? 's' : ''} found
+          {filteredDeals.length} deal{filteredDeals.length !== 1 ? 's' : ''} found
         </Badge>
+        {filteredDeals.length > 0 && (
+          <button
+            onClick={selectedIds.size === filteredDeals.length ? clearSelection : selectAll}
+            className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {selectedIds.size === filteredDeals.length
+              ? <CheckSquare className="w-3.5 h-3.5" />
+              : <Square className="w-3.5 h-3.5" />}
+            {selectedIds.size === filteredDeals.length ? 'Deselect all' : 'Select all'}
+          </button>
+        )}
       </div>
 
       {/* Results */}
-      {hotDeals.length === 0 ? (
+      {filteredDeals.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
             <Inbox className="w-16 h-16 text-muted-foreground/30 mb-4" />
             <h3 className="text-lg font-semibold text-muted-foreground mb-1">
-              No hot deals {filter !== 'all' ? `for "${config.label}"` : 'yet'}
+              No hot deals {filter !== 'all' ? `for "${config.label}"` : statusFilter !== 'all' ? `with status "${DEAL_STATUS_CONFIG[statusFilter].label}"` : 'yet'}
             </h3>
             <p className="text-sm text-muted-foreground/70 max-w-sm">
-              {filter === 'today' 
+              {filter === 'today'
                 ? 'No deals with score 8+ were added in the last 24 hours.'
                 : filter === 'week'
                   ? 'No deals with score 8+ were added in the last 7 days.'
                   : filter === 'top'
                     ? 'No deals with score 9+ found. Try the "All" tab for 8+ deals.'
-                    : 'Sync your email to import deals, then analyze them. Deals under $300K with flip ROI ≥ 18% will appear here.'}
+                    : statusFilter !== 'all'
+                      ? 'Try removing the status filter to see all hot deals.'
+                      : 'Sync your email to import deals, then analyze them. Deals under $300K with flip ROI ≥ 18% will appear here.'}
             </p>
           </CardContent>
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {hotDeals.map(({ deal, score, flipRoi, netProfit, purchasePrice, arv, rehabCost }) => (
-            <Link key={deal.id} to={`/deals/${deal.id}`} className="group">
-              <Card className="border-orange-500/20 hover:border-orange-500/50 transition-all duration-200 hover:shadow-lg hover:shadow-orange-500/5">
-                <CardContent className="p-4 space-y-3">
-                  {/* Top row: score + status */}
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className={`
-                        flex items-center justify-center w-10 h-10 rounded-lg font-bold text-lg
-                        ${score === 10 
-                          ? 'bg-green-500/20 text-green-400' 
-                          : score === 9 
-                            ? 'bg-orange-500/20 text-orange-400' 
-                            : 'bg-yellow-500/20 text-yellow-400'}
-                      `}>
-                        {score}
+          {filteredDeals.map(({ deal, score, flipRoi, netProfit, purchasePrice, arv, rehabCost }) => {
+            const isSelected = selectedIds.has(deal.id);
+            return (
+              <div key={deal.id} className="relative group">
+                {/* Checkbox overlay */}
+                <button
+                  onClick={(e) => toggleSelect(deal.id, e)}
+                  className={`absolute top-3 left-3 z-10 transition-opacity ${
+                    isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                  }`}
+                  title={isSelected ? 'Deselect' : 'Select'}
+                >
+                  {isSelected
+                    ? <CheckSquare className="w-4 h-4 text-primary drop-shadow" />
+                    : <Square className="w-4 h-4 text-muted-foreground drop-shadow" />}
+                </button>
+
+                <Link to={`/deals/${deal.id}`}>
+                  <Card className={`transition-all duration-200 hover:shadow-lg ${
+                    isSelected
+                      ? 'border-primary/60 bg-primary/5 shadow-primary/10'
+                      : 'border-orange-500/20 hover:border-orange-500/50 hover:shadow-orange-500/5'
+                  }`}>
+                    <CardContent className="p-4 space-y-3">
+                      {/* Top row: score + status */}
+                      <div className="flex items-start justify-between pl-5">
+                        <div className="flex items-center gap-2">
+                          <div className={`
+                            flex items-center justify-center w-10 h-10 rounded-lg font-bold text-lg
+                            ${score === 10
+                              ? 'bg-green-500/20 text-green-400'
+                              : score === 9
+                                ? 'bg-orange-500/20 text-orange-400'
+                                : 'bg-yellow-500/20 text-yellow-400'}
+                          `}>
+                            {score}
+                          </div>
+                          <div>
+                            <span className="text-xs text-muted-foreground">Flip Score</span>
+                            <p className="text-xs font-semibold text-orange-400">{flipRoi.toFixed(1)}% ROI</p>
+                          </div>
+                        </div>
+                        <DealStatusBadge status={deal.status} />
                       </div>
+
+                      {/* Address */}
                       <div>
-                        <span className="text-xs text-muted-foreground">Flip Score</span>
-                        <p className="text-xs font-semibold text-orange-400">{flipRoi.toFixed(1)}% ROI</p>
+                        <p className="font-semibold text-sm group-hover:text-orange-400 transition-colors truncate">
+                          {deal.address.street}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {deal.address.city}, {deal.address.state} {deal.address.zip}
+                        </p>
                       </div>
-                    </div>
-                    <DealStatusBadge status={deal.status} />
-                  </div>
 
-                  {/* Address */}
-                  <div>
-                    <p className="font-semibold text-sm group-hover:text-orange-400 transition-colors truncate">
-                      {deal.address.street}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {deal.address.city}, {deal.address.state} {deal.address.zip}
-                    </p>
-                  </div>
+                      {/* Metrics */}
+                      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/50">
+                        <div>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Purchase</p>
+                          <p className="text-sm font-semibold">{formatCurrency(purchasePrice)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">ARV</p>
+                          <p className="text-sm font-semibold text-green-400">{formatCurrency(arv)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Rehab</p>
+                          <p className="text-sm font-semibold text-yellow-400">{formatCurrency(rehabCost)}</p>
+                        </div>
+                      </div>
 
-                  {/* Metrics */}
-                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/50">
-                    <div>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Purchase</p>
-                      <p className="text-sm font-semibold">{formatCurrency(purchasePrice)}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">ARV</p>
-                      <p className="text-sm font-semibold text-green-400">{formatCurrency(arv)}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Rehab</p>
-                      <p className="text-sm font-semibold text-yellow-400">{formatCurrency(rehabCost)}</p>
-                    </div>
-                  </div>
+                      {/* Net Profit */}
+                      <div className="flex items-center justify-between bg-muted/30 rounded-lg px-3 py-2">
+                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                          <DollarSign className="w-3 h-3" /> Net Profit
+                        </span>
+                        <span className={`text-sm font-bold ${netProfit >= 50000 ? 'text-green-400' : netProfit >= 25000 ? 'text-orange-400' : 'text-yellow-400'}`}>
+                          {formatCurrency(netProfit)}
+                        </span>
+                      </div>
 
-                  {/* Net Profit */}
-                  <div className="flex items-center justify-between bg-muted/30 rounded-lg px-3 py-2">
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">
-                      <DollarSign className="w-3 h-3" /> Net Profit
-                    </span>
-                    <span className={`text-sm font-bold ${netProfit >= 50000 ? 'text-green-400' : netProfit >= 25000 ? 'text-orange-400' : 'text-yellow-400'}`}>
-                      {formatCurrency(netProfit)}
-                    </span>
-                  </div>
+                      {/* Source */}
+                      {deal.senderName && (
+                        <p className="text-[10px] text-muted-foreground truncate">
+                          From: {deal.senderName}
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                </Link>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
-                  {/* Source / Sender info */}
-                  {deal.senderName && (
-                    <p className="text-[10px] text-muted-foreground truncate">
-                      From: {deal.senderName}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
+      {/* Bulk Action Bar */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-background border border-border rounded-2xl shadow-2xl px-4 py-3 animate-in slide-in-from-bottom-4 fade-in duration-200">
+          <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">
+            {selectedIds.size} selected
+          </span>
+          <div className="w-px h-5 bg-border" />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline" className="gap-1.5 h-8">
+                Change Status <ChevronDown className="w-3.5 h-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="center" side="top">
+              {(Object.entries(DEAL_STATUS_CONFIG) as [DealStatus, { label: string; color: string }][]).map(([st, cfg]) => (
+                <DropdownMenuItem key={st} onClick={() => bulkUpdateStatus(st)}>
+                  <span className={`w-2 h-2 rounded-full mr-2 ${cfg.color.split(' ')[0]}`} />
+                  {cfg.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <button
+            onClick={clearSelection}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            title="Clear selection"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
     </div>
