@@ -37,57 +37,60 @@ export function useGmailAuth() {
 
   // Handle OAuth callback
   useEffect(() => {
-    const handleCallback = async () => {
-      const urlParams = new URLSearchParams(window.location.search);
-      const code = urlParams.get('code');
-      
-      if (code && !tokens && !localStorage.getItem(STORAGE_KEY)) {
-        setIsLoading(true);
-        try {
-          const redirectUri = window.location.origin;
-          
-          const { data, error } = await supabase.functions.invoke('gmail-exchange-token', {
-            body: { code, redirect_uri: redirectUri }
-          });
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    if (!code || localStorage.getItem(STORAGE_KEY)) return;
 
-          if (error) throw error;
-          
-          if (data.success && data.access_token) {
-            const newTokens: GmailTokens = {
-              access_token: data.access_token,
-              refresh_token: data.refresh_token,
-              expires_at: Date.now() + (data.expires_in * 1000),
-            };
-            
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(newTokens));
-            setTokens(newTokens);
-            setIsConnected(true);
-            
-            toast({
-              title: "Gmail Connected",
-              description: "Successfully connected to your Gmail account",
-            });
-            
-            // Clean up URL
-            window.history.replaceState({}, document.title, window.location.pathname);
-          } else {
-            throw new Error(data.error || 'Failed to connect');
-          }
-        } catch (error) {
-          console.error('OAuth callback error:', error);
+    // Clean up URL immediately so re-renders don't retrigger
+    window.history.replaceState({}, document.title, window.location.pathname);
+
+    const handleCallback = async () => {
+      setIsLoading(true);
+      try {
+        const redirectUri = window.location.origin;
+
+        const { data, error } = await supabase.functions.invoke('gmail-exchange-token', {
+          body: { code, redirect_uri: redirectUri }
+        });
+
+        if (error) throw error;
+
+        if (data.success && data.access_token) {
+          const newTokens: GmailTokens = {
+            access_token: data.access_token,
+            refresh_token: data.refresh_token,
+            expires_at: Date.now() + (data.expires_in * 1000),
+          };
+
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(newTokens));
+          setTokens(newTokens);
+          setIsConnected(true);
+
+          // Clear banner session flag so it shows after fresh connect
+          sessionStorage.removeItem('auto_scan_offered');
+
           toast({
-            title: "Connection Failed",
-            description: error instanceof Error ? error.message : "Failed to connect Gmail",
-            variant: "destructive",
+            title: "Gmail Connected",
+            description: "Successfully connected to your Gmail account",
           });
-        } finally {
-          setIsLoading(false);
+        } else {
+          throw new Error(data.error || 'Failed to connect');
         }
+      } catch (error) {
+        console.error('OAuth callback error:', error);
+        toast({
+          title: "Connection Failed",
+          description: error instanceof Error ? error.message : "Failed to connect Gmail",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
       }
     };
 
     handleCallback();
-  }, [toast, tokens]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const connect = useCallback(async () => {
     setIsLoading(true);
@@ -150,6 +153,8 @@ export function useGmailAuth() {
                         localStorage.setItem(STORAGE_KEY, JSON.stringify(newTokens));
                         setTokens(newTokens);
                         setIsConnected(true);
+                        // Clear banner session flag so it shows after fresh connect
+                        sessionStorage.removeItem('auto_scan_offered');
                         toast({ title: "Gmail Connected", description: "Successfully connected to your Gmail account" });
                       } else {
                         throw new Error(tokenData.error || 'Failed to connect');
