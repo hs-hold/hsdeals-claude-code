@@ -3957,7 +3957,21 @@ BRRRR STRATEGY:
               
               const rehabCost = baseRehabCost + layoutRehabCost;
               const arv = liveFinancials?.arv ?? (baseArv + layoutArvIncrease);
-              
+
+              // No ARV — can't analyze
+              if (arv === 0) {
+                return (
+                  <Card className="border border-amber-500/30 bg-amber-500/5">
+                    <CardContent className="p-4 flex items-center gap-3">
+                      <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                      <p className="text-sm text-amber-300">
+                        לא ניתן לנתח את העסקה ללא ARV. יש להזין ערך ARV כדי לראות את הניתוח וציוני האסטרטגיה.
+                      </p>
+                    </CardContent>
+                  </Card>
+                );
+              }
+
               // Holding costs calculation
               const propertyTaxMonthly = localOverrides.propertyTaxMonthly 
                 ? parseFloat(localOverrides.propertyTaxMonthly) 
@@ -4404,7 +4418,7 @@ BRRRR STRATEGY:
             })()}
 
             {/* Analysis Sections Container - uses CSS flexbox order for dynamic reordering */}
-            <div className="flex flex-col gap-6">
+            {arv > 0 ? <div className="flex flex-col gap-6">
             
             {/* ========================================== */}
             {/* FLIP ANALYSIS - order controlled by settings.analysisViewsOrder */}
@@ -6453,7 +6467,7 @@ Best regards`;
                 </Dialog>
               );
             })()}
-            </div>
+            </div> : null}
 
           </>
         );
