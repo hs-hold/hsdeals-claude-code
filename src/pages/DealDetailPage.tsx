@@ -105,6 +105,7 @@ import { FlipAnalysisCard } from '@/components/deals/FlipAnalysisCard'; // updat
 import { ExpansionAnalysisCard } from '@/components/deals/ExpansionAnalysisCard';
 import { RentalAnalysisCard } from '@/components/deals/RentalAnalysisCard';
 import { BrrrrAnalysisCard } from '@/components/deals/BrrrrAnalysisCard';
+import { AdvancedCompsAnalysis } from '@/components/deals/AdvancedCompsAnalysis';
 import { DealInvestorsManager } from '@/components/deals/DealInvestorsManager';
 import { ZipMarketCard } from '@/components/deals/ZipMarketCard';
 import { useDealMessages } from '@/hooks/useDealMessages';
@@ -6337,8 +6338,14 @@ BRRRR STRATEGY:
                   </CardHeader>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
-                  <CardContent className="p-4 pt-0">
-                    {/* Content will be added */}
+                  <CardContent className="p-3 pt-2">
+                    <AdvancedCompsAnalysis
+                      deal={deal}
+                      apiData={apiData}
+                      onSaveComps={(comps) => {
+                        updateDealOverrides(deal.id, { ...deal.overrides, compPrecisionComps: comps } as any);
+                      }}
+                    />
                   </CardContent>
                 </CollapsibleContent>
               </Card>
