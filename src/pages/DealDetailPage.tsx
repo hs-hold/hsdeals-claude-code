@@ -6330,7 +6330,7 @@ BRRRR STRATEGY:
                     <CardTitle className="text-sm flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <BarChart2 className="w-4 h-4 text-blue-400" />
-                        <span className="text-blue-400">ניתוח קומפס מתקדם</span>
+                        <span className="text-blue-400">Advanced Comps Analysis</span>
                       </div>
                       <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform", advancedCompsOpen && "rotate-180")} />
                     </CardTitle>
@@ -6338,7 +6338,7 @@ BRRRR STRATEGY:
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <CardContent className="p-4 pt-0">
-                    {/* תוכן יתווסף בהמשך */}
+                    {/* Content will be added */}
                   </CardContent>
                 </CollapsibleContent>
               </Card>
