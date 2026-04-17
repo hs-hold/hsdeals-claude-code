@@ -70,7 +70,8 @@ import {
   Lock,
   Unlock,
   RefreshCw,
-  ShieldAlert
+  ShieldAlert,
+  BarChart2
 } from 'lucide-react';
 import { ZillowIcon } from '@/components/icons/ZillowIcon';
 import { generateDealPDF } from '@/utils/pdfExport';
@@ -227,6 +228,7 @@ export default function DealDetailPage() {
   const [expansionAnalysisOpen, setExpansionAnalysisOpen] = useState(false);
   const [rentalAnalysisOpen, setRentalAnalysisOpen] = useState(false);
   const [brrrrAnalysisOpen, setBrrrrAnalysisOpen] = useState(false);
+  const [advancedCompsOpen, setAdvancedCompsOpen] = useState(false);
   const [saleCompsOpen, setSaleCompsOpen] = useState(false);
   const [rentCompsOpen, setRentCompsOpen] = useState(false);
   const [moreInfoOpen, setMoreInfoOpen] = useState(false);
@@ -6478,6 +6480,28 @@ Best regards`;
           </CardContent>
         </Card>
       )}
+
+      {/* Advanced Comps Analysis */}
+      <Collapsible open={advancedCompsOpen} onOpenChange={setAdvancedCompsOpen}>
+        <Card className="border-blue-500/30 bg-card/50">
+          <CollapsibleTrigger asChild>
+            <CardHeader className="py-3 cursor-pointer hover:bg-muted/30 transition-colors">
+              <CardTitle className="text-sm flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <BarChart2 className="w-4 h-4 text-blue-400" />
+                  <span className="text-blue-400">ניתוח קומפס מתקדם</span>
+                </div>
+                <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform", advancedCompsOpen && "rotate-180")} />
+              </CardTitle>
+            </CardHeader>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <CardContent className="p-4 pt-0">
+              {/* תוכן יתווסף בהמשך */}
+            </CardContent>
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
 
       {/* More Info - Collapsible section for comps and property details */}
       <Collapsible open={moreInfoOpen} onOpenChange={setMoreInfoOpen}>
