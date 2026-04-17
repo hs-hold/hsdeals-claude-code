@@ -106,6 +106,7 @@ import { ExpansionAnalysisCard } from '@/components/deals/ExpansionAnalysisCard'
 import { RentalAnalysisCard } from '@/components/deals/RentalAnalysisCard';
 import { BrrrrAnalysisCard } from '@/components/deals/BrrrrAnalysisCard';
 import { AdvancedCompsAnalysis } from '@/components/deals/AdvancedCompsAnalysis';
+import { RehabEstimator } from '@/components/deals/RehabEstimator';
 import { DealInvestorsManager } from '@/components/deals/DealInvestorsManager';
 import { ZipMarketCard } from '@/components/deals/ZipMarketCard';
 import { useDealMessages } from '@/hooks/useDealMessages';
@@ -3781,6 +3782,14 @@ BRRRR STRATEGY:
                       </p>
                     )}
                   </div>
+
+                  {/* Rehab Estimator */}
+                  <RehabEstimator
+                    sqft={apiData.sqft}
+                    onApply={(value) => {
+                      handleOverrideChange('rehabCost', Math.round(value).toString());
+                    }}
+                  />
 
                   {/* PPSQFT Calculations */}
                   <div className="col-span-full flex items-center gap-4 mt-2 pt-2 border-t border-border/50">
