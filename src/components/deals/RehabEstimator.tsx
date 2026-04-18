@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Wrench, Plus, Minus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
 // ── Rehab rates ($/sqft) — tweak these to change underwriting assumptions ──
@@ -28,8 +29,9 @@ interface RehabEstimatorProps {
 export function RehabEstimator({ sqft, onApply }: RehabEstimatorProps) {
   const [level, setLevel] = useState<RehabLevel>('cosmetic_full');
   const [bigTickets, setBigTickets] = useState(0);
+  const [sqftOverride, setSqftOverride] = useState('');
 
-  const effectiveSqft = sqft ?? 0;
+  const effectiveSqft = sqftOverride ? parseInt(sqftOverride) || 0 : (sqft ?? 0);
   const rate = REHAB_RATES[level];
   const calculated = useMemo(
     () => effectiveSqft * rate + bigTickets * BIG_TICKET_COST,
@@ -87,6 +89,20 @@ export function RehabEstimator({ sqft, onApply }: RehabEstimatorProps) {
         </div>
       </div>
 
+      {/* Sqft input (shown when sqft is missing) */}
+      {(sqft == null || sqft === 0) && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-muted-foreground">Sqft:</span>
+          <Input
+            type="number"
+            value={sqftOverride}
+            onChange={e => setSqftOverride(e.target.value)}
+            placeholder="Enter sqft"
+            className="h-5 text-[10px] px-1.5 w-20 border-amber-500/30"
+          />
+        </div>
+      )}
+
       {/* Formula line */}
       <div className="text-[10px] text-muted-foreground/70 leading-snug">
         {formatNum(effectiveSqft)} sqft × ${rate}
@@ -103,7 +119,7 @@ export function RehabEstimator({ sqft, onApply }: RehabEstimatorProps) {
           variant="outline"
           className="h-6 text-[10px] px-2 border-amber-500/40 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
           onClick={() => onApply(calculated)}
-          disabled={effectiveSqft === 0}
+          disabled={calculated === 0}
         >
           Apply to Rehab
         </Button>

@@ -104,6 +104,10 @@ export default function HotDealsPage() {
         const result = calculateFlipScore(deal, loanDefaults);
         if (!result || result.score < minScore) return null;
 
+        // Sqft filter: 1200–1800 sqft only
+        const sqft = deal.apiData?.sqft ?? 0;
+        if (sqft < 1200 || sqft > 1800) return null;
+
         if (filter === 'today') {
           const created = new Date(deal.createdAt);
           if (created < oneDayAgo) return null;

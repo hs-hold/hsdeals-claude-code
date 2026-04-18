@@ -233,6 +233,7 @@ export default function DealDetailPage() {
   const [advancedCompsOpen, setAdvancedCompsOpen] = useState(false);
   const [saleCompsOpen, setSaleCompsOpen] = useState(false);
   const [rentCompsOpen, setRentCompsOpen] = useState(false);
+  const [hiddenCompAddresses, setHiddenCompAddresses] = useState<Set<string>>(new Set());
   const [moreInfoOpen, setMoreInfoOpen] = useState(false);
   const [hmlFeesDetailOpen, setHmlFeesDetailOpen] = useState(false);
   const [hmlCashToCloseOpen, setHmlCashToCloseOpen] = useState(false);
@@ -3954,9 +3955,8 @@ BRRRR STRATEGY:
               // Get current effective values (same logic as main section)
               const purchasePrice = localOverrides.purchasePrice ? parseFloat(localOverrides.purchasePrice) : (apiData?.purchasePrice ?? 0);
               const baseRehabCost = localOverrides.rehabCost ? parseFloat(localOverrides.rehabCost) : (apiData?.rehabCost ?? 0);
-              const baseArv = localOverrides.arv ? parseFloat(localOverrides.arv) : (apiData?.arv ?? 0);
               const rent = liveFinancials?.monthlyGrossRent ?? 0;
-              
+
               // Layout adjustments
               const currentBedrooms = apiData?.bedrooms ?? 0;
               const currentBathrooms = apiData?.bathrooms ?? 0;
@@ -3965,10 +3965,9 @@ BRRRR STRATEGY:
               const bedroomsAdded = Math.max(0, targetBedrooms - currentBedrooms);
               const bathroomsAdded = Math.max(0, targetBathrooms - currentBathrooms);
               const layoutRehabCost = (bedroomsAdded * 20000) + (bathroomsAdded * 15000);
-              const layoutArvIncrease = (bedroomsAdded * 30000) + (bathroomsAdded * 20000);
               
               const rehabCost = baseRehabCost + layoutRehabCost;
-              const arv = liveFinancials?.arv ?? (baseArv + layoutArvIncrease);
+              // arv comes from the enclosing IIFE (validateArvAgainstComps result) — do NOT shadow with liveFinancials.arv
               
               // Holding costs calculation
               const propertyTaxMonthly = localOverrides.propertyTaxMonthly 
@@ -4432,12 +4431,12 @@ BRRRR STRATEGY:
                         {!flipAnalysisOpen && (
                           <div className="flex items-center gap-3 ml-2 text-xs">
                             <span className="text-muted-foreground">Profit:</span>
-                            <span className={cn("font-bold", flipNetProfit >= 30000 ? "text-emerald-400" : flipNetProfit >= 0 ? "text-amber-400" : "text-red-400")}>
-                              {formatCurrency(flipNetProfit)}
+                            <span className={cn("font-bold", netProfitFlip >= 30000 ? "text-emerald-400" : netProfitFlip >= 0 ? "text-amber-400" : "text-red-400")}>
+                              {formatCurrency(netProfitFlip)}
                             </span>
                             <span className="text-muted-foreground">ROI:</span>
-                            <span className={cn("font-bold", flipRoi >= 25 ? "text-emerald-400" : flipRoi >= 15 ? "text-amber-400" : "text-red-400")}>
-                              {flipRoi.toFixed(1)}%
+                            <span className={cn("font-bold", roiFlip * 100 >= 25 ? "text-emerald-400" : roiFlip * 100 >= 15 ? "text-amber-400" : "text-red-400")}>
+                              {(roiFlip * 100).toFixed(1)}%
                             </span>
                           </div>
                         )}
@@ -6737,15 +6736,32 @@ Best regards`;
                       {recentSoldComps.length > 0 ? (
                         recentSoldComps.map((comp, idx) => {
                           const isExactMatch = comp.bedrooms === targetBed && comp.bathrooms === targetBath;
+                          const compNum = idx + 1;
+                          const isHidden = hiddenCompAddresses.has(comp.address);
                           return (
                             <div key={idx} className={cn(
                               "p-3 rounded-lg border",
-                              isExactMatch 
-                                ? "bg-success/5 border-success/20" 
+                              isExactMatch
+                                ? "bg-success/5 border-success/20"
                                 : "bg-muted/30 border-muted-foreground/20"
                             )}>
                               <div className="flex justify-between items-start mb-2">
                                 <div className="flex items-center gap-2">
+                                  <span
+                                    className={cn(
+                                      "inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold shrink-0 cursor-pointer select-none border",
+                                      isHidden
+                                        ? "bg-muted/30 border-muted-foreground/30 text-muted-foreground"
+                                        : "bg-amber-500 border-amber-400 text-white"
+                                    )}
+                                    title={isHidden ? "Show on map" : "Hide from map"}
+                                    onClick={() => setHiddenCompAddresses(prev => {
+                                      const next = new Set(prev);
+                                      if (next.has(comp.address)) next.delete(comp.address);
+                                      else next.add(comp.address);
+                                      return next;
+                                    })}
+                                  >{compNum}</span>
                                   <span className="font-medium text-sm">{comp.address}</span>
                                   {!isExactMatch && (
                                     <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 text-muted-foreground border-muted-foreground/30">
@@ -6811,6 +6827,8 @@ Best regards`;
                           <CollapsibleContent className="space-y-3 pt-3">
                             {olderSoldComps.map((comp, idx) => {
                               const isExactMatch = comp.bedrooms === targetBed && comp.bathrooms === targetBath;
+                              const compNum = recentSoldComps.length + idx + 1;
+                              const isHidden = hiddenCompAddresses.has(comp.address);
                               return (
                                 <div key={idx} className={cn(
                                   "p-3 rounded-lg border",
@@ -6818,6 +6836,21 @@ Best regards`;
                                 )}>
                                   <div className="flex justify-between items-start mb-2">
                                     <div className="flex items-center gap-2">
+                                      <span
+                                        className={cn(
+                                          "inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold shrink-0 cursor-pointer select-none border",
+                                          isHidden
+                                            ? "bg-muted/30 border-muted-foreground/30 text-muted-foreground"
+                                            : "bg-amber-500/60 border-amber-400/50 text-white"
+                                        )}
+                                        title={isHidden ? "Show on map" : "Hide from map"}
+                                        onClick={() => setHiddenCompAddresses(prev => {
+                                          const next = new Set(prev);
+                                          if (next.has(comp.address)) next.delete(comp.address);
+                                          else next.add(comp.address);
+                                          return next;
+                                        })}
+                                      >{compNum}</span>
                                       <span className="font-medium text-sm text-muted-foreground">{comp.address}</span>
                                       {!isExactMatch && (
                                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 text-muted-foreground border-muted-foreground/30">
@@ -7210,10 +7243,40 @@ Best regards`;
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <PropertyMap 
-                  latitude={apiData.latitude} 
-                  longitude={apiData.longitude} 
+                <PropertyMap
+                  latitude={apiData.latitude}
+                  longitude={apiData.longitude}
                   address={deal.address.full}
+                  comps={(() => {
+                    if (!apiData.saleComps?.length) return undefined;
+                    const targetBed = localOverrides.targetBedrooms ? parseInt(localOverrides.targetBedrooms) : (apiData.bedrooms ?? 0);
+                    const targetBath = localOverrides.targetBathrooms ? parseInt(localOverrides.targetBathrooms) : (apiData.bathrooms ?? 0);
+                    const now = new Date();
+                    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+                    const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+                    const filterLayout = (c: typeof apiData.saleComps[0]) =>
+                      Math.abs((c.bedrooms || 0) - targetBed) <= 1 && Math.abs((c.bathrooms || 0) - targetBath) <= 1;
+                    const sortComps = (arr: typeof apiData.saleComps) =>
+                      [...arr].sort((a, b) => {
+                        const aExact = a.bedrooms === targetBed && a.bathrooms === targetBath;
+                        const bExact = b.bedrooms === targetBed && b.bathrooms === targetBath;
+                        if (aExact !== bExact) return aExact ? -1 : 1;
+                        return b.salePrice - a.salePrice;
+                      });
+                    const allSold = apiData.saleComps.filter(c => c.saleDate).filter(filterLayout);
+                    const recent = sortComps(allSold.filter(c => new Date(c.saleDate) >= sixMonthsAgo)).slice(0, 8);
+                    const older = sortComps(allSold.filter(c => new Date(c.saleDate) < sixMonthsAgo && new Date(c.saleDate) >= oneYearAgo)).slice(0, 8);
+                    return [...recent, ...older]
+                      .filter(c => !hiddenCompAddresses.has(c.address))
+                      .map(c => ({
+                        address: c.address,
+                        salePrice: c.salePrice,
+                        bedrooms: c.bedrooms,
+                        bathrooms: c.bathrooms,
+                        sqft: c.sqft,
+                        distance: c.distance,
+                      }));
+                  })()}
                 />
               </CardContent>
             </Card>
