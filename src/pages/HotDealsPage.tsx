@@ -26,7 +26,8 @@ function calculateFlipScore(deal: Deal, loanDefaults: any) {
   const purchasePrice = deal.overrides?.purchasePrice ?? apiData.purchasePrice ?? 0;
   if (purchasePrice > MAX_PRICE || purchasePrice <= 0) return null;
 
-  const arv = deal.overrides?.arv ?? financials.arv ?? apiData.arv ?? 0;
+  // Use apiData.arv (not financials.arv) — financials.arv is inflated by calculateArvFromRecentComps
+  const arv = deal.overrides?.arv ?? apiData.arv ?? 0;
 
   const baseRehabCost = deal.overrides?.rehabCost ?? apiData.rehabCost ?? 0;
   const bedroomsAdded = deal.overrides?.targetBedrooms != null
@@ -103,6 +104,10 @@ export default function HotDealsPage() {
       .map(deal => {
         const result = calculateFlipScore(deal, loanDefaults);
         if (!result || result.score < minScore) return null;
+
+        // Sqft filter: 1200–1800 sqft only
+        const sqft = deal.apiData?.sqft ?? 0;
+        if (sqft < 1200 || sqft > 1800) return null;
 
         if (filter === 'today') {
           const created = new Date(deal.createdAt);

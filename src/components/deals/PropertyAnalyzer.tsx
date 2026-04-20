@@ -288,17 +288,19 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
         const dealNumber = extractStreetNumber(deal.address_street || deal.address_full);
         if (dealNumber !== inputNumber) continue;
 
-        // 1. ZIP match (most reliable — same street number + ZIP = same property)
         const dealZip = deal.address_zip || extractZip(deal.address_full);
-        if (inputZip && dealZip && inputZip === dealZip) {
-          return { exists: true, dealId: deal.id, addressFull: deal.address_full, updatedAt: deal.updated_at, status: deal.status };
-        }
-
-        // 2. Normalized street name starts with the same word (fallback when ZIP missing)
         const dealNorm = normalizeStreetName(deal.address_street || deal.address_full);
         const inputFirstWord = inputNorm.split(' ')[1] || ''; // word after house number
         const dealFirstWord  = dealNorm.split(' ')[1]  || '';
-        if (inputFirstWord.length >= 4 && dealFirstWord.length >= 4 && inputFirstWord === dealFirstWord) {
+        const streetNameMatches = inputFirstWord.length >= 3 && dealFirstWord.length >= 3 && inputFirstWord === dealFirstWord;
+
+        // 1. ZIP + street name match (most reliable)
+        if (inputZip && dealZip && inputZip === dealZip && streetNameMatches) {
+          return { exists: true, dealId: deal.id, addressFull: deal.address_full, updatedAt: deal.updated_at, status: deal.status };
+        }
+
+        // 2. Street name match only (fallback when ZIP missing)
+        if (!inputZip && !dealZip && streetNameMatches) {
           return { exists: true, dealId: deal.id, addressFull: deal.address_full, updatedAt: deal.updated_at, status: deal.status };
         }
       }

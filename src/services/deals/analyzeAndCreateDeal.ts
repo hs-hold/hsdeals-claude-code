@@ -184,6 +184,28 @@ function mapToDealApiData(analysis: PropertyAnalysis, property?: PropertyData): 
   };
 }
 
+async function updateDealInDb(id: string, analysisData: PropertyAnalysis, propertyData?: PropertyData, scoutAiData?: Record<string, any>): Promise<string | null> {
+  try {
+    const apiData = mapToDealApiData(analysisData, propertyData);
+    const financials = calculateFinancials(apiData, defaultOverrides);
+    const { error } = await supabase
+      .from('deals')
+      .update({
+        api_data: apiData,
+        financials,
+        scout_ai_data: scoutAiData || null,
+        analyzed_at: new Date().toISOString(),
+        status: 'new',
+      })
+      .eq('id', id);
+    if (error) { console.error('Error updating deal:', error); return null; }
+    return id;
+  } catch (err) {
+    console.error('Error:', err);
+    return null;
+  }
+}
+
 async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: PropertyData, scoutAiData?: Record<string, any>): Promise<string | null> {
   try {
     const addressParts = analysisData.address?.split(',').map((s) => s.trim()) || [];
@@ -233,16 +255,27 @@ async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: Prope
 
 export async function analyzeAndCreateDeal(address: string, scoutAiData?: Record<string, any>): Promise<{ dealId: string | null; error?: string; alreadyExists?: boolean }> {
   try {
-    // Dedup check — skip if this address was already analyzed
+    // Dedup check — skip only if this address was already analyzed
     const { data: existing } = await supabase
       .from('deals')
-      .select('id')
+      .select('id, api_data')
       .ilike('address_full', address.trim())
       .limit(1)
       .maybeSingle();
 
     if (existing?.id) {
-      return { dealId: existing.id, alreadyExists: true };
+      const existingApiData = existing.api_data || {};
+      const alreadyAnalyzed = !!(
+        existingApiData.arv ||
+        existingApiData.purchasePrice ||
+        existingApiData.grade ||
+        existingApiData.aiSummary ||
+        (existingApiData.rawResponse && Object.keys(existingApiData.rawResponse).length > 0)
+      );
+      if (alreadyAnalyzed) {
+        return { dealId: existing.id, alreadyExists: true };
+      }
+      // Existing deal is not analyzed — fall through to re-analyze and update it
     }
 
     const { data, error } = await supabase.functions.invoke('analyze-property', {
@@ -262,7 +295,10 @@ export async function analyzeAndCreateDeal(address: string, scoutAiData?: Record
       return { dealId: null, error: apiResponse?.error || 'Analysis failed' };
     }
 
-    const dealId = await saveDealToDb(apiResponse.data.analysis, apiResponse.data.property, scoutAiData);
+    // If an unanalyzed deal exists, update it instead of inserting a duplicate
+    const dealId = existing?.id
+      ? await updateDealInDb(existing.id, apiResponse.data.analysis, apiResponse.data.property, scoutAiData)
+      : await saveDealToDb(apiResponse.data.analysis, apiResponse.data.property, scoutAiData);
     if (!dealId) return { dealId: null, error: 'Property analyzed but failed to save' };
 
     return { dealId };

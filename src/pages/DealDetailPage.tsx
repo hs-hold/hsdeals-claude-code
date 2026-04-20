@@ -70,7 +70,8 @@ import {
   Lock,
   Unlock,
   RefreshCw,
-  ShieldAlert
+  ShieldAlert,
+  BarChart2
 } from 'lucide-react';
 import { ZillowIcon } from '@/components/icons/ZillowIcon';
 import { generateDealPDF } from '@/utils/pdfExport';
@@ -104,6 +105,8 @@ import { FlipAnalysisCard } from '@/components/deals/FlipAnalysisCard'; // updat
 import { ExpansionAnalysisCard } from '@/components/deals/ExpansionAnalysisCard';
 import { RentalAnalysisCard } from '@/components/deals/RentalAnalysisCard';
 import { BrrrrAnalysisCard } from '@/components/deals/BrrrrAnalysisCard';
+import { AdvancedCompsAnalysis } from '@/components/deals/AdvancedCompsAnalysis';
+import { RehabEstimator } from '@/components/deals/RehabEstimator';
 import { DealInvestorsManager } from '@/components/deals/DealInvestorsManager';
 import { ZipMarketCard } from '@/components/deals/ZipMarketCard';
 import { useDealMessages } from '@/hooks/useDealMessages';
@@ -227,8 +230,10 @@ export default function DealDetailPage() {
   const [expansionAnalysisOpen, setExpansionAnalysisOpen] = useState(false);
   const [rentalAnalysisOpen, setRentalAnalysisOpen] = useState(false);
   const [brrrrAnalysisOpen, setBrrrrAnalysisOpen] = useState(false);
+  const [advancedCompsOpen, setAdvancedCompsOpen] = useState(false);
   const [saleCompsOpen, setSaleCompsOpen] = useState(false);
   const [rentCompsOpen, setRentCompsOpen] = useState(false);
+  const [hiddenCompAddresses, setHiddenCompAddresses] = useState<Set<string>>(new Set());
   const [moreInfoOpen, setMoreInfoOpen] = useState(false);
   const [hmlFeesDetailOpen, setHmlFeesDetailOpen] = useState(false);
   const [hmlCashToCloseOpen, setHmlCashToCloseOpen] = useState(false);
@@ -3779,6 +3784,14 @@ BRRRR STRATEGY:
                     )}
                   </div>
 
+                  {/* Rehab Estimator */}
+                  <RehabEstimator
+                    sqft={apiData.sqft}
+                    onApply={(value) => {
+                      handleOverrideChange('rehabCost', Math.round(value).toString());
+                    }}
+                  />
+
                   {/* PPSQFT Calculations */}
                   <div className="col-span-full flex items-center gap-4 mt-2 pt-2 border-t border-border/50">
                     <div className="flex items-center gap-1.5">
@@ -3942,9 +3955,8 @@ BRRRR STRATEGY:
               // Get current effective values (same logic as main section)
               const purchasePrice = localOverrides.purchasePrice ? parseFloat(localOverrides.purchasePrice) : (apiData?.purchasePrice ?? 0);
               const baseRehabCost = localOverrides.rehabCost ? parseFloat(localOverrides.rehabCost) : (apiData?.rehabCost ?? 0);
-              const baseArv = localOverrides.arv ? parseFloat(localOverrides.arv) : (apiData?.arv ?? 0);
               const rent = liveFinancials?.monthlyGrossRent ?? 0;
-              
+
               // Layout adjustments
               const currentBedrooms = apiData?.bedrooms ?? 0;
               const currentBathrooms = apiData?.bathrooms ?? 0;
@@ -3953,10 +3965,9 @@ BRRRR STRATEGY:
               const bedroomsAdded = Math.max(0, targetBedrooms - currentBedrooms);
               const bathroomsAdded = Math.max(0, targetBathrooms - currentBathrooms);
               const layoutRehabCost = (bedroomsAdded * 20000) + (bathroomsAdded * 15000);
-              const layoutArvIncrease = (bedroomsAdded * 30000) + (bathroomsAdded * 20000);
               
               const rehabCost = baseRehabCost + layoutRehabCost;
-              const arv = liveFinancials?.arv ?? (baseArv + layoutArvIncrease);
+              // arv comes from the enclosing IIFE (validateArvAgainstComps result) — do NOT shadow with liveFinancials.arv
               
               // Holding costs calculation
               const propertyTaxMonthly = localOverrides.propertyTaxMonthly 
@@ -3974,26 +3985,9 @@ BRRRR STRATEGY:
                 : loanDefaults.holdingMonths;
               const totalHoldingCosts = monthlyHoldingCost * flipRehabMonths;
               
-              // FLIP metrics (Cash deal)
-              const flipClosingPercent = localOverrides.closingCostsPercent
-                ? parseFloat(localOverrides.closingCostsPercent) / 100 
-                : loanDefaults.closingCostsPercent / 100;
-              const flipContingencyPercent = localOverrides.contingencyPercent 
-                ? parseFloat(localOverrides.contingencyPercent) / 100 
-                : loanDefaults.contingencyPercent / 100;
-              const flipAgentPercent = localOverrides.agentCommissionPercent 
-                ? parseFloat(localOverrides.agentCommissionPercent) / 100 
-                : loanDefaults.agentCommissionPercent / 100;
-              const flipClosingCostsBuy = localOverrides.closingCostsDollar 
-                ? parseFloat(localOverrides.closingCostsDollar)
-                : purchasePrice * flipClosingPercent;
-              const flipRehabContingency = rehabCost * flipContingencyPercent;
-              const flipTotalInvestment = purchasePrice + flipClosingCostsBuy + rehabCost + flipRehabContingency + (totalHoldingCosts || 0);
-              const flipAgentCommission = arv * flipAgentPercent;
-              const scoreNotaryFee = localOverrides.notaryFees ? parseFloat(localOverrides.notaryFees) : FINANCIAL_CONFIG.notaryFeePerSigning;
-              const scoreTitleFee = localOverrides.titleFees ? parseFloat(localOverrides.titleFees) : FINANCIAL_CONFIG.titleFees;
-              const flipNetProfit = arv - flipTotalInvestment - flipAgentCommission - (scoreNotaryFee * 2) - scoreTitleFee;
-              const flipRoi = flipTotalInvestment > 0 ? (flipNetProfit / flipTotalInvestment) * 100 : 0;
+              // FLIP metrics — reuse the large IIFE's netProfitFlip/roiFlip so Best Strategy matches Flip Analysis exactly
+              const flipNetProfit = netProfitFlip;
+              const flipRoi = roiFlip * 100;
               
               // RENTAL metrics
               const rentalMonthlyCashflow = liveFinancials?.monthlyCashflow ?? 0;
@@ -4062,19 +4056,19 @@ BRRRR STRATEGY:
                   netProfitWarning: flipNetProfit < 25000,
                   netProfitSuccess: flipNetProfit >= 50000,
                   // Flip score 1-10 based on ROI % (cash deal, no financing)
-                  // ≤8% = 1, 8-10% = 1-2, 11-12% = 3-4, 13-14% = 5, 15-17% = 6
-                  // 18-20% = 7-8, 20-25% = 9, ≥25% = 10
+                  // <5% = 1, 5-7% = 2, 7-9% = 3, 9-11% = 4, 11-13% = 5, 13-15% = 6
+                  // 15-18% = 7, 18-20% = 8, 20-25% = 9, ≥25% = 10
                   score: (() => {
                     const roi = flipRoi;
                     if (roi >= 25) return 10;
                     if (roi >= 20) return 9;
                     if (roi >= 18) return 8;
-                    if (roi >= 17) return 7; // 18-20% midpoint
-                    if (roi >= 15) return 6;
-                    if (roi >= 13) return 5;
-                    if (roi >= 11) return 4;
-                    if (roi >= 10) return 3; // 11-12% midpoint
-                    if (roi >= 8) return 2;
+                    if (roi >= 15) return 7;
+                    if (roi >= 13) return 6;
+                    if (roi >= 11) return 5;
+                    if (roi >= 9) return 4;
+                    if (roi >= 7) return 3;
+                    if (roi >= 5) return 2;
                     return 1;
                   })(),
                   isProfitable: flipNetProfit > 0,
@@ -4420,12 +4414,12 @@ BRRRR STRATEGY:
                         {!flipAnalysisOpen && (
                           <div className="flex items-center gap-3 ml-2 text-xs">
                             <span className="text-muted-foreground">Profit:</span>
-                            <span className={cn("font-bold", flipNetProfit >= 30000 ? "text-emerald-400" : flipNetProfit >= 0 ? "text-amber-400" : "text-red-400")}>
-                              {formatCurrency(flipNetProfit)}
+                            <span className={cn("font-bold", netProfitFlip >= 30000 ? "text-emerald-400" : netProfitFlip >= 0 ? "text-amber-400" : "text-red-400")}>
+                              {formatCurrency(netProfitFlip)}
                             </span>
                             <span className="text-muted-foreground">ROI:</span>
-                            <span className={cn("font-bold", flipRoi >= 25 ? "text-emerald-400" : flipRoi >= 15 ? "text-amber-400" : "text-red-400")}>
-                              {flipRoi.toFixed(1)}%
+                            <span className={cn("font-bold", roiFlip * 100 >= 25 ? "text-emerald-400" : roiFlip * 100 >= 15 ? "text-amber-400" : "text-red-400")}>
+                              {(roiFlip * 100).toFixed(1)}%
                             </span>
                           </div>
                         )}
@@ -6320,6 +6314,34 @@ BRRRR STRATEGY:
               </Card>
             </Collapsible>
 
+            {/* Advanced Comps Analysis */}
+            <Collapsible open={advancedCompsOpen} onOpenChange={setAdvancedCompsOpen}>
+              <Card className="border-blue-500/30 bg-card/50">
+                <CollapsibleTrigger asChild>
+                  <CardHeader className="py-3 cursor-pointer hover:bg-muted/30 transition-colors">
+                    <CardTitle className="text-sm flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <BarChart2 className="w-4 h-4 text-blue-400" />
+                        <span className="text-blue-400">Advanced Comps Analysis</span>
+                      </div>
+                      <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform", advancedCompsOpen && "rotate-180")} />
+                    </CardTitle>
+                  </CardHeader>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent className="p-3 pt-2">
+                    <AdvancedCompsAnalysis
+                      deal={deal}
+                      apiData={apiData}
+                      onSaveComps={(comps) => {
+                        updateDealOverrides(deal.id, { ...deal.overrides, compPrecisionComps: comps } as any);
+                      }}
+                    />
+                  </CardContent>
+                </CollapsibleContent>
+              </Card>
+            </Collapsible>
+
             {/* ZIP Market Intelligence */}
             {deal.address.zip && (
               <ZipMarketCard
@@ -6697,15 +6719,32 @@ Best regards`;
                       {recentSoldComps.length > 0 ? (
                         recentSoldComps.map((comp, idx) => {
                           const isExactMatch = comp.bedrooms === targetBed && comp.bathrooms === targetBath;
+                          const compNum = idx + 1;
+                          const isHidden = hiddenCompAddresses.has(comp.address);
                           return (
                             <div key={idx} className={cn(
                               "p-3 rounded-lg border",
-                              isExactMatch 
-                                ? "bg-success/5 border-success/20" 
+                              isExactMatch
+                                ? "bg-success/5 border-success/20"
                                 : "bg-muted/30 border-muted-foreground/20"
                             )}>
                               <div className="flex justify-between items-start mb-2">
                                 <div className="flex items-center gap-2">
+                                  <span
+                                    className={cn(
+                                      "inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold shrink-0 cursor-pointer select-none border",
+                                      isHidden
+                                        ? "bg-muted/30 border-muted-foreground/30 text-muted-foreground"
+                                        : "bg-amber-500 border-amber-400 text-white"
+                                    )}
+                                    title={isHidden ? "Show on map" : "Hide from map"}
+                                    onClick={() => setHiddenCompAddresses(prev => {
+                                      const next = new Set(prev);
+                                      if (next.has(comp.address)) next.delete(comp.address);
+                                      else next.add(comp.address);
+                                      return next;
+                                    })}
+                                  >{compNum}</span>
                                   <span className="font-medium text-sm">{comp.address}</span>
                                   {!isExactMatch && (
                                     <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 text-muted-foreground border-muted-foreground/30">
@@ -6771,6 +6810,8 @@ Best regards`;
                           <CollapsibleContent className="space-y-3 pt-3">
                             {olderSoldComps.map((comp, idx) => {
                               const isExactMatch = comp.bedrooms === targetBed && comp.bathrooms === targetBath;
+                              const compNum = recentSoldComps.length + idx + 1;
+                              const isHidden = hiddenCompAddresses.has(comp.address);
                               return (
                                 <div key={idx} className={cn(
                                   "p-3 rounded-lg border",
@@ -6778,6 +6819,21 @@ Best regards`;
                                 )}>
                                   <div className="flex justify-between items-start mb-2">
                                     <div className="flex items-center gap-2">
+                                      <span
+                                        className={cn(
+                                          "inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold shrink-0 cursor-pointer select-none border",
+                                          isHidden
+                                            ? "bg-muted/30 border-muted-foreground/30 text-muted-foreground"
+                                            : "bg-amber-500/60 border-amber-400/50 text-white"
+                                        )}
+                                        title={isHidden ? "Show on map" : "Hide from map"}
+                                        onClick={() => setHiddenCompAddresses(prev => {
+                                          const next = new Set(prev);
+                                          if (next.has(comp.address)) next.delete(comp.address);
+                                          else next.add(comp.address);
+                                          return next;
+                                        })}
+                                      >{compNum}</span>
                                       <span className="font-medium text-sm text-muted-foreground">{comp.address}</span>
                                       {!isExactMatch && (
                                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 text-muted-foreground border-muted-foreground/30">
@@ -7170,10 +7226,40 @@ Best regards`;
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <PropertyMap 
-                  latitude={apiData.latitude} 
-                  longitude={apiData.longitude} 
+                <PropertyMap
+                  latitude={apiData.latitude}
+                  longitude={apiData.longitude}
                   address={deal.address.full}
+                  comps={(() => {
+                    if (!apiData.saleComps?.length) return undefined;
+                    const targetBed = localOverrides.targetBedrooms ? parseInt(localOverrides.targetBedrooms) : (apiData.bedrooms ?? 0);
+                    const targetBath = localOverrides.targetBathrooms ? parseInt(localOverrides.targetBathrooms) : (apiData.bathrooms ?? 0);
+                    const now = new Date();
+                    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+                    const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+                    const filterLayout = (c: typeof apiData.saleComps[0]) =>
+                      Math.abs((c.bedrooms || 0) - targetBed) <= 1 && Math.abs((c.bathrooms || 0) - targetBath) <= 1;
+                    const sortComps = (arr: typeof apiData.saleComps) =>
+                      [...arr].sort((a, b) => {
+                        const aExact = a.bedrooms === targetBed && a.bathrooms === targetBath;
+                        const bExact = b.bedrooms === targetBed && b.bathrooms === targetBath;
+                        if (aExact !== bExact) return aExact ? -1 : 1;
+                        return b.salePrice - a.salePrice;
+                      });
+                    const allSold = apiData.saleComps.filter(c => c.saleDate).filter(filterLayout);
+                    const recent = sortComps(allSold.filter(c => new Date(c.saleDate) >= sixMonthsAgo)).slice(0, 8);
+                    const older = sortComps(allSold.filter(c => new Date(c.saleDate) < sixMonthsAgo && new Date(c.saleDate) >= oneYearAgo)).slice(0, 8);
+                    return [...recent, ...older]
+                      .filter(c => !hiddenCompAddresses.has(c.address))
+                      .map(c => ({
+                        address: c.address,
+                        salePrice: c.salePrice,
+                        bedrooms: c.bedrooms,
+                        bathrooms: c.bathrooms,
+                        sqft: c.sqft,
+                        distance: c.distance,
+                      }));
+                  })()}
                 />
               </CardContent>
             </Card>

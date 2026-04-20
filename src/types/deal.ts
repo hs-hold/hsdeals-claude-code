@@ -45,6 +45,49 @@ export interface SaleComp {
   daysOnMarket?: number | null;
 }
 
+export type CompVerificationStatus = 'verified' | 'needs_review' | 'not_relevant' | 'excluded';
+export type CompSource = 'manual' | 'auto' | 'zillow' | 'api';
+export type CompImportedFrom = 'more_info_recently_sold' | 'manual' | 'address_lookup' | 'zillow_link' | 'api';
+export type CompPropertyStatus = 'sold' | 'active' | 'pending' | 'for_sale' | 'off_market';
+export type CompCategory = 'high_market' | 'low_market_for_sale';
+export type ComparisonToSubject = 'much_inferior' | 'slightly_inferior' | 'similar' | 'slightly_superior' | 'much_superior';
+
+export interface CompPrecisionComp {
+  id: string;
+  dealId: string;
+  source: CompSource;
+  importedFrom: CompImportedFrom;
+  verificationStatus: CompVerificationStatus;
+  isIncludedInArv: boolean;
+  category: CompCategory;
+  address: string;
+  externalUrl?: string;
+  status: CompPropertyStatus;
+  price: number;
+  soldDate?: string;
+  livingAreaSqft?: number;
+  bedrooms?: number;
+  bathrooms?: number;
+  lotSizeSqft?: number;
+  yearBuilt?: number;
+  distanceMiles?: number;
+  compTitle?: string;
+  relevanceNote?: string;
+  notes?: string;
+  similarityScore?: number;
+  comparisonToSubject?: ComparisonToSubject;
+  adjustedPrice?: number;
+  adjustedPpsf?: number;
+  isBestComp?: boolean;
+  createdByUser?: boolean;
+  updatedManually?: boolean;
+  approvedByUser?: boolean;
+  approvedAt?: string;
+  rawPayload?: any;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface PriceHistoryItem {
   date: string;
   price: number;
@@ -189,6 +232,9 @@ export interface DealOverrides {
   rentalUnderwritingFee: number | null;     // Rental underwriting fee (default $750)
   rentalPointsPercent: number | null;       // Rental points % of ARV (default 1%)
   rentalOtherFees: number | null;           // Rental other fees (default $3500)
+  // Comp Precision
+  compPrecisionComps?: CompPrecisionComp[];
+  compPrecisionImportedAt?: string;
 }
 
 export interface DealFinancials {
