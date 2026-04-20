@@ -190,15 +190,24 @@ export function useDealsFromDB() {
         if (!existing) {
           seen.set(key, deal);
         } else {
-          // Prefer the analyzed deal; if both have same analysis state, keep most recent
-          const dealAnalyzed = !!(deal.apiData && Object.keys(deal.apiData).length > 0 &&
-            (deal.apiData.grade || deal.apiData.aiSummary || deal.apiData.rawResponse || (deal.apiData.arv && deal.apiData.arv > 0)));
-          const existingAnalyzed = !!(existing.apiData && Object.keys(existing.apiData).length > 0 &&
-            (existing.apiData.grade || existing.apiData.aiSummary || existing.apiData.rawResponse || (existing.apiData.arv && existing.apiData.arv > 0)));
-          if (dealAnalyzed && !existingAnalyzed) {
-            seen.set(key, deal); // replace unanalyzed with analyzed
+          const ACTIONED = new Set(['not_relevant', 'filtered_out', 'closed', 'offer_sent', 'under_contract', 'purchased']);
+          const dealActioned = ACTIONED.has(deal.status);
+          const existingActioned = ACTIONED.has(existing.status);
+
+          // Always prefer an explicitly actioned status over a passive one (new / under_analysis)
+          if (dealActioned && !existingActioned) {
+            seen.set(key, deal);
+          } else if (!existingActioned) {
+            // Neither is actioned — prefer the analyzed deal
+            const dealAnalyzed = !!(deal.apiData && Object.keys(deal.apiData).length > 0 &&
+              (deal.apiData.grade || deal.apiData.aiSummary || deal.apiData.rawResponse || (deal.apiData.arv && deal.apiData.arv > 0)));
+            const existingAnalyzed = !!(existing.apiData && Object.keys(existing.apiData).length > 0 &&
+              (existing.apiData.grade || existing.apiData.aiSummary || existing.apiData.rawResponse || (existing.apiData.arv && existing.apiData.arv > 0)));
+            if (dealAnalyzed && !existingAnalyzed) {
+              seen.set(key, deal);
+            }
           }
-          // if existing is already analyzed (or both unanalyzed), keep existing (more recent created_at)
+          // if existing is actioned (or both actioned), keep existing
         }
       }
       setDeals(Array.from(seen.values()));

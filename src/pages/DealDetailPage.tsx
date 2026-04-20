@@ -3985,26 +3985,9 @@ BRRRR STRATEGY:
                 : loanDefaults.holdingMonths;
               const totalHoldingCosts = monthlyHoldingCost * flipRehabMonths;
               
-              // FLIP metrics (Cash deal)
-              const flipClosingPercent = localOverrides.closingCostsPercent
-                ? parseFloat(localOverrides.closingCostsPercent) / 100 
-                : loanDefaults.closingCostsPercent / 100;
-              const flipContingencyPercent = localOverrides.contingencyPercent 
-                ? parseFloat(localOverrides.contingencyPercent) / 100 
-                : loanDefaults.contingencyPercent / 100;
-              const flipAgentPercent = localOverrides.agentCommissionPercent 
-                ? parseFloat(localOverrides.agentCommissionPercent) / 100 
-                : loanDefaults.agentCommissionPercent / 100;
-              const flipClosingCostsBuy = localOverrides.closingCostsDollar 
-                ? parseFloat(localOverrides.closingCostsDollar)
-                : purchasePrice * flipClosingPercent;
-              const flipRehabContingency = rehabCost * flipContingencyPercent;
-              const flipTotalInvestment = purchasePrice + flipClosingCostsBuy + rehabCost + flipRehabContingency + (totalHoldingCosts || 0);
-              const flipAgentCommission = arv * flipAgentPercent;
-              const scoreNotaryFee = localOverrides.notaryFees ? parseFloat(localOverrides.notaryFees) : FINANCIAL_CONFIG.notaryFeePerSigning;
-              const scoreTitleFee = localOverrides.titleFees ? parseFloat(localOverrides.titleFees) : FINANCIAL_CONFIG.titleFees;
-              const flipNetProfit = arv - flipTotalInvestment - flipAgentCommission - (scoreNotaryFee * 2) - scoreTitleFee;
-              const flipRoi = flipTotalInvestment > 0 ? (flipNetProfit / flipTotalInvestment) * 100 : 0;
+              // FLIP metrics — reuse the large IIFE's netProfitFlip/roiFlip so Best Strategy matches Flip Analysis exactly
+              const flipNetProfit = netProfitFlip;
+              const flipRoi = roiFlip * 100;
               
               // RENTAL metrics
               const rentalMonthlyCashflow = liveFinancials?.monthlyCashflow ?? 0;
@@ -4073,19 +4056,19 @@ BRRRR STRATEGY:
                   netProfitWarning: flipNetProfit < 25000,
                   netProfitSuccess: flipNetProfit >= 50000,
                   // Flip score 1-10 based on ROI % (cash deal, no financing)
-                  // ≤8% = 1, 8-10% = 1-2, 11-12% = 3-4, 13-14% = 5, 15-17% = 6
-                  // 18-20% = 7-8, 20-25% = 9, ≥25% = 10
+                  // <5% = 1, 5-7% = 2, 7-9% = 3, 9-11% = 4, 11-13% = 5, 13-15% = 6
+                  // 15-18% = 7, 18-20% = 8, 20-25% = 9, ≥25% = 10
                   score: (() => {
                     const roi = flipRoi;
                     if (roi >= 25) return 10;
                     if (roi >= 20) return 9;
                     if (roi >= 18) return 8;
-                    if (roi >= 17) return 7; // 18-20% midpoint
-                    if (roi >= 15) return 6;
-                    if (roi >= 13) return 5;
-                    if (roi >= 11) return 4;
-                    if (roi >= 10) return 3; // 11-12% midpoint
-                    if (roi >= 8) return 2;
+                    if (roi >= 15) return 7;
+                    if (roi >= 13) return 6;
+                    if (roi >= 11) return 5;
+                    if (roi >= 9) return 4;
+                    if (roi >= 7) return 3;
+                    if (roi >= 5) return 2;
                     return 1;
                   })(),
                   isProfitable: flipNetProfit > 0,
