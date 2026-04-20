@@ -3988,6 +3988,10 @@ BRRRR STRATEGY:
               // FLIP metrics — reuse the large IIFE's netProfitFlip/roiFlip so Best Strategy matches Flip Analysis exactly
               const flipNetProfit = netProfitFlip;
               const flipRoi = roiFlip * 100;
+              // Supporting vars still needed by BRRRR section below
+              const flipClosingPercent = localOverrides.closingCostsPercent ? parseFloat(localOverrides.closingCostsPercent) / 100 : loanDefaults.closingCostsPercent / 100;
+              const flipClosingCostsBuy = localOverrides.closingCostsDollar ? parseFloat(localOverrides.closingCostsDollar) : purchasePrice * flipClosingPercent;
+              const scoreNotaryFee = localOverrides.notaryFees ? parseFloat(localOverrides.notaryFees) : FINANCIAL_CONFIG.notaryFeePerSigning;
               
               // RENTAL metrics
               const rentalMonthlyCashflow = liveFinancials?.monthlyCashflow ?? 0;
