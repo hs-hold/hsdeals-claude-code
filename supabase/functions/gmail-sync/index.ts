@@ -482,7 +482,7 @@ RULES:
 - "Total Interior Area", "Second Floor Finished", "First Floor Finished" → sum for sqft if no single total given
 
 For each property, extract:
-- address: Full US address with street, city, state, ZIP (required)
+- address: Full US address with street, city, state, and ZIP if available. ZIP is optional — "123 Main St, Atlanta, GA" is valid. If multiple properties share the same city/state context, apply it to all of them.
 - purchasePrice: Asking/offer/purchase price as plain number (NOT ARV, NOT rehab). e.g. 162000
 - arv: After Repair Value as plain number
 - dealType: Fix & Flip / Wholesale / Buy & Hold / BRRRR / Subject To / Seller Financing / Multifamily / Other / null
@@ -639,6 +639,74 @@ Return { "deals": [] } if no valid US property addresses with street numbers are
   }
 }
 
+/**
+ * Second-pass address extraction: simpler prompt, more aggressive, used when the full
+ * extractDealsWithAI returns 0 results. Returns minimal ExtractedDeal objects (address only).
+ */
+async function extractAddressesSecondPass(emailContent: string, subject: string): Promise<ExtractedDeal[]> {
+  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+  if (!apiKey) return [];
+
+  const prompt = `Look carefully at this email. Does it mention any specific US property address — even without a ZIP code?
+
+Subject: ${subject}
+
+Email (first 3000 chars):
+${emailContent.substring(0, 3000)}
+
+Rules:
+- An address must have a street number AND street name (e.g. "456 Elm St" or "456 Elm Street, Atlanta, GA")
+- ZIP code is optional
+- If you see city/state context (like "Atlanta, GA" or "Clayton County"), apply it to nearby addresses that lack city/state
+- Price mentions like "$175K", "175k", "ARV: $280,000", "Asking: $135,000" help confirm this is a deal email
+- "3/2", "3 bed/2 bath", "3BR/2BA" etc. help confirm this is a property listing
+
+Return JSON ONLY:
+{ "addresses": ["123 Main St, Atlanta, GA 30274", "456 Oak Ave, College Park, GA"] }
+
+If no street-number addresses found: { "addresses": [] }`;
+
+  try {
+    const response = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    const text = data.content?.[0]?.text?.trim() || '';
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return [];
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    const addresses: string[] = Array.isArray(parsed.addresses) ? parsed.addresses : [];
+    console.log(`[secondPass] Found ${addresses.length} addresses:`, addresses);
+
+    return addresses
+      .filter((a: string) => typeof a === 'string' && a.length > 10)
+      .map((a: string) => ({
+        address: a.trim(),
+        purchasePrice: null,
+        dealType: null,
+        extractedData: {},
+        source: 'ai' as const,
+      }));
+  } catch (err) {
+    console.error('[secondPass] error:', err);
+    return [];
+  }
+}
+
 // Mark email as read in Gmail
 async function markEmailAsRead(accessToken: string, messageId: string): Promise<void> {
   try {
@@ -686,7 +754,7 @@ serve(async (req) => {
     const body = await req.json();
     const {
       access_token,
-      max_results = 50,
+      max_results = 200,
       since_days,
       mark_all_read = false,
       include_read = false,
@@ -961,7 +1029,16 @@ serve(async (req) => {
         }
 
         // Extract deals (reuse results from thread-reply scan if available)
-        const extractedDeals = preExtractedDeals ?? await extractDealsWithAI(body, subject);
+        let extractedDeals = preExtractedDeals ?? await extractDealsWithAI(body, subject);
+
+        // Second-pass: if primary extraction found nothing, try a simpler focused prompt
+        if (extractedDeals.length === 0 && preExtractedDeals === null) {
+          console.log(`[secondPass] Primary extraction found 0 — trying second pass for: "${subject}"`);
+          extractedDeals = await extractAddressesSecondPass(body, subject);
+          if (extractedDeals.length > 0) {
+            console.log(`[secondPass] Recovered ${extractedDeals.length} address(es) on second pass`);
+          }
+        }
 
         if (extractedDeals.length === 0) {
           console.log(`No addresses found in: "${subject}" — classifying email type`);
@@ -971,8 +1048,8 @@ serve(async (req) => {
             ea => ea.deal?.sender_email && ea.deal.sender_email.toLowerCase() === senderInfo.email.toLowerCase()
           );
 
-          // If the email body looks like a deal (keywords present), keep it for review
-          const DEAL_KEYWORDS = /\b(arv|flip|rehab|asking\s*price|purchase\s*price|wholesal|off.?market|assignment|emd|earnest|clear\s*title|fixer|beds?\s*\/\s*baths?|bed\s*\/\s*bath|\$\s*\d{2,3}[,k]|price\s*drop|price\s*reduced)\b/i;
+          // Broad keyword check — includes common wholesaler patterns
+          const DEAL_KEYWORDS = /\b(arv|flip|rehab|asking\s*price|purchase\s*price|wholesal|off.?market|assignment|emd|earnest|clear\s*title|fixer|beds?\s*\/\s*baths?|bed\s*\/\s*bath|\$\s*\d{2,3}[,k]|price\s*drop|price\s*reduced|available\s*(now|today)|new\s*(deal|listing|property|home)|deal\s*(alert|available)|sqft|sq\.?\s*ft|square\s*feet|vacant|occupied|single\s*family|multi[\s-]?family|investment\s*propert|rental|buy\s*and\s*hold|fix\s*(and|&|\+)\s*flip|cash\s*buyer|closing\s*cost|under\s*contract|property\s*available|below\s*market)\b/i;
           const looksLikeDeal = DEAL_KEYWORDS.test(body) || DEAL_KEYWORDS.test(subject);
 
           if (isKnownWholesaler || looksLikeDeal) {
