@@ -34,6 +34,7 @@ import {
   ClipboardList,
   BookOpen,
   Activity,
+  BarChart2,
 } from 'lucide-react';
 import {
   Sidebar,
@@ -81,6 +82,7 @@ const hotDealsSubItems = [
 const dealsNavItems = [
   { to: '/new-deals', icon: Inbox, label: 'New Deals' },
   { to: '/potential-deals', icon: TrendingUp, label: 'Potential Off-Market' },
+  { to: '/potential-market-deals', icon: BarChart2, label: 'Potential Market' },
   { to: '/deals', icon: Building2, label: 'Analyzed' },
   { to: '/pipeline', icon: Columns3, label: 'Pipeline' },
   { to: '/closed', icon: CheckCircle2, label: 'Closed' },
