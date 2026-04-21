@@ -59,7 +59,7 @@ export default function PotentialDealsPage() {
   const potentialDeals = useMemo(() => {
     const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     return deals
-      .filter(d => d.source === 'email' && new Date(d.createdAt) >= oneWeekAgo)
+      .filter(d => d.source === 'email' && d.status !== 'not_relevant' && new Date(d.createdAt) >= oneWeekAgo)
       .map(deal => {
         const nums = calcFlipNumbers(deal, loanDefaults);
         if (!nums || nums.netProfit < MIN_PROFIT) return null;
