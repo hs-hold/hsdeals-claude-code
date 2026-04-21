@@ -448,15 +448,17 @@ export default function DealDetailPage() {
     setRejectionReason(deal.rejectionReason || '');
   }, [deal?.updatedAt]);
 
-  // Auto-apply $60k rehab minimum for API deals with no existing override
+  // Auto-apply rehab minimums: $60k for API deals, $80k for email deals
   useEffect(() => {
     if (!deal) return;
-    if (deal.source !== 'api') return;
     if (deal.overrides?.rehabCost != null) return;
-    const apiRehab = deal.apiData?.rehabCost ?? 0;
-    if (apiRehab >= 60_000) return;
-    updateDealOverrides(deal.id, { rehabCost: 60_000 });
-    setLocalOverrides(prev => ({ ...prev, rehabCost: '60000' }));
+    const currentRehab = deal.apiData?.rehabCost ?? 0;
+    let floor = 0;
+    if (deal.source === 'api') floor = 60_000;
+    else if (deal.source === 'email') floor = 80_000;
+    if (floor === 0 || currentRehab >= floor) return;
+    updateDealOverrides(deal.id, { rehabCost: floor });
+    setLocalOverrides(prev => ({ ...prev, rehabCost: floor.toString() }));
   }, [deal?.id]);
 
   const financials = deal?.financials;
@@ -3733,10 +3735,13 @@ BRRRR STRATEGY:
 
                     {(layoutRehabCost > 0 || localOverrides.rehabCost) && (
                       <p className="mt-1 text-[10px] text-muted-foreground flex items-center justify-center gap-1 flex-wrap">
-                        {localOverrides.rehabCost && deal?.source === 'api' && (apiData.rehabCost ?? 0) < 60_000 && localOverrides.rehabCost === '60000' ? (
+                        {localOverrides.rehabCost && (() => {
+                          const floor = deal?.source === 'api' ? 60_000 : deal?.source === 'email' ? 80_000 : 0;
+                          return floor > 0 && (apiData.rehabCost ?? 0) < floor && localOverrides.rehabCost === floor.toString();
+                        })() ? (
                           <>
-                            <span className="text-violet-400">Min $60K</span>
-                            <span>(API: {formatCurrency(apiData.rehabCost ?? 0)})</span>
+                            <span className="text-violet-400">Min {deal?.source === 'email' ? '$80K' : '$60K'}</span>
+                            <span>(original: {formatCurrency(apiData.rehabCost ?? 0)})</span>
                             <button
                               onClick={(e) => { e.stopPropagation(); handleResetOverride('rehabCost'); }}
                               className="p-0.5 rounded hover:bg-muted"
