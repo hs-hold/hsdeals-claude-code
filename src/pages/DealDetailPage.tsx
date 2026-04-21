@@ -108,6 +108,7 @@ import { DealInvestorsManager } from '@/components/deals/DealInvestorsManager';
 import { ZipMarketCard } from '@/components/deals/ZipMarketCard';
 import { useDealMessages } from '@/hooks/useDealMessages';
 import { EmailThreadChat } from '@/components/deals/EmailThreadChat';
+import { OfferEmailDraft } from '@/components/deals/OfferEmailDraft';
 
 export default function DealDetailPage() {
   const { id } = useParams();
@@ -3466,6 +3467,13 @@ BRRRR STRATEGY:
                           </div>
                         );
                       })()}
+
+                      {/* AI Offer Email Draft */}
+                      {deal.source === 'email' && deal.senderEmail && deal.financials && (
+                        <div className="border-t border-blue-500/20 pt-4">
+                          <OfferEmailDraft deal={deal} />
+                        </div>
+                      )}
 
                       {/* Email Thread / Reply */}
                       {deal.source === 'email' && (deal.senderEmail || deal.gmailThreadId) && (

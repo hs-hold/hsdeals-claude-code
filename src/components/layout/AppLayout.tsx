@@ -80,6 +80,7 @@ const hotDealsSubItems = [
 
 const dealsNavItems = [
   { to: '/new-deals', icon: Inbox, label: 'New Deals' },
+  { to: '/potential-deals', icon: TrendingUp, label: 'Potential Off-Market' },
   { to: '/deals', icon: Building2, label: 'Analyzed' },
   { to: '/pipeline', icon: Columns3, label: 'Pipeline' },
   { to: '/closed', icon: CheckCircle2, label: 'Closed' },
