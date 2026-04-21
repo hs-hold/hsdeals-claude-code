@@ -63,7 +63,7 @@ export default function PotentialMarketDealsPage() {
 
   const potentialDeals = useMemo(() => {
     return deals
-      .filter(d => d.source !== 'email')
+      .filter(d => d.source === 'api')
       .map(deal => {
         const nums = calcFlipNumbers(deal, loanDefaults);
         if (!nums || nums.netProfit < nums.minProfit) return null;
