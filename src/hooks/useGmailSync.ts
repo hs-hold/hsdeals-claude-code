@@ -48,7 +48,7 @@ export function useGmailSync() {
   const { toast } = useToast();
 
   const sync = useCallback(async (accessToken: string, options?: SyncOptions): Promise<SyncResult | null> => {
-    const { maxResults = 50, sinceDays, markAllRead = false, includeRead = false, targetState, forceRescan = false } = options || {};
+    const { maxResults = 200, sinceDays, markAllRead = false, includeRead = false, targetState, forceRescan = false } = options || {};
     setIsSyncing(true);
     try {
       const { data, error } = await supabase.functions.invoke('gmail-sync', {

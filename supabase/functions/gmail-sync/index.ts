@@ -965,6 +965,34 @@ serve(async (req) => {
 
         if (extractedDeals.length === 0) {
           console.log(`No addresses found in: "${subject}" — classifying email type`);
+
+          // If this sender has previously sent us deals, never silently discard their email
+          const isKnownWholesaler = state.existingAddresses.some(
+            ea => ea.deal?.sender_email && ea.deal.sender_email.toLowerCase() === senderInfo.email.toLowerCase()
+          );
+
+          // If the email body looks like a deal (keywords present), keep it for review
+          const DEAL_KEYWORDS = /\b(arv|flip|rehab|asking\s*price|purchase\s*price|wholesal|off.?market|assignment|emd|earnest|clear\s*title|fixer|beds?\s*\/\s*baths?|bed\s*\/\s*bath|\$\s*\d{2,3}[,k]|price\s*drop|price\s*reduced)\b/i;
+          const looksLikeDeal = DEAL_KEYWORDS.test(body) || DEAL_KEYWORDS.test(subject);
+
+          if (isKnownWholesaler || looksLikeDeal) {
+            // Don't mark as read — leave for manual review or next sync attempt
+            console.log(`[classify] Looks like deal email (knownWholesaler=${isKnownWholesaler}, keywords=${looksLikeDeal}) — keeping unread for review`);
+            state.syncDetails.push({
+              address: '',
+              action: 'message',
+              senderEmail: senderInfo.email,
+              senderName: senderInfo.name,
+              subject,
+              messageId: msg.id,
+              emailSnippet: snippet,
+              isImportant: true,
+              messagePreview: body.substring(0, 300),
+              reason: isKnownWholesaler ? 'Known wholesaler — no address extracted' : 'Deal keywords found — no address extracted',
+            });
+            return;
+          }
+
           const classification = await classifyNonDealEmail(body, subject, senderInfo.email);
           await markEmailAsRead(access_token, msg.id);
 
