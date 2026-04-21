@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useDeals } from '@/context/DealsContext';
 import { useSettings } from '@/context/SettingsContext';
@@ -7,7 +7,6 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DealStatusBadge } from '@/components/deals/DealStatusBadge';
-import { DealAgeFilter, AgeFilterType, applyDealAgeFilter } from '@/components/deals/DealAgeFilter';
 import { DollarSign, Mail, TrendingUp, Inbox } from 'lucide-react';
 import { Deal } from '@/types/deal';
 
@@ -56,18 +55,17 @@ export default function PotentialDealsPage() {
   const { deals, isLoading } = useDeals();
   const { settings } = useSettings();
   const loanDefaults = settings.loanDefaults;
-  const [ageFilter, setAgeFilter] = useState<AgeFilterType>('month');
 
   const potentialDeals = useMemo(() => {
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     return deals
-      .filter(d => d.source === 'email')
+      .filter(d => d.source === 'email' && new Date(d.createdAt) >= oneWeekAgo)
       .map(deal => {
         const nums = calcFlipNumbers(deal, loanDefaults);
         if (!nums || nums.netProfit < MIN_PROFIT) return null;
         return { deal, ...nums };
       })
       .filter(Boolean)
-      .filter(item => applyDealAgeFilter([item!.deal], ageFilter).length > 0)
       .sort((a, b) => b!.netProfit - a!.netProfit) as {
         deal: Deal;
         netProfit: number;
@@ -103,9 +101,11 @@ export default function PotentialDealsPage() {
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
-        <DealAgeFilter value={ageFilter} onChange={setAgeFilter} />
         <Badge variant="outline" className="text-emerald-400 border-emerald-400/40">
           Min Profit: $30K
+        </Badge>
+        <Badge variant="outline" className="text-blue-400/60 border-blue-400/30">
+          Last 7 days
         </Badge>
         <Badge variant="outline" className="text-muted-foreground">
           {potentialDeals.length} deal{potentialDeals.length !== 1 ? 's' : ''} found
