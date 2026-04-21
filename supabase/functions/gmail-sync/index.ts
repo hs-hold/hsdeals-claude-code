@@ -897,7 +897,9 @@ serve(async (req) => {
 
         // ── Thread reply detection ────────────────────────────────────────────
         // If this email belongs to a thread we already have a deal for, store it
-        // as a reply on that deal instead of creating a new one.
+        // as a reply on that deal. Also check if it introduces a NEW property
+        // (e.g. "that one sold, here's another") — if so, create a new deal too.
+        let preExtractedDeals: ExtractedDeal[] | null = null;
         const existingDealForThread = fullMessage.threadId ? threadIdToDeal.get(fullMessage.threadId) : null;
         if (existingDealForThread && existingDealForThread.gmail_message_id !== msg.id) {
           console.log(`Thread reply detected — deal ${existingDealForThread.id}, thread ${fullMessage.threadId}`);
@@ -920,9 +922,14 @@ serve(async (req) => {
               }).eq('id', existingDealForThread.id);
             }
           }
-          await markEmailAsRead(access_token, msg.id);
+
+          // Check if this reply also contains a NEW property address
+          const replyExtracts = await extractDealsWithAI(body, subject);
+          const existingAddr = existingDealForThread.address_full || '';
+          const newProperties = replyExtracts.filter(d => !addressesMatch(d.address, existingAddr));
+
           state.syncDetails.push({
-            address: existingDealForThread.address_full || '',
+            address: existingAddr,
             action: 'thread_reply',
             existingDealId: existingDealForThread.id,
             senderEmail: senderInfo.email,
@@ -931,7 +938,16 @@ serve(async (req) => {
             messageId: msg.id,
             emailSnippet: snippet,
           });
-          return;
+
+          if (newProperties.length === 0) {
+            // Pure thread reply — no new property to create
+            await markEmailAsRead(access_token, msg.id);
+            return;
+          }
+
+          // New property found in this reply — fall through to deal creation
+          console.log(`Thread reply contains ${newProperties.length} new property deal(s) — processing`);
+          preExtractedDeals = newProperties;
         }
         // ─────────────────────────────────────────────────────────────────────
 
@@ -944,8 +960,8 @@ serve(async (req) => {
           return;
         }
 
-        // Extract deals (AI + regex fallback)
-        const extractedDeals = await extractDealsWithAI(body, subject);
+        // Extract deals (reuse results from thread-reply scan if available)
+        const extractedDeals = preExtractedDeals ?? await extractDealsWithAI(body, subject);
 
         if (extractedDeals.length === 0) {
           console.log(`No addresses found in: "${subject}" — classifying email type`);
