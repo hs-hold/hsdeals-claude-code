@@ -147,7 +147,7 @@ export function useGmailSync() {
     }
   }, [toast]);
 
-  const markUnreadRecent = useCallback(async (accessToken: string, sinceDays = 7): Promise<number> => {
+  const markUnreadRecent = useCallback(async (accessToken: string, sinceDays = 7, maxCount = 200): Promise<number> => {
     setIsMarkingOld(true);
     const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
     const headers = { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
@@ -155,7 +155,7 @@ export function useGmailSync() {
     try {
       // Step 1: list recent inbox messages directly from Gmail API (no edge function)
       const listRes = await fetch(
-        `${GMAIL}/messages?maxResults=200&labelIds=INBOX`,
+        `${GMAIL}/messages?maxResults=${maxCount}&labelIds=INBOX`,
         { headers }
       );
       if (!listRes.ok) {

@@ -790,6 +790,12 @@ export default function EmailSearchPage() {
     await markUnreadRecent(accessToken, 7);
   }, [getValidToken, markUnreadRecent]);
 
+  const handleMarkUnreadLast20 = useCallback(async () => {
+    const accessToken = await getValidToken();
+    if (!accessToken) return;
+    await markUnreadRecent(accessToken, 7, 20);
+  }, [getValidToken, markUnreadRecent]);
+
   // ── Selection ────────────────────────────────────────────────────────────
 
   // actionableItems — all created/updated deals, with OR without dealId
@@ -1047,6 +1053,17 @@ export default function EmailSearchPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="outline" size="sm" onClick={handleMarkUnreadLast20} disabled={isMarkingOld || isSyncing}>
+                  {isMarkingOld ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                  <span className="ml-1.5">Mark Last 20 Unread</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-xs">
+                Marks the last 20 inbox emails as unread so they appear in the next scan.
+              </TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="outline" size="sm" onClick={handleMarkUnreadRecent} disabled={isMarkingOld || isSyncing}>
