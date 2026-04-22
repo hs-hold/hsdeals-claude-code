@@ -521,42 +521,31 @@ export default function MarketScanPage() {
           />
         </div>
 
-        {/* Action bar */}
+        {/* Action bar — one button per stage */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Scan button */}
-          <Button
-            size="sm"
-            variant={stage === 0 ? 'default' : 'outline'}
-            className="h-8 text-xs gap-1.5"
-            onClick={startScan}
-            disabled={scanInProgress || aiRunning || dbRunning}
-          >
-            {scanInProgress ? (
-              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Scanning…</>
-            ) : (
-              <><ScanLine className="w-3.5 h-3.5" /> {stage === 0 ? 'Configure & Scan' : 'Re-scan'}</>
-            )}
-          </Button>
-
-          {/* Re-filter button — applies stricter filter to existing results without rescanning */}
-          {stage >= 2 && results.some(r => !r.zestimate || r.margin < 0.20) && (
+          {/* Stage 0–1: Scan */}
+          {(stage === 0 || stage === 1) && (
             <Button
               size="sm"
-              variant="outline"
-              className="h-8 text-xs gap-1.5 border-violet-500/40 text-violet-400 hover:bg-violet-500/10"
-              onClick={reFilter}
-              disabled={aiRunning || dbRunning || scanInProgress}
+              variant="default"
+              className="h-8 text-xs gap-1.5"
+              onClick={startScan}
+              disabled={scanInProgress || aiRunning || dbRunning}
             >
-              <Filter className="w-3.5 h-3.5" /> Re-filter (no rescan)
+              {scanInProgress ? (
+                <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Scanning…</>
+              ) : (
+                <><ScanLine className="w-3.5 h-3.5" /> Scan</>
+              )}
             </Button>
           )}
 
-          {/* AI screen button */}
-          {stage >= 2 && stage !== 5 && (
+          {/* Stage 2–3: AI Screen */}
+          {(stage === 2 || stage === 3) && (
             <Button
               size="sm"
-              variant={stage === 2 || stage === 6 ? 'default' : 'outline'}
-              className={cn('h-8 text-xs gap-1.5', stage >= 4 && 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30')}
+              variant="default"
+              className="h-8 text-xs gap-1.5"
               onClick={runAiScreen}
               disabled={aiRunning || dbRunning || scanInProgress}
             >
@@ -568,8 +557,8 @@ export default function MarketScanPage() {
             </Button>
           )}
 
-          {/* DealBeast button */}
-          {stage >= 4 && (
+          {/* Stage 4–5: DealBeast */}
+          {(stage === 4 || stage === 5) && (
             <Button
               size="sm"
               className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
@@ -584,15 +573,26 @@ export default function MarketScanPage() {
             </Button>
           )}
 
+          {/* Stage 6: Done — View Deals + Re-scan */}
           {stage === 6 && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 text-xs gap-1.5 text-emerald-400 border-emerald-500/40"
-              onClick={() => navigate('/deals')}
-            >
-              <CheckCircle2 className="w-3.5 h-3.5" /> View Deals
-            </Button>
+            <>
+              <Button
+                size="sm"
+                className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                onClick={() => navigate('/deals')}
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" /> View Deals
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs gap-1.5"
+                onClick={startScan}
+                disabled={scanInProgress}
+              >
+                <ScanLine className="w-3.5 h-3.5" /> Re-scan
+              </Button>
+            </>
           )}
         </div>
 
