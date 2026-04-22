@@ -272,18 +272,6 @@ function AppSidebar() {
               <SidebarGroupLabel>Deals</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {/* New Deals — first item */}
-                  {dealsNavItems.slice(0, 1).map((item) => (
-                    <SidebarMenuItem key={item.to}>
-                      <SidebarMenuButton asChild isActive={location.pathname === item.to} tooltip={item.label}>
-                        <Link to={item.to} onClick={handleNavClick}>
-                          <item.icon className="w-5 h-5" />
-                          <span>{item.label}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
-
                   {/* Hot Deals */}
                   <Collapsible asChild defaultOpen={isHotDealsActive} className="group/collapsible">
                     <SidebarMenuItem>
@@ -311,8 +299,8 @@ function AppSidebar() {
                     </SidebarMenuItem>
                   </Collapsible>
 
-                  {/* Remaining deals items */}
-                  {dealsNavItems.slice(1).map((item) => (
+                  {/* All deals items */}
+                  {dealsNavItems.map((item) => (
                     <SidebarMenuItem key={item.to}>
                       <SidebarMenuButton
                         asChild
