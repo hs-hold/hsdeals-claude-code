@@ -1133,19 +1133,12 @@ serve(async (req) => {
             return;
           }
 
-          const apiKey = Deno.env.get('ANTHROPIC_API_KEY') || '';
-          const { result: extracted, audit } = await extractDealsFromEmail(normalized, apiKey);
-          extractionResult = extracted;
-
-          // Save extraction audit (fire and forget)
-          if (!dry_run) {
-            supabase.from('extraction_audits').insert({
-              message_id: msg.id,
-              raw_response: audit.rawResponse.substring(0, 10000),
-              prompt_tokens_estimate: audit.promptTokensEstimate,
-              created_at: audit.createdAt,
-            }).then(() => {}).catch(() => {});
-          }
+          // Use legacy extraction prompt (proven to work) — new extract.ts is preserved for future use
+          const legacyDeals = await extractDealsWithAI(normalized.combinedContext, normalized.cleanSubject);
+          extractionResult = {
+            email_type: legacyDeals.length > 0 ? 'deal' : 'non_deal',
+            properties: legacyDeals.map(d => legacyToExtractedProperty(d)),
+          };
         }
 
         console.log(`[pipeline] email_type=${extractionResult.email_type} properties=${extractionResult.properties.length}`);
