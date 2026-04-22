@@ -1,5 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { normalizeEmail } from './normalize.ts';
+import { prefilter } from './prefilter.ts';
+import { extractDealsFromEmail } from './extract.ts';
+import { validateAndEnrich } from './validate.ts';
+import { routeProperty } from './route.ts';
+import type { ExtractionResult, ExtractedProperty, ExtractedField } from './types.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -45,7 +51,7 @@ interface GmailMessage {
 
 interface SyncDetails {
   address: string;
-  action: 'created' | 'skipped_duplicate' | 'skipped_portal' | 'skipped_over_budget' | 'skipped_wrong_state' | 'updated_existing' | 'no_address' | 'error' | 'message' | 'skipped_newsletter';
+  action: 'created' | 'skipped_duplicate' | 'skipped_portal' | 'skipped_over_budget' | 'skipped_wrong_state' | 'updated_existing' | 'no_address' | 'error' | 'message' | 'skipped_newsletter' | 'thread_reply';
   dealId?: string;
   senderEmail?: string;
   senderName?: string;
@@ -446,6 +452,7 @@ Return JSON only:
   }
 }
 
+// LEGACY - preserved as fallback
 // Use Anthropic claude-haiku to extract ALL property addresses and deal info from email
 async function extractDealsWithAI(emailContent: string, subject: string): Promise<ExtractedDeal[]> {
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
@@ -639,6 +646,7 @@ Return { "deals": [] } if no valid US property addresses with street numbers are
   }
 }
 
+// LEGACY - preserved as fallback
 /**
  * Second-pass address extraction: simpler prompt, more aggressive, used when the full
  * extractDealsWithAI returns 0 results. Returns minimal ExtractedDeal objects (address only).
@@ -735,6 +743,54 @@ async function markEmailAsUnread(accessToken: string, messageId: string): Promis
   } catch (error) {
     console.error(`Failed to mark email ${messageId} as unread:`, error);
   }
+}
+
+/** Convert old ExtractedDeal format to new ExtractedProperty for thread-reply path */
+function legacyToExtractedProperty(deal: ExtractedDeal): ExtractedProperty {
+  function makeField<T>(value: T | null, evidence?: string): ExtractedField<T> {
+    return {
+      value,
+      evidence: evidence || (value !== null ? String(value).substring(0, 80) : null),
+      confidence: value !== null ? 'medium' : 'low',
+      source: 'body',
+    };
+  }
+
+  // Parse address components
+  const parts = deal.address.split(',').map((p: string) => p.trim());
+  const street = parts[0] || deal.address;
+  const city = parts[1] || null;
+  const stateZip = parts[2] || '';
+  const stateParts = stateZip.split(' ').filter(Boolean);
+  const stateVal = stateParts[0] || null;
+  const zipVal = stateParts[1] || null;
+
+  const d = deal.extractedData || {};
+
+  return {
+    address_full:    makeField(deal.address),
+    street:          makeField(street),
+    city:            makeField(city),
+    state:           makeField(stateVal),
+    zip:             makeField(zipVal),
+    asking_price:    makeField(deal.purchasePrice),
+    arv:             makeField(d.arv ?? null),
+    rent:            makeField(d.rent ?? null),
+    repair_estimate: makeField(d.rehabCost ?? null),
+    beds:            makeField(d.bedrooms ?? null),
+    baths:           makeField(d.bathrooms ?? null),
+    sqft:            makeField(d.sqft ?? null),
+    lot_size:        makeField(d.lotSize ?? null),
+    year_built:      makeField(d.yearBuilt ?? null),
+    property_type:   makeField(d.propertyType ?? deal.dealType ?? null),
+    occupancy:       makeField(d.occupancy ?? null),
+    condition:       makeField(d.condition ?? null),
+    access_notes:    makeField(d.access ?? null),
+    contact_name:    makeField(null),
+    contact_phone:   makeField(null),
+    contact_email:   makeField(null),
+    deal_notes:      makeField(d.dealNotes ?? null),
+  };
 }
 
 function isBetterDeal(newDealData: any, existingDeal: any): boolean {
@@ -1028,66 +1084,41 @@ serve(async (req) => {
           return;
         }
 
-        // Extract deals (reuse results from thread-reply scan if available)
-        let extractedDeals = preExtractedDeals ?? await extractDealsWithAI(body, subject);
+        // ── NEW PIPELINE ─────────────────────────────────────────────────────
+        const normalized = normalizeEmail(fullMessage);
 
-        // Second-pass: if primary extraction found nothing, try a simpler focused prompt
-        if (extractedDeals.length === 0 && preExtractedDeals === null) {
-          console.log(`[secondPass] Primary extraction found 0 — trying second pass for: "${subject}"`);
-          extractedDeals = await extractAddressesSecondPass(body, subject);
-          if (extractedDeals.length > 0) {
-            console.log(`[secondPass] Recovered ${extractedDeals.length} address(es) on second pass`);
-          }
-        }
+        // Build set of known wholesaler emails from existing deals
+        const knownWholesalerEmails = new Set<string>(
+          state.existingAddresses
+            .map(ea => ea.deal?.sender_email)
+            .filter(Boolean)
+            .map((e: string) => e.toLowerCase())
+        );
 
-        if (extractedDeals.length === 0) {
-          console.log(`No addresses found in: "${subject}" — classifying email type`);
+        let extractionResult: ExtractionResult;
 
-          // If this sender has previously sent us deals, never silently discard their email
-          const isKnownWholesaler = state.existingAddresses.some(
-            ea => ea.deal?.sender_email && ea.deal.sender_email.toLowerCase() === senderInfo.email.toLowerCase()
-          );
+        // If thread reply found new properties, skip prefilter+extract, convert legacy format
+        if (preExtractedDeals !== null) {
+          extractionResult = {
+            email_type: 'deal',
+            properties: preExtractedDeals.map(d => legacyToExtractedProperty(d)),
+          };
+        } else {
+          const prefilterResult = prefilter(normalized, knownWholesalerEmails);
 
-          // Broad keyword check — includes common wholesaler patterns
-          const DEAL_KEYWORDS = /\b(arv|flip|rehab|asking\s*price|purchase\s*price|wholesal|off.?market|assignment|emd|earnest|clear\s*title|fixer|beds?\s*\/\s*baths?|bed\s*\/\s*bath|\$\s*\d{2,3}[,k]|price\s*drop|price\s*reduced|available\s*(now|today)|new\s*(deal|listing|property|home)|deal\s*(alert|available)|sqft|sq\.?\s*ft|square\s*feet|vacant|occupied|single\s*family|multi[\s-]?family|investment\s*propert|rental|buy\s*and\s*hold|fix\s*(and|&|\+)\s*flip|cash\s*buyer|closing\s*cost|under\s*contract|property\s*available|below\s*market)\b/i;
-          const looksLikeDeal = DEAL_KEYWORDS.test(body) || DEAL_KEYWORDS.test(subject);
-
-          if (isKnownWholesaler || looksLikeDeal) {
-            // Don't mark as read — leave for manual review or next sync attempt
-            console.log(`[classify] Looks like deal email (knownWholesaler=${isKnownWholesaler}, keywords=${looksLikeDeal}) — keeping unread for review`);
-            state.syncDetails.push({
-              address: '',
-              action: 'message',
-              senderEmail: senderInfo.email,
-              senderName: senderInfo.name,
-              subject,
-              messageId: msg.id,
-              emailSnippet: snippet,
-              isImportant: true,
-              messagePreview: body.substring(0, 300),
-              reason: isKnownWholesaler ? 'Known wholesaler — no address extracted' : 'Deal keywords found — no address extracted',
-            });
-            return;
+          // Save prefilter result (fire and forget)
+          if (!dry_run) {
+            supabase.from('prefilter_log').insert({
+              message_id: msg.id,
+              score: prefilterResult.score,
+              signals: prefilterResult.signals,
+              skip_reason: prefilterResult.skip_reason || null,
+              created_at: new Date().toISOString(),
+            }).then(() => {}).catch(() => {});
           }
 
-          const classification = await classifyNonDealEmail(body, subject, senderInfo.email);
-          await markEmailAsRead(access_token, msg.id);
-
-          if (classification.type === 'message') {
-            console.log(`[classify] Personal message from ${senderInfo.email}, important=${classification.isImportant}`);
-            state.syncDetails.push({
-              address: '',
-              action: 'message',
-              senderEmail: senderInfo.email,
-              senderName: senderInfo.name,
-              subject,
-              messageId: msg.id,
-              emailSnippet: snippet,
-              isImportant: classification.isImportant,
-              messagePreview: classification.preview,
-            });
-          } else {
-            console.log(`[classify] Newsletter/automated from ${senderInfo.email} — marked read, skipping`);
+          if (prefilterResult.score < 3) {
+            console.log(`[prefilter] score=${prefilterResult.score} skip_reason=${prefilterResult.skip_reason} — skipping`);
             state.syncDetails.push({
               address: '',
               action: 'skipped_newsletter',
@@ -1096,94 +1127,136 @@ serve(async (req) => {
               subject,
               messageId: msg.id,
               emailSnippet: snippet,
+              reason: prefilterResult.skip_reason || `prefilter_score_${prefilterResult.score}`,
             });
+            await markEmailAsRead(access_token, msg.id);
+            return;
           }
+
+          const apiKey = Deno.env.get('ANTHROPIC_API_KEY') || '';
+          const { result: extracted, audit } = await extractDealsFromEmail(normalized, apiKey);
+          extractionResult = extracted;
+
+          // Save extraction audit (fire and forget)
+          if (!dry_run) {
+            supabase.from('extraction_audits').insert({
+              message_id: msg.id,
+              raw_response: audit.rawResponse.substring(0, 10000),
+              prompt_tokens_estimate: audit.promptTokensEstimate,
+              created_at: audit.createdAt,
+            }).then(() => {}).catch(() => {});
+          }
+        }
+
+        console.log(`[pipeline] email_type=${extractionResult.email_type} properties=${extractionResult.properties.length}`);
+
+        if (extractionResult.email_type === 'non_deal' || extractionResult.properties.length === 0) {
+          await markEmailAsRead(access_token, msg.id);
+          state.syncDetails.push({
+            address: '',
+            action: 'skipped_newsletter',
+            senderEmail: senderInfo.email,
+            senderName: senderInfo.name,
+            subject,
+            messageId: msg.id,
+            emailSnippet: snippet,
+            reason: `email_type:${extractionResult.email_type}`,
+          });
           return;
         }
 
-        console.log(`Found ${extractedDeals.length} deal(s) in "${subject}"`);
-
+        const validatedProperties = validateAndEnrich(extractionResult, 'email');
+        let emailWasProcessed = false;
         let dealsFromThisEmail = 0;
 
-        let emailWasProcessed = false; // any address extracted → mark as read regardless of outcome
+        for (const validated of validatedProperties) {
+          const { property: prop, issues, overallConfidence, rehabFloorApplied } = validated;
+          const address = prop.address_full.value || [prop.street.value, prop.city.value, prop.state.value].filter(Boolean).join(', ');
 
-        for (const dealInfo of extractedDeals) {
-          const address = dealInfo.address;
-          const emailPurchasePrice = dealInfo.purchasePrice;
-          console.log(`  Deal: "${address}" price=$${emailPurchasePrice} source=${dealInfo.source}`);
+          if (!address) {
+            state.syncDetails.push({
+              address: '',
+              action: 'no_address',
+              senderEmail: senderInfo.email,
+              senderName: senderInfo.name,
+              subject,
+              messageId: msg.id,
+              emailSnippet: snippet,
+              reason: 'no address extracted',
+            });
+            continue;
+          }
 
-          // Any address found → email is considered "processed", mark as read after loop
           emailWasProcessed = true;
+          const routeResult = routeProperty(validated);
 
           // Skip over-budget
-          if (emailPurchasePrice && emailPurchasePrice > MAX_DEAL_PRICE) {
-            state.syncDetails.push({ address, action: 'skipped_over_budget', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `$${emailPurchasePrice.toLocaleString()} > $${MAX_DEAL_PRICE.toLocaleString()}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
+          const askingPrice = prop.asking_price.value;
+          if (askingPrice && askingPrice > MAX_DEAL_PRICE) {
+            state.syncDetails.push({ address, action: 'skipped_over_budget', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `$${askingPrice} > $${MAX_DEAL_PRICE}`, messageId: msg.id, purchasePrice: askingPrice, emailSnippet: snippet });
             continue;
           }
-
-          // Duplicate check — skip when force_rescan so we can see full extraction
-          // Note: existingAddresses is shared — within-batch dedup works because workers
-          // push to it immediately after creating a deal.
-          const duplicateMatch = force_rescan ? null : state.existingAddresses.find(ea => addressesMatch(ea.address, address));
-          if (duplicateMatch) {
-            const newDealData = { emailPurchasePrice, purchasePrice: emailPurchasePrice };
-            if (!dry_run && isBetterDeal(newDealData, duplicateMatch.deal)) {
-              await supabase.from('deals').update({
-                overrides: { ...(duplicateMatch.deal.overrides || {}), purchasePrice: emailPurchasePrice },
-                sender_name: senderInfo.name,
-                sender_email: senderInfo.email,
-                email_snippet: snippet,
-                email_subject: subject,
-                email_date: date ? new Date(date).toISOString() : null,
-              }).eq('id', duplicateMatch.id);
-              state.syncDetails.push({ address, action: 'updated_existing', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `Better price: $${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
-              dealsFromThisEmail++;
-            } else {
-              state.skippedAddresses.push(address);
-              state.dealsSkippedDuplicate++;
-              state.syncDetails.push({ address, action: 'skipped_duplicate', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
-            }
-            continue;
-          }
-
-          // Parse address parts
-          const addressParts = address.split(',').map((p: string) => p.trim());
-          const street   = addressParts[0] || address;
-          const city     = addressParts[1] || '';
-          const stateZip = addressParts[2] || '';
-          const [state_code, zip] = stateZip.split(' ').filter(Boolean);
 
           // State filter
-          if (target_state && state_code) {
-            const normState = state_code.toUpperCase().trim();
-            const normTarget = target_state.toUpperCase().trim();
-            if (normState !== normTarget) {
-              state.syncDetails.push({ address, action: 'skipped_wrong_state', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `State ${normState} != ${normTarget}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
-              continue;
-            }
+          const stateCode = prop.state.value?.toUpperCase();
+          if (target_state && stateCode && stateCode !== target_state.toUpperCase()) {
+            state.syncDetails.push({ address, action: 'skipped_wrong_state', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `state ${stateCode} != ${target_state}`, messageId: msg.id, emailSnippet: snippet });
+            continue;
           }
 
-          // Merge image links (use rawHtml so <img> tags are still present)
-          const regexImageLinks = extractImageLinks(rawHtml || body);
-          const aiPhotoLinks: string[] = Array.isArray(dealInfo.extractedData?.photoLinks)
-            ? dealInfo.extractedData.photoLinks : [];
-          const allImageLinks = [...new Set([...aiPhotoLinks, ...regexImageLinks])].slice(0, 20);
-          const enrichedExtractedData = {
-            ...dealInfo.extractedData,
-            imageLinks: allImageLinks,
-            documentLinks: docLinks.length > 0 ? docLinks : undefined,
+          // Duplicate check
+          const duplicateMatch = force_rescan ? null : state.existingAddresses.find(ea => addressesMatch(ea.address, address));
+          if (duplicateMatch) {
+            state.dealsSkippedDuplicate++;
+            state.syncDetails.push({ address, action: 'skipped_duplicate', existingDealId: duplicateMatch.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: askingPrice, emailSnippet: snippet });
+            continue;
+          }
+
+          // Build deal data from ExtractedProperty
+          const addressFull = prop.address_full.value || address;
+          const addressParts = addressFull.split(',').map((p: string) => p.trim());
+          const street = prop.street.value || addressParts[0] || addressFull;
+          const city = prop.city.value || addressParts[1] || '';
+          const stateZip = addressParts[2] || '';
+          const stateParts = stateZip.split(' ').filter(Boolean);
+          const stateVal = prop.state.value || stateParts[0] || '';
+          const zipVal = prop.zip.value || stateParts[1] || null;
+
+          const emailExtractedData: Record<string, any> = {
+            extraction_v2: { property: prop, issues, overallConfidence, rehabFloorApplied, routeReason: routeResult.route_reason },
+            arv: prop.arv.value,
+            bedrooms: prop.beds.value,
+            bathrooms: prop.baths.value,
+            sqft: prop.sqft.value,
+            yearBuilt: prop.year_built.value,
+            lotSize: prop.lot_size.value,
+            propertyType: prop.property_type.value,
+            occupancy: prop.occupancy.value,
+            condition: prop.condition.value,
+            rehabCost: prop.repair_estimate.value,
+            rent: prop.rent.value,
+            dealNotes: prop.deal_notes.value,
+            accessNotes: prop.access_notes.value,
+            contactName: prop.contact_name.value,
+            contactPhone: prop.contact_phone.value,
+            contactEmail: prop.contact_email.value,
           };
 
           const dealData: Record<string, any> = {
             address_street: street,
             address_city: city,
-            address_state: state_code || '',
-            address_zip: zip || null,
-            address_full: address,
+            address_state: stateVal,
+            address_zip: zipVal,
+            address_full: addressFull,
             status: 'new',
             source: 'email',
-            api_data: emailPurchasePrice ? { emailPurchasePrice } : null,
-            overrides: emailPurchasePrice ? { arv: null, rent: null, rehabCost: null, purchasePrice: emailPurchasePrice } : undefined,
+            api_data: askingPrice ? { emailPurchasePrice: askingPrice } : null,
+            overrides: {
+              purchasePrice: askingPrice || null,
+              rehabCost: prop.repair_estimate.value || null,
+              arv: prop.arv.value || null,
+              rent: prop.rent.value || null,
+            },
             email_subject: subject,
             email_date: date ? new Date(date).toISOString() : null,
             gmail_message_id: msg.id,
@@ -1191,54 +1264,51 @@ serve(async (req) => {
             sender_name: senderInfo.name,
             sender_email: senderInfo.email,
             email_snippet: snippet,
-            deal_type: dealInfo.dealType || null,
-            email_extracted_data: Object.keys(enrichedExtractedData).length > 0 ? enrichedExtractedData : null,
+            deal_type: prop.property_type.value || null,
+            email_extracted_data: emailExtractedData,
           };
 
           if (dry_run || force_rescan) {
-            // force_rescan: look up existing deal to return its ID for analysis
-            const existingMatch = force_rescan
-              ? state.existingAddresses.find(ea => addressesMatch(ea.address, address))
-              : null;
-            const existingId = existingMatch?.id && existingMatch.id !== 'dry-run' ? existingMatch.id : null;
-
-            state.processedDeals.push({ ...dealData, dry_run: true, extractionSource: dealInfo.source });
-            if (existingId) {
-              state.syncDetails.push({ address, action: 'updated_existing', existingDealId: existingId, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `[RESCAN] Source: ${dealInfo.source} price=${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
-            } else {
-              state.syncDetails.push({ address, action: 'created', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `[TEST] Source: ${dealInfo.source} price=${emailPurchasePrice}`, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
-            }
-            // Register address immediately so within-batch dedup works
-            state.existingAddresses.push({ id: existingId || 'dry-run', address, deal: dealData });
+            state.processedDeals.push({ ...dealData, dry_run: true, routeDecision: routeResult.decision });
+            state.syncDetails.push({ address, action: 'created', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: `[TEST] route=${routeResult.decision} confidence=${overallConfidence}`, messageId: msg.id, purchasePrice: askingPrice, emailSnippet: snippet });
+            state.existingAddresses.push({ id: 'dry-run', address: addressFull, deal: dealData });
             dealsFromThisEmail++;
             continue;
           }
 
-          const { data: newDeal, error: insertError } = await supabase
-            .from('deals').insert(dealData).select().single();
+          const { data: newDeal, error: insertError } = await supabase.from('deals').insert(dealData).select().single();
 
           if (insertError) {
             console.error('Error inserting deal:', insertError);
             state.errors.push(`Failed to save ${address}: ${insertError.message}`);
-            state.syncDetails.push({ address, action: 'error', senderEmail: senderInfo.email, senderName: senderInfo.name, subject, reason: insertError.message, messageId: msg.id, emailSnippet: snippet });
+            state.syncDetails.push({ address, action: 'error', reason: insertError.message, messageId: msg.id, emailSnippet: snippet });
             continue;
           }
 
-          // Register immediately so subsequent parallel workers see this address
+          // Insert to review_queue if not auto_create
+          if (!dry_run && (routeResult.decision === 'review' || routeResult.decision === 'flagged')) {
+            supabase.from('review_queue').insert({
+              deal_id: newDeal.id,
+              message_id: msg.id,
+              route_reason: routeResult.route_reason,
+              overall_confidence: overallConfidence,
+              extraction: emailExtractedData.extraction_v2,
+              status: 'pending',
+              created_at: new Date().toISOString(),
+            }).then(() => {}).catch(() => {});
+          }
+
           state.existingAddresses.push({ id: newDeal.id, address: newDeal.address_full, deal: newDeal });
           state.processedDeals.push(newDeal);
-          state.syncDetails.push({ address, action: 'created', dealId: newDeal.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: emailPurchasePrice, dealType: dealInfo.dealType, extractedData: dealInfo.extractedData, emailSnippet: snippet, extractionSource: dealInfo.source });
+          state.syncDetails.push({ address, action: 'created', dealId: newDeal.id, senderEmail: senderInfo.email, senderName: senderInfo.name, subject, messageId: msg.id, purchasePrice: askingPrice, emailSnippet: snippet, reason: `route=${routeResult.decision} confidence=${overallConfidence}` });
           dealsFromThisEmail++;
-          console.log(`  ✓ Created deal: ${address}`);
+          console.log(`  ✓ Created deal: ${address} [${routeResult.decision}, conf=${overallConfidence}]`);
         }
 
-        // Mark as read whenever any address was found (even if skipped/duplicate/over-budget).
-        // Only leave unread when no address was found at all (no_address → retry).
-        // force_rescan is also allowed to mark as read — it is used as "Reset & Rescan"
-        // which is a real scan, not a preview. Only dry_run (true preview) skips marking.
         if (!dry_run && emailWasProcessed) {
           await markEmailAsRead(access_token, msg.id);
         }
+        // ── END NEW PIPELINE ──────────────────────────────────────────────────
 
       } catch (error) {
         console.error(`Error processing message ${msg.id}:`, error);
