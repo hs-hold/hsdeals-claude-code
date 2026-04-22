@@ -36,7 +36,8 @@ function calculateFlipScore(deal: Deal, loanDefaults: any) {
     ? Math.max(0, deal.overrides.targetBathrooms - (apiData.bathrooms ?? 0))
     : 0;
   const layoutRehabCost = (bedroomsAdded * 20_000) + (bathroomsAdded * 15_000);
-  const rehabCost = baseRehabCost + layoutRehabCost;
+  const rehabFloor = deal.source === 'email' ? 80_000 : 60_000;
+  const rehabCost = Math.max(baseRehabCost + layoutRehabCost, rehabFloor);
 
   const flipClosingCosts = purchasePrice * 0.02;
   const holdingMonths = loanDefaults?.holdingMonths ?? 4;

@@ -449,14 +449,15 @@ export default function DealDetailPage() {
   }, [deal?.updatedAt]);
 
   // Auto-apply rehab minimums: $60k for API deals, $80k for email deals
+  // Also applies when existing override is below the floor
   useEffect(() => {
     if (!deal) return;
-    if (deal.overrides?.rehabCost != null) return;
-    const currentRehab = deal.apiData?.rehabCost ?? 0;
     let floor = 0;
     if (deal.source === 'api') floor = 60_000;
     else if (deal.source === 'email') floor = 80_000;
-    if (floor === 0 || currentRehab >= floor) return;
+    if (floor === 0) return;
+    const currentRehab = deal.overrides?.rehabCost ?? deal.apiData?.rehabCost ?? 0;
+    if (currentRehab >= floor) return;
     updateDealOverrides(deal.id, { rehabCost: floor });
     setLocalOverrides(prev => ({ ...prev, rehabCost: floor.toString() }));
   }, [deal?.id]);
@@ -3992,7 +3993,8 @@ BRRRR STRATEGY:
               const layoutArvIncrease = (bedroomsAdded * 30000) + (bathroomsAdded * 20000);
               
               const rehabCost = baseRehabCost + layoutRehabCost;
-              const arv = liveFinancials?.arv ?? (baseArv + layoutArvIncrease);
+              // Use the same ARV the user sees (override or apiData.arv), not comp-recalculated liveFinancials.arv
+              const arv = baseArv + layoutArvIncrease;
               
               // Holding costs calculation
               const propertyTaxMonthly = localOverrides.propertyTaxMonthly 
