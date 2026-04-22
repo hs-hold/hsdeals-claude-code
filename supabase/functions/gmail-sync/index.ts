@@ -553,7 +553,7 @@ Return { "deals": [] } if no valid US property addresses with street numbers are
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 8192,
+        max_tokens: 32000,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
