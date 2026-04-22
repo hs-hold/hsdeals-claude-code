@@ -448,6 +448,19 @@ export default function DealDetailPage() {
     setRejectionReason(deal.rejectionReason || '');
   }, [deal?.updatedAt]);
 
+  // Auto-apply rehab minimums: $60k for API deals, $80k for email deals
+  useEffect(() => {
+    if (!deal) return;
+    if (deal.overrides?.rehabCost != null) return;
+    const currentRehab = deal.apiData?.rehabCost ?? 0;
+    let floor = 0;
+    if (deal.source === 'api') floor = 60_000;
+    else if (deal.source === 'email') floor = 80_000;
+    if (floor === 0 || currentRehab >= floor) return;
+    updateDealOverrides(deal.id, { rehabCost: floor });
+    setLocalOverrides(prev => ({ ...prev, rehabCost: floor.toString() }));
+  }, [deal?.id]);
+
   const financials = deal?.financials;
   const apiData = deal?.apiData;
   
@@ -3722,7 +3735,22 @@ BRRRR STRATEGY:
 
                     {(layoutRehabCost > 0 || localOverrides.rehabCost) && (
                       <p className="mt-1 text-[10px] text-muted-foreground flex items-center justify-center gap-1 flex-wrap">
-                        {localOverrides.rehabCost && (
+                        {localOverrides.rehabCost && (() => {
+                          const floor = deal?.source === 'api' ? 60_000 : deal?.source === 'email' ? 80_000 : 0;
+                          return floor > 0 && (apiData.rehabCost ?? 0) < floor && localOverrides.rehabCost === floor.toString();
+                        })() ? (
+                          <>
+                            <span className="text-violet-400">Min {deal?.source === 'email' ? '$80K' : '$60K'}</span>
+                            <span>(original: {formatCurrency(apiData.rehabCost ?? 0)})</span>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleResetOverride('rehabCost'); }}
+                              className="p-0.5 rounded hover:bg-muted"
+                              title="Reset to original"
+                            >
+                              <RotateCcw className="w-2.5 h-2.5 text-muted-foreground hover:text-foreground" />
+                            </button>
+                          </>
+                        ) : localOverrides.rehabCost ? (
                           <>
                             <span>Original:</span>
                             <span className="line-through">{formatCurrency(apiData.rehabCost ?? 0)}</span>
@@ -3734,7 +3762,7 @@ BRRRR STRATEGY:
                               <RotateCcw className="w-2.5 h-2.5 text-muted-foreground hover:text-foreground" />
                             </button>
                           </>
-                        )}
+                        ) : null}
                         {layoutRehabCost > 0 && (
                           <span className="text-purple-400">+{formatCurrency(layoutRehabCost)} layout</span>
                         )}
