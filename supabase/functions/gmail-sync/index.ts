@@ -1117,7 +1117,7 @@ serve(async (req) => {
             }).then(() => {}).catch(() => {});
           }
 
-          if (prefilterResult.score < 3) {
+          if (prefilterResult.score < 1) {
             console.log(`[prefilter] score=${prefilterResult.score} skip_reason=${prefilterResult.skip_reason} — skipping`);
             state.syncDetails.push({
               address: '',

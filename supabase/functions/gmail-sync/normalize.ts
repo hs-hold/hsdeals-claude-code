@@ -121,16 +121,26 @@ function stripThreadsAndSignatures(text: string): string {
     // Lines starting with ">"
     .replace(/^>.*$/gm, '');
 
-  // Strip signatures
-  text = text
-    .replace(/^--\s*\n[\s\S]*/m, '')
-    .replace(/^Best regards[\s\S]*/im, '')
-    .replace(/^Best,[\s\S]*/im, '')
-    .replace(/^Thanks,[\s\S]*/im, '')
-    .replace(/^Thank you,[\s\S]*/im, '')
-    .replace(/^Regards,[\s\S]*/im, '')
-    .replace(/^Sent from my iPhone[\s\S]*/im, '')
-    .replace(/^Sent from my Android[\s\S]*/im, '');
+  // Strip signatures — only when they appear as the last block (at most 20 trailing lines)
+  // Avoid stripping mid-email content: only match if signature marker is within last 20 lines
+  const sigLines = text.split('\n');
+  const cutoffIdx = Math.max(0, sigLines.length - 20);
+  const tail = sigLines.slice(cutoffIdx).join('\n');
+  const sigPatterns = [
+    /^--\s*\n[\s\S]*/m,
+    /^Best regards[\s\S]*/im,
+    /^Best,[\s\S]*/im,
+    /^Thanks,[\s\S]*/im,
+    /^Thank you,[\s\S]*/im,
+    /^Regards,[\s\S]*/im,
+    /^Sent from my iPhone[\s\S]*/im,
+    /^Sent from my Android[\s\S]*/im,
+  ];
+  let trimmedTail = tail;
+  for (const pat of sigPatterns) {
+    trimmedTail = trimmedTail.replace(pat, '');
+  }
+  text = sigLines.slice(0, cutoffIdx).join('\n') + '\n' + trimmedTail;
 
   // Strip footers (line by line)
   const lines = text.split('\n');
