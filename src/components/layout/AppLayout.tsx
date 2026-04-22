@@ -263,14 +263,32 @@ function AppSidebar() {
                     </SidebarMenuItem>
                   </Collapsible>
 
-                  {/* Hot Deals with collapsible sub-items */}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+
+            {/* Deals */}
+            <SidebarGroup>
+              <SidebarGroupLabel>Deals</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {/* New Deals — first item */}
+                  {dealsNavItems.slice(0, 1).map((item) => (
+                    <SidebarMenuItem key={item.to}>
+                      <SidebarMenuButton asChild isActive={location.pathname === item.to} tooltip={item.label}>
+                        <Link to={item.to} onClick={handleNavClick}>
+                          <item.icon className="w-5 h-5" />
+                          <span>{item.label}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+
+                  {/* Hot Deals */}
                   <Collapsible asChild defaultOpen={isHotDealsActive} className="group/collapsible">
                     <SidebarMenuItem>
                       <CollapsibleTrigger asChild>
-                        <SidebarMenuButton
-                          isActive={isHotDealsActive}
-                          tooltip="Hot Deals"
-                        >
+                        <SidebarMenuButton isActive={isHotDealsActive} tooltip="Hot Deals">
                           <Flame className="w-5 h-5" />
                           <span>Hot Deals</span>
                           <ChevronRight className="ml-auto w-4 h-4 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
@@ -280,10 +298,7 @@ function AppSidebar() {
                         <SidebarMenuSub>
                           {hotDealsSubItems.map((sub) => (
                             <SidebarMenuSubItem key={sub.to}>
-                              <SidebarMenuSubButton
-                                asChild
-                                isActive={currentPath === sub.to || (sub.to === '/hot-deals' && location.pathname === '/hot-deals' && !location.search)}
-                              >
+                              <SidebarMenuSubButton asChild isActive={currentPath === sub.to || (sub.to === '/hot-deals' && location.pathname === '/hot-deals' && !location.search)}>
                                 <Link to={sub.to} onClick={handleNavClick}>
                                   <sub.icon className="w-3.5 h-3.5 mr-1" />
                                   <span>{sub.label}</span>
@@ -295,16 +310,9 @@ function AppSidebar() {
                       </CollapsibleContent>
                     </SidebarMenuItem>
                   </Collapsible>
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
 
-            {/* Deals */}
-            <SidebarGroup>
-              <SidebarGroupLabel>Deals</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {dealsNavItems.map((item) => (
+                  {/* Remaining deals items */}
+                  {dealsNavItems.slice(1).map((item) => (
                     <SidebarMenuItem key={item.to}>
                       <SidebarMenuButton
                         asChild
