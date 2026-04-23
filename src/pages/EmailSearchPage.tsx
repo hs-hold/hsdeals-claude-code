@@ -799,9 +799,18 @@ export default function EmailSearchPage() {
   );
 
   const unanalyzedActionable = useMemo(() => {
+    const normalizeAddr = (addr: string) => addr.toLowerCase().replace(/[^a-z0-9]/g, '');
     return actionableItems.filter(item => {
+      // Look up by dealId first
       const deal = item.dealId ? deals.find(d => d.id === item.dealId) : null;
-      return deal ? !isDealAnalyzed(deal) : true;
+      if (deal) return !isDealAnalyzed(deal);
+      // dealId set but not found (may have been deduplicated) — fall back to address match
+      if (item.dealId || item.address) {
+        const normalItem = normalizeAddr(item.address);
+        const dealByAddr = deals.find(d => normalizeAddr(d.address.full) === normalItem);
+        if (dealByAddr) return !isDealAnalyzed(dealByAddr);
+      }
+      return true; // truly new deal — needs creation + analysis
     });
   }, [actionableItems, deals]);
 
