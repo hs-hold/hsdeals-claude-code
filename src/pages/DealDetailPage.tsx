@@ -3979,7 +3979,7 @@ BRRRR STRATEGY:
               // Get current effective values (same logic as main section)
               const purchasePrice = localOverrides.purchasePrice ? parseFloat(localOverrides.purchasePrice) : (apiData?.purchasePrice ?? 0);
               const baseRehabCost = localOverrides.rehabCost ? parseFloat(localOverrides.rehabCost) : (apiData?.rehabCost ?? 0);
-              const baseArv = localOverrides.arv ? parseFloat(localOverrides.arv) : (apiData?.arv ?? 0);
+              const baseArv = localOverrides.arv ? parseFloat(localOverrides.arv) : (liveFinancials?.arv ?? apiData?.arv ?? 0);
               const rent = liveFinancials?.monthlyGrossRent ?? 0;
               
               // Layout adjustments
