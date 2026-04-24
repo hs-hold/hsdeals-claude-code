@@ -558,28 +558,30 @@ export default function AcquisitionPage() {
 
   const filtered = useMemo(() => {
     return deals
-      .filter(d => {
-        const arv = safeNum(d.overrides.arv) ?? safeNum(d.apiData.arv) ?? safeNum(d.financials?.arv);
-        const price = safeNum(d.overrides.purchasePrice) ?? safeNum(d.apiData.purchasePrice) ?? safeNum(d.financials?.purchasePrice);
-        return arv && arv > 0 && price && price > 0;
-      })
       .filter(d => passesFilters(d, filters))
-      .sort((a, b) => {
-        // Sort by: has offer < no offer, then by DOM descending
+      .map(d => ({ deal: d, analysis: analyzeAcquisition(d) }))
+      // Only deals where at least the best-case scenario yields a positive MAO
+      .filter(({ analysis }) => analysis !== null && analysis.flipMao.bestCase !== null)
+      .sort(({ deal: a, analysis: aa }, { deal: b, analysis: ab }) => {
+        // Deals closer to working (smaller required discount %) float up
         const oa = loadOffer(a.id).status;
         const ob = loadOffer(b.id).status;
         if (oa === 'not_sent' && ob !== 'not_sent') return -1;
         if (ob === 'not_sent' && oa !== 'not_sent') return 1;
-        return (b.apiData.daysOnMarket ?? 0) - (a.apiData.daysOnMarket ?? 0);
-      });
+        // Sort by required discount ascending (less discount needed = better deal)
+        const discA = aa?.requiredDiscount ?? Infinity;
+        const discB = ab?.requiredDiscount ?? Infinity;
+        return discA - discB;
+      })
+      .map(({ deal }) => deal);
   }, [deals, filters]);
 
-  // Stats
+  // Stats — count only deals with at least one viable MAO scenario
   const stats = useMemo(() => {
     const analyzable = deals.filter(d => {
-      const arv = safeNum(d.overrides.arv) ?? safeNum(d.apiData.arv) ?? safeNum(d.financials?.arv);
-      const price = safeNum(d.overrides.purchasePrice) ?? safeNum(d.apiData.purchasePrice) ?? safeNum(d.financials?.purchasePrice);
-      return arv && arv > 0 && price && price > 0 && ACTIVE_STATUSES.has(d.status);
+      if (!ACTIVE_STATUSES.has(d.status)) return false;
+      const analysis = analyzeAcquisition(d);
+      return analysis !== null && analysis.flipMao.bestCase !== null;
     });
     const withOffer = analyzable.filter(d => loadOffer(d.id).status !== 'not_sent');
     const withResponse = analyzable.filter(d => {
@@ -699,11 +701,7 @@ export default function AcquisitionPage() {
       {/* Results */}
       <div className="text-sm text-muted-foreground">
         Showing {filtered.length} deal{filtered.length !== 1 ? 's' : ''}
-        {filtered.length < deals.filter(d => {
-          const arv = safeNum(d.overrides.arv) ?? safeNum(d.apiData.arv) ?? safeNum(d.financials?.arv);
-          const price = safeNum(d.overrides.purchasePrice) ?? safeNum(d.apiData.purchasePrice) ?? safeNum(d.financials?.purchasePrice);
-          return arv && arv > 0 && price && price > 0 && ACTIVE_STATUSES.has(d.status);
-        }).length && ' (filtered)'}
+        {filtered.length < stats.total && ' (filtered)'}
       </div>
 
       {filtered.length === 0 ? (
