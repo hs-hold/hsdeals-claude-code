@@ -553,9 +553,9 @@ function AcquisitionCard({ deal }: { deal: Deal }) {
 // Only show deals that can still receive an offer — exclude pending/closed/dead
 const ACTIVE_STATUSES = new Set(['new', 'under_analysis', 'qualified', 'offer_sent']);
 
-// Minimum ratio: our best-case offer must be at least this fraction of list price
-// Filters out deals where the math is so far off that no realistic offer exists
-const MIN_OFFER_RATIO = 0.50;
+// If ARV is below this fraction of list price, no flip math can ever work
+// e.g. if asking $170K but ARV is only $137K (0.81), it's mathematically dead
+const MIN_ARV_TO_LIST_RATIO = 0.85;
 
 type TimeRange = 'week' | 'month' | 'all';
 
@@ -602,7 +602,7 @@ function passesFilters(
 
 export default function AcquisitionPage() {
   const { deals } = useDeals();
-  const [timeRange, setTimeRange] = useState<TimeRange>('week');
+  const [timeRange, setTimeRange] = useState<TimeRange>('month');
   const [domMin, setDomMin] = useState(0);
   const [offerFilter, setOfferFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -614,12 +614,12 @@ export default function AcquisitionPage() {
     return deals
       .filter(d => passesFilters(d, filters))
       .map(d => ({ deal: d, analysis: analyzeAcquisition(d) }))
-      // Only deals where best-case MAO is positive AND offer is ≥ 50% of ask
+      // Only deals where best-case MAO is positive AND ARV is not far below list price
       .filter(({ analysis }) => {
         if (!analysis || analysis.flipMao.bestCase === null) return false;
-        // Exclude deals where even the best offer is unrealistically low vs asking
-        if (analysis.safeOfferHigh != null && analysis.listPrice > 0) {
-          if (analysis.safeOfferHigh / analysis.listPrice < MIN_OFFER_RATIO) return false;
+        // Exclude deals where ARV is too far below asking — no flip math can save them
+        if (analysis.listPrice > 0) {
+          if (analysis.arv / analysis.listPrice < MIN_ARV_TO_LIST_RATIO) return false;
         }
         return true;
       })
@@ -642,8 +642,8 @@ export default function AcquisitionPage() {
       if (!ACTIVE_STATUSES.has(d.status)) return false;
       const analysis = analyzeAcquisition(d);
       if (!analysis || analysis.flipMao.bestCase === null) return false;
-      if (analysis.safeOfferHigh != null && analysis.listPrice > 0) {
-        if (analysis.safeOfferHigh / analysis.listPrice < MIN_OFFER_RATIO) return false;
+      if (analysis.listPrice > 0) {
+        if (analysis.arv / analysis.listPrice < MIN_ARV_TO_LIST_RATIO) return false;
       }
       return true;
     });
