@@ -518,7 +518,7 @@ function AcquisitionCard({ deal }: { deal: Deal }) {
 
 // ─── Filters ──────────────────────────────────────────────────────────────────
 
-const ACTIVE_STATUSES = new Set(['new', 'under_analysis', 'qualified', 'offer_sent']);
+const ACTIVE_STATUSES = new Set(['new', 'under_analysis', 'qualified', 'offer_sent', 'under_contract', 'pending_other']);
 
 function passesFilters(
   deal: Deal,
@@ -557,7 +557,7 @@ export default function AcquisitionPage() {
 
   const filtered = useMemo(() => {
     return deals
-      .filter(d => d.apiData.arv && d.apiData.purchasePrice)
+      .filter(d => (d.apiData.arv || d.overrides.arv) && (d.apiData.purchasePrice || d.overrides.purchasePrice))
       .filter(d => passesFilters(d, filters))
       .sort((a, b) => {
         // Sort by: has offer < no offer, then by DOM descending
@@ -571,7 +571,7 @@ export default function AcquisitionPage() {
 
   // Stats
   const stats = useMemo(() => {
-    const analyzable = deals.filter(d => d.apiData.arv && d.apiData.purchasePrice && ACTIVE_STATUSES.has(d.status));
+    const analyzable = deals.filter(d => (d.apiData.arv || d.overrides.arv) && (d.apiData.purchasePrice || d.overrides.purchasePrice) && ACTIVE_STATUSES.has(d.status));
     const withOffer = analyzable.filter(d => loadOffer(d.id).status !== 'not_sent');
     const withResponse = analyzable.filter(d => {
       const s = loadOffer(d.id).status;
@@ -690,7 +690,7 @@ export default function AcquisitionPage() {
       {/* Results */}
       <div className="text-sm text-muted-foreground">
         Showing {filtered.length} deal{filtered.length !== 1 ? 's' : ''}
-        {filtered.length < deals.filter(d => ACTIVE_STATUSES.has(d.status)).length && ' (filtered)'}
+        {filtered.length < deals.filter(d => (d.apiData.arv || d.overrides.arv) && (d.apiData.purchasePrice || d.overrides.purchasePrice) && ACTIVE_STATUSES.has(d.status)).length && ' (filtered)'}
       </div>
 
       {filtered.length === 0 ? (
