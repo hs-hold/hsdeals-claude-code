@@ -4458,18 +4458,30 @@ BRRRR STRATEGY:
                       <div className="flex items-center gap-2">
                         <Calculator className="w-4 h-4 text-orange-400" />
                         <span className="text-orange-400">Flip Analysis</span>
-                        {!flipAnalysisOpen && (
-                          <div className="flex items-center gap-3 ml-2 text-xs">
-                            <span className="text-muted-foreground">Profit:</span>
-                            <span className={cn("font-bold", flipNetProfit >= 30000 ? "text-emerald-400" : flipNetProfit >= 0 ? "text-amber-400" : "text-red-400")}>
-                              {formatCurrency(flipNetProfit)}
-                            </span>
-                            <span className="text-muted-foreground">ROI:</span>
-                            <span className={cn("font-bold", flipRoi >= 25 ? "text-emerald-400" : flipRoi >= 15 ? "text-amber-400" : "text-red-400")}>
-                              {flipRoi.toFixed(1)}%
-                            </span>
-                          </div>
-                        )}
+                        {!flipAnalysisOpen && (() => {
+                          // Compute cash-deal summary using same formula as expanded section
+                          const _cp = localOverrides.closingCostsPercent ? parseFloat(localOverrides.closingCostsPercent) / 100 : loanDefaults.closingCostsPercent / 100;
+                          const _closing = localOverrides.closingCostsDollar ? parseFloat(localOverrides.closingCostsDollar) : purchasePrice * _cp;
+                          const _contingency = rehabCost * (localOverrides.contingencyPercent ? parseFloat(localOverrides.contingencyPercent) / 100 : loanDefaults.contingencyPercent / 100);
+                          const _totalInv = purchasePrice + _closing + rehabCost + _contingency + totalHoldingCosts;
+                          const _agent = arv * (localOverrides.agentCommissionPercent ? parseFloat(localOverrides.agentCommissionPercent) / 100 : loanDefaults.agentCommissionPercent / 100);
+                          const _notary = localOverrides.cashNotaryFee ? parseFloat(localOverrides.cashNotaryFee) : 400;
+                          const _title = localOverrides.titleFees ? parseFloat(localOverrides.titleFees) : 500;
+                          const _profit = arv - _totalInv - _agent - _notary - _title;
+                          const _roi = _totalInv > 0 ? (_profit / _totalInv) * 100 : 0;
+                          return (
+                            <div className="flex items-center gap-3 ml-2 text-xs">
+                              <span className="text-muted-foreground">Profit:</span>
+                              <span className={cn("font-bold", _profit >= 30000 ? "text-emerald-400" : _profit >= 0 ? "text-amber-400" : "text-red-400")}>
+                                {formatCurrency(_profit)}
+                              </span>
+                              <span className="text-muted-foreground">ROI:</span>
+                              <span className={cn("font-bold", _roi >= 25 ? "text-emerald-400" : _roi >= 15 ? "text-amber-400" : "text-red-400")}>
+                                {_roi.toFixed(1)}%
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </div>
                       <div className="flex items-center gap-2">
                         <Button 

@@ -63,6 +63,7 @@ interface OfferRecord {
   counterPrice: number | null;
   nextFollowUp: string | null;
   notes: string;
+  numbersReviewed: boolean;
 }
 
 const EMPTY_OFFER: OfferRecord = {
@@ -73,6 +74,7 @@ const EMPTY_OFFER: OfferRecord = {
   counterPrice: null,
   nextFollowUp: null,
   notes: '',
+  numbersReviewed: false,
 };
 
 // ─── localStorage helpers ──────────────────────────────────────────────────────
@@ -348,9 +350,15 @@ function AcquisitionCard({ deal }: { deal: Deal }) {
   const [emailOpen, setEmailOpen] = useState(false);
   const [emailText, setEmailText] = useState('');
 
+  const toggleReviewed = () => {
+    const next = { ...offer, numbersReviewed: !offer.numbersReviewed };
+    setOffer(next);
+    saveOffer(deal.id, next);
+  };
+
   const openEmail = () => {
     if (!analysis) return;
-    const price = offer.offerPrice ?? analysis.safeOfferHigh ?? analysis.flipMao.conservative ?? 0;
+    const price = offer.offerPrice ?? analysis.safeOfferHigh ?? analysis.flipMao.worstCase ?? 0;
     setEmailText(generateOfferEmail(deal, analysis, price));
     setEmailOpen(true);
   };
@@ -367,11 +375,12 @@ function AcquisitionCard({ deal }: { deal: Deal }) {
 
   const { arvAnalysis, rehabAnalysis, flipMao, brrrrMao, requiredDiscount, safeOfferLow, safeOfferHigh } = analysis;
   const isHighRisk = arvAnalysis.confidence === 'red' || rehabAnalysis.confidence === 'low';
-  const dealWorks = flipMao.conservative != null && analysis.listPrice <= (flipMao.conservative ?? 0);
+  const dealWorks = flipMao.worstCase != null && analysis.listPrice <= (flipMao.worstCase ?? 0);
+  const isQualified = deal.status === 'qualified';
 
   return (
     <>
-      <Card className={`border ${isHighRisk ? 'border-yellow-500/30' : ''} ${dealWorks ? 'border-green-500/30' : ''}`}>
+      <Card className={`border ${isQualified ? 'border-primary/50 ring-1 ring-primary/20' : isHighRisk ? 'border-yellow-500/30' : ''} ${dealWorks ? 'border-green-500/30' : ''}`}>
         <CardHeader className="pb-2 pt-4 px-4">
           {/* Top row */}
           <div className="flex items-start justify-between gap-2">
@@ -400,6 +409,9 @@ function AcquisitionCard({ deal }: { deal: Deal }) {
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
+              {isQualified && (
+                <Badge className="text-xs bg-primary/15 text-primary border-primary/30">Qualified</Badge>
+              )}
               <OfferStatusBadge status={offer.status} />
               {isHighRisk && (
                 <Tooltip>
@@ -479,13 +491,32 @@ function AcquisitionCard({ deal }: { deal: Deal }) {
             )}
           </div>
 
+          {/* Numbers reviewed gate */}
+          <div
+            className={`flex items-center gap-2 rounded-md px-3 py-2 cursor-pointer select-none border transition-colors ${
+              offer.numbersReviewed
+                ? 'border-green-500/40 bg-green-500/10 text-green-400'
+                : 'border-border bg-muted/30 text-muted-foreground hover:border-primary/40'
+            }`}
+            onClick={toggleReviewed}
+          >
+            <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${offer.numbersReviewed ? 'bg-green-500 border-green-500' : 'border-muted-foreground'}`}>
+              {offer.numbersReviewed && <Check className="w-3 h-3 text-white" />}
+            </div>
+            <span className="text-xs font-medium">
+              {offer.numbersReviewed ? 'Numbers reviewed — ready to offer' : 'Check this after reviewing ARV, rehab, and MAO'}
+            </span>
+          </div>
+
           {/* Offer tracking row */}
           <div className="flex items-center justify-between gap-2">
             <Button
               size="sm"
               variant="outline"
               onClick={openEmail}
+              disabled={!offer.numbersReviewed}
               className="gap-1.5"
+              title={!offer.numbersReviewed ? 'Review the numbers above before generating an offer' : undefined}
             >
               <Mail className="w-3.5 h-3.5" />
               Generate Offer Email
@@ -519,7 +550,12 @@ function AcquisitionCard({ deal }: { deal: Deal }) {
 
 // ─── Filters ──────────────────────────────────────────────────────────────────
 
-const ACTIVE_STATUSES = new Set(['new', 'under_analysis', 'qualified', 'offer_sent', 'under_contract', 'pending_other']);
+// Only show deals that can still receive an offer — exclude pending/closed/dead
+const ACTIVE_STATUSES = new Set(['new', 'under_analysis', 'qualified', 'offer_sent']);
+
+// Minimum ratio: our best-case offer must be at least this fraction of list price
+// Filters out deals where the math is so far off that no realistic offer exists
+const MIN_OFFER_RATIO = 0.50;
 
 type TimeRange = 'week' | 'month' | 'all';
 
@@ -578,15 +614,21 @@ export default function AcquisitionPage() {
     return deals
       .filter(d => passesFilters(d, filters))
       .map(d => ({ deal: d, analysis: analyzeAcquisition(d) }))
-      // Only deals where at least the best-case scenario yields a positive MAO
-      .filter(({ analysis }) => analysis !== null && analysis.flipMao.bestCase !== null)
+      // Only deals where best-case MAO is positive AND offer is ≥ 50% of ask
+      .filter(({ analysis }) => {
+        if (!analysis || analysis.flipMao.bestCase === null) return false;
+        // Exclude deals where even the best offer is unrealistically low vs asking
+        if (analysis.safeOfferHigh != null && analysis.listPrice > 0) {
+          if (analysis.safeOfferHigh / analysis.listPrice < MIN_OFFER_RATIO) return false;
+        }
+        return true;
+      })
       .sort(({ deal: a, analysis: aa }, { deal: b, analysis: ab }) => {
-        // Deals closer to working (smaller required discount %) float up
-        const oa = loadOffer(a.id).status;
-        const ob = loadOffer(b.id).status;
-        if (oa === 'not_sent' && ob !== 'not_sent') return -1;
-        if (ob === 'not_sent' && oa !== 'not_sent') return 1;
-        // Sort by required discount ascending (less discount needed = better deal)
+        // Qualified deals always first
+        const aQ = a.status === 'qualified' ? 0 : 1;
+        const bQ = b.status === 'qualified' ? 0 : 1;
+        if (aQ !== bQ) return aQ - bQ;
+        // Then by required discount ascending (less discount needed = better deal)
         const discA = aa?.requiredDiscount ?? Infinity;
         const discB = ab?.requiredDiscount ?? Infinity;
         return discA - discB;
@@ -599,7 +641,11 @@ export default function AcquisitionPage() {
     const analyzable = deals.filter(d => {
       if (!ACTIVE_STATUSES.has(d.status)) return false;
       const analysis = analyzeAcquisition(d);
-      return analysis !== null && analysis.flipMao.bestCase !== null;
+      if (!analysis || analysis.flipMao.bestCase === null) return false;
+      if (analysis.safeOfferHigh != null && analysis.listPrice > 0) {
+        if (analysis.safeOfferHigh / analysis.listPrice < MIN_OFFER_RATIO) return false;
+      }
+      return true;
     });
     const withOffer = analyzable.filter(d => loadOffer(d.id).status !== 'not_sent');
     const withResponse = analyzable.filter(d => {
