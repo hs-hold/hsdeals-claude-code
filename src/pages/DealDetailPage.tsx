@@ -3228,9 +3228,12 @@ BRRRR STRATEGY:
         // Cash to close (no financing)
         const cashToClose = purchasePrice + closingCostsBuy;
         
-        // Check for suspicious data
+        // Check for suspicious data — use liveFinancials.arv as the effective ARV
+        // (it already accounts for comp validation), so the warning only fires when
+        // the *effective* ARV is unrealistic, not when the raw API value is bad but comps fixed it.
+        const effectiveArvForCheck = localOverrides.arv ? parseFloat(localOverrides.arv) : (liveFinancials?.arv ?? null);
         const suspiciousCheck = detectSuspiciousData(apiData, {
-          arv: localOverrides.arv ? parseFloat(localOverrides.arv) : null,
+          arv: effectiveArvForCheck,
           purchasePrice: localOverrides.purchasePrice ? parseFloat(localOverrides.purchasePrice) : null,
           rent: localOverrides.rent ? parseFloat(localOverrides.rent) : null,
           rehabCost: localOverrides.rehabCost ? parseFloat(localOverrides.rehabCost) : null,
@@ -3979,7 +3982,7 @@ BRRRR STRATEGY:
               // Get current effective values (same logic as main section)
               const purchasePrice = localOverrides.purchasePrice ? parseFloat(localOverrides.purchasePrice) : (apiData?.purchasePrice ?? 0);
               const baseRehabCost = localOverrides.rehabCost ? parseFloat(localOverrides.rehabCost) : (apiData?.rehabCost ?? 0);
-              const baseArv = localOverrides.arv ? parseFloat(localOverrides.arv) : (apiData?.arv ?? 0);
+              const baseArv = localOverrides.arv ? parseFloat(localOverrides.arv) : (liveFinancials?.arv ?? apiData?.arv ?? 0);
               const rent = liveFinancials?.monthlyGrossRent ?? 0;
               
               // Layout adjustments
