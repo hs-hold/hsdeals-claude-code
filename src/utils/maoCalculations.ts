@@ -24,9 +24,12 @@ export interface RehabAnalysis {
 }
 
 export interface MaoScenarios {
-  conservative: number | null;
+  /** Worst-case assumptions (high rehab, lower ARV mult) — this is what you send */
+  worstCase: number | null;
+  /** Expected assumptions */
   base: number | null;
-  aggressive: number | null;
+  /** Best-case assumptions (low rehab, higher ARV mult) — ceiling, do not exceed */
+  bestCase: number | null;
   transactionCosts: number;
 }
 
@@ -37,9 +40,13 @@ export interface AcquisitionAnalysis {
   rehabAnalysis: RehabAnalysis;
   flipMao: MaoScenarios;
   brrrrMao: MaoScenarios;
+  /** Max purchase price for flip to work with $50K profit — equals flipMao.worstCase */
   worksAsFlipBelow: number | null;
+  /** Max purchase price for full BRRRR capital recovery */
   worksAsBrrrrBelow: number | null;
+  /** listPrice - worksAsFlipBelow; positive = need this discount; null if no MAO */
   requiredDiscount: number | null;
+  /** Offer range to send: 93%–100% of worstCase MAO */
   safeOfferLow: number | null;
   safeOfferHigh: number | null;
 }
@@ -193,9 +200,9 @@ export function calcFlipMao(arv: number, rehabAnalysis: RehabAnalysis): MaoScena
   };
 
   return {
-    conservative: calc(rehabAnalysis.high, 0.65),
+    worstCase: calc(rehabAnalysis.high, 0.65),   // high rehab + conservative ARV = lowest safe offer
     base: calc(rehabAnalysis.base, 0.70),
-    aggressive: calc(rehabAnalysis.low, 0.75),
+    bestCase: calc(rehabAnalysis.low, 0.75),      // low rehab + optimistic ARV = ceiling, don't exceed
     transactionCosts: txCosts,
   };
 }
@@ -210,17 +217,25 @@ export function calcBrrrrMao(arv: number, rehabAnalysis: RehabAnalysis, refiLtv 
   };
 
   return {
-    conservative: calc(rehabAnalysis.high),
+    worstCase: calc(rehabAnalysis.high),
     base: calc(rehabAnalysis.base),
-    aggressive: calc(rehabAnalysis.low),
+    bestCase: calc(rehabAnalysis.low),
     transactionCosts: txCosts,
   };
 }
 
+/** Returns a valid finite number, or null for null/undefined/NaN/non-numeric strings */
+export function safeNum(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = typeof v === 'number' ? v : Number(v);
+  return isFinite(n) && !isNaN(n) ? n : null;
+}
+
 export function analyzeAcquisition(deal: Deal): AcquisitionAnalysis | null {
-  const { apiData, overrides } = deal;
-  const arv = overrides.arv ?? apiData.arv;
-  const listPrice = overrides.purchasePrice ?? apiData.purchasePrice;
+  const { apiData, overrides, financials } = deal;
+  // safeNum guards against NaN, "NaN" strings, and other invalid values
+  const arv = safeNum(overrides.arv) ?? safeNum(apiData.arv) ?? safeNum(financials?.arv);
+  const listPrice = safeNum(overrides.purchasePrice) ?? safeNum(apiData.purchasePrice) ?? safeNum(financials?.purchasePrice);
 
   if (!arv || arv <= 0 || !listPrice || listPrice <= 0) return null;
 
@@ -229,8 +244,8 @@ export function analyzeAcquisition(deal: Deal): AcquisitionAnalysis | null {
   const flipMao = calcFlipMao(arv, rehabAnalysis);
   const brrrrMao = calcBrrrrMao(arv, rehabAnalysis);
 
-  const worksAsFlipBelow = flipMao.conservative;
-  const worksAsBrrrrBelow = brrrrMao.conservative;
+  const worksAsFlipBelow = flipMao.worstCase;
+  const worksAsBrrrrBelow = brrrrMao.worstCase;
   const requiredDiscount = worksAsFlipBelow != null ? listPrice - worksAsFlipBelow : null;
 
   const safeOfferHigh = worksAsFlipBelow;

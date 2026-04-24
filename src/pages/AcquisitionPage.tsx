@@ -5,6 +5,7 @@ import { Deal } from '@/types/deal';
 import {
   analyzeAcquisition,
   generateOfferEmail,
+  safeNum,
   AcquisitionAnalysis,
   ArvConfidence,
   RehabConfidence,
@@ -439,9 +440,9 @@ function AcquisitionCard({ deal }: { deal: Deal }) {
 
           {/* MAO Grid */}
           <div className="grid grid-cols-3 gap-2">
-            <MaoBox label="Conservative MAO" value={flipMao.conservative} listPrice={analysis.listPrice} highlight />
-            <MaoBox label="Base MAO" value={flipMao.base} listPrice={analysis.listPrice} />
-            <MaoBox label="Aggressive MAO" value={flipMao.aggressive} listPrice={analysis.listPrice} />
+            <MaoBox label="Safe Offer ↓ Send This" value={flipMao.worstCase} listPrice={analysis.listPrice} highlight />
+            <MaoBox label="Base Case" value={flipMao.base} listPrice={analysis.listPrice} />
+            <MaoBox label="Best Case ↑ Ceiling" value={flipMao.bestCase} listPrice={analysis.listPrice} />
           </div>
 
           {/* Works at / Recommendation */}
@@ -557,7 +558,11 @@ export default function AcquisitionPage() {
 
   const filtered = useMemo(() => {
     return deals
-      .filter(d => (d.apiData.arv || d.overrides.arv) && (d.apiData.purchasePrice || d.overrides.purchasePrice))
+      .filter(d => {
+        const arv = safeNum(d.overrides.arv) ?? safeNum(d.apiData.arv) ?? safeNum(d.financials?.arv);
+        const price = safeNum(d.overrides.purchasePrice) ?? safeNum(d.apiData.purchasePrice) ?? safeNum(d.financials?.purchasePrice);
+        return arv && arv > 0 && price && price > 0;
+      })
       .filter(d => passesFilters(d, filters))
       .sort((a, b) => {
         // Sort by: has offer < no offer, then by DOM descending
@@ -571,7 +576,11 @@ export default function AcquisitionPage() {
 
   // Stats
   const stats = useMemo(() => {
-    const analyzable = deals.filter(d => (d.apiData.arv || d.overrides.arv) && (d.apiData.purchasePrice || d.overrides.purchasePrice) && ACTIVE_STATUSES.has(d.status));
+    const analyzable = deals.filter(d => {
+      const arv = safeNum(d.overrides.arv) ?? safeNum(d.apiData.arv) ?? safeNum(d.financials?.arv);
+      const price = safeNum(d.overrides.purchasePrice) ?? safeNum(d.apiData.purchasePrice) ?? safeNum(d.financials?.purchasePrice);
+      return arv && arv > 0 && price && price > 0 && ACTIVE_STATUSES.has(d.status);
+    });
     const withOffer = analyzable.filter(d => loadOffer(d.id).status !== 'not_sent');
     const withResponse = analyzable.filter(d => {
       const s = loadOffer(d.id).status;
@@ -690,7 +699,11 @@ export default function AcquisitionPage() {
       {/* Results */}
       <div className="text-sm text-muted-foreground">
         Showing {filtered.length} deal{filtered.length !== 1 ? 's' : ''}
-        {filtered.length < deals.filter(d => (d.apiData.arv || d.overrides.arv) && (d.apiData.purchasePrice || d.overrides.purchasePrice) && ACTIVE_STATUSES.has(d.status)).length && ' (filtered)'}
+        {filtered.length < deals.filter(d => {
+          const arv = safeNum(d.overrides.arv) ?? safeNum(d.apiData.arv) ?? safeNum(d.financials?.arv);
+          const price = safeNum(d.overrides.purchasePrice) ?? safeNum(d.apiData.purchasePrice) ?? safeNum(d.financials?.purchasePrice);
+          return arv && arv > 0 && price && price > 0 && ACTIVE_STATUSES.has(d.status);
+        }).length && ' (filtered)'}
       </div>
 
       {filtered.length === 0 ? (
