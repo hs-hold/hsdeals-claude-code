@@ -521,12 +521,29 @@ function AcquisitionCard({ deal }: { deal: Deal }) {
 
 const ACTIVE_STATUSES = new Set(['new', 'under_analysis', 'qualified', 'offer_sent', 'under_contract', 'pending_other']);
 
+type TimeRange = 'week' | 'month' | 'all';
+
+function cutoffDate(range: TimeRange): Date | null {
+  if (range === 'all') return null;
+  const d = new Date();
+  if (range === 'week') d.setDate(d.getDate() - 7);
+  if (range === 'month') d.setMonth(d.getMonth() - 1);
+  return d;
+}
+
 function passesFilters(
   deal: Deal,
-  filters: { domMin: number; offerFilter: string; statusFilter: string },
+  filters: { domMin: number; offerFilter: string; statusFilter: string; timeRange: TimeRange },
 ): boolean {
   if (!ACTIVE_STATUSES.has(deal.status)) return false;
   if (filters.statusFilter !== 'all' && deal.status !== filters.statusFilter) return false;
+
+  // Time filter — use analyzedAt if available, else createdAt
+  const cutoff = cutoffDate(filters.timeRange);
+  if (cutoff) {
+    const dateStr = deal.analyzedAt ?? deal.createdAt;
+    if (!dateStr || new Date(dateStr) < cutoff) return false;
+  }
 
   const dom = deal.apiData.daysOnMarket;
   if (filters.domMin > 0 && (dom == null || dom < filters.domMin)) return false;
@@ -549,12 +566,13 @@ function passesFilters(
 
 export default function AcquisitionPage() {
   const { deals } = useDeals();
+  const [timeRange, setTimeRange] = useState<TimeRange>('week');
   const [domMin, setDomMin] = useState(0);
   const [offerFilter, setOfferFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [showFilters, setShowFilters] = useState(false);
 
-  const filters = useMemo(() => ({ domMin, offerFilter, statusFilter }), [domMin, offerFilter, statusFilter]);
+  const filters = useMemo(() => ({ domMin, offerFilter, statusFilter, timeRange }), [domMin, offerFilter, statusFilter, timeRange]);
 
   const filtered = useMemo(() => {
     return deals
@@ -597,6 +615,7 @@ export default function AcquisitionPage() {
   }, [deals]);
 
   const resetFilters = useCallback(() => {
+    setTimeRange('week');
     setDomMin(0);
     setOfferFilter('all');
     setStatusFilter('all');
@@ -605,11 +624,28 @@ export default function AcquisitionPage() {
   return (
     <div className="container mx-auto p-4 max-w-4xl space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">Acquisition Engine</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          At what price does each deal work? Focus on offers, not scores.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Acquisition Engine</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            At what price does each deal work? Focus on offers, not scores.
+          </p>
+        </div>
+        <div className="flex items-center rounded-lg border border-border bg-card p-1 gap-1 shrink-0">
+          {(['week', 'month', 'all'] as TimeRange[]).map(r => (
+            <button
+              key={r}
+              onClick={() => setTimeRange(r)}
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                timeRange === r
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {r === 'week' ? 'Last 7 days' : r === 'month' ? 'Last 30 days' : 'All time'}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* KPI bar */}
