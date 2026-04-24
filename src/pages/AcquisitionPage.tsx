@@ -376,6 +376,9 @@ function AcquisitionCard({ deal }: { deal: Deal }) {
   const { arvAnalysis, rehabAnalysis, flipMao, brrrrMao, requiredDiscount, safeOfferLow, safeOfferHigh } = analysis;
   const isHighRisk = arvAnalysis.confidence === 'red' || rehabAnalysis.confidence === 'low';
   const dealWorks = flipMao.worstCase != null && analysis.listPrice <= (flipMao.worstCase ?? 0);
+  const discountPct = requiredDiscount != null && analysis.listPrice > 0
+    ? Math.round((requiredDiscount / analysis.listPrice) * 100)
+    : null;
   const isQualified = deal.status === 'qualified';
 
   return (
@@ -478,7 +481,7 @@ function AcquisitionCard({ deal }: { deal: Deal }) {
               <span className={`font-bold ${requiredDiscount != null && requiredDiscount > 0 ? 'text-orange-400' : 'text-green-400'}`}>
                 {requiredDiscount != null
                   ? requiredDiscount > 0
-                    ? `${fmt(requiredDiscount)} needed`
+                    ? `${fmt(requiredDiscount)} (${discountPct}% off ask)`
                     : 'Already works!'
                   : '—'}
               </span>
@@ -563,9 +566,21 @@ function cutoffDate(range: TimeRange): Date | null {
   return d;
 }
 
+type DiscountFilter = 'all' | '5' | '10' | '15' | '20' | '30';
+
+const DISCOUNT_OPTIONS: { value: DiscountFilter; label: string; desc: string }[] = [
+  { value: 'all',  label: 'All deals',     desc: 'Show everything' },
+  { value: '5',    label: '≤5% off ask',   desc: 'Seller drops max 5% — very realistic' },
+  { value: '10',   label: '≤10% off ask',  desc: 'Seller drops max 10% — normal negotiation' },
+  { value: '15',   label: '≤15% off ask',  desc: 'Seller drops max 15%' },
+  { value: '20',   label: '≤20% off ask',  desc: 'Seller drops max 20% — motivated seller' },
+  { value: '30',   label: '≤30% off ask',  desc: 'Seller drops max 30% — very distressed' },
+];
+
 function passesFilters(
   deal: Deal,
-  filters: { domMin: number; offerFilter: string; statusFilter: string; timeRange: TimeRange },
+  filters: { domMin: number; offerFilter: string; statusFilter: string; timeRange: TimeRange; discountFilter: DiscountFilter },
+  analysis: AcquisitionAnalysis | null,
 ): boolean {
   if (!ACTIVE_STATUSES.has(deal.status)) return false;
   if (filters.statusFilter !== 'all' && deal.status !== filters.statusFilter) return false;
@@ -591,6 +606,16 @@ function passesFilters(
     }
   }
 
+  // Discount filter — key filter: how much does seller need to drop for deal to work?
+  if (filters.discountFilter !== 'all' && analysis) {
+    const maxDiscountPct = parseInt(filters.discountFilter);
+    const reqDisc = analysis.requiredDiscount;
+    const listPrice = analysis.listPrice;
+    if (reqDisc == null || listPrice <= 0) return false;
+    const discountPct = (reqDisc / listPrice) * 100;
+    if (discountPct > maxDiscountPct) return false;
+  }
+
   return true;
 }
 
@@ -602,80 +627,94 @@ export default function AcquisitionPage() {
   const [domMin, setDomMin] = useState(0);
   const [offerFilter, setOfferFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [discountFilter, setDiscountFilter] = useState<DiscountFilter>('all');
   const [showFilters, setShowFilters] = useState(false);
 
-  const filters = useMemo(() => ({ domMin, offerFilter, statusFilter, timeRange }), [domMin, offerFilter, statusFilter, timeRange]);
+  const filters = useMemo(
+    () => ({ domMin, offerFilter, statusFilter, timeRange, discountFilter }),
+    [domMin, offerFilter, statusFilter, timeRange, discountFilter],
+  );
+
+  // Pre-compute analysis for all deals once, then filter/sort
+  const analyzed = useMemo(() =>
+    deals
+      .filter(d => ACTIVE_STATUSES.has(d.status))
+      .map(d => ({ deal: d, analysis: analyzeAcquisition(d) }))
+      .filter(({ analysis }) => analysis !== null && analysis.flipMao.bestCase !== null),
+    [deals],
+  );
 
   const filtered = useMemo(() => {
-    return deals
-      .filter(d => passesFilters(d, filters))
-      .map(d => ({ deal: d, analysis: analyzeAcquisition(d) }))
-      .filter(({ analysis }) => analysis !== null && analysis.flipMao.bestCase !== null)
+    return analyzed
+      .filter(({ deal, analysis }) => passesFilters(deal, filters, analysis))
       .sort(({ deal: a, analysis: aa }, { deal: b, analysis: ab }) => {
         // Qualified deals always first
         const aQ = a.status === 'qualified' ? 0 : 1;
         const bQ = b.status === 'qualified' ? 0 : 1;
         if (aQ !== bQ) return aQ - bQ;
-        // Then by required discount ascending (less discount needed = better deal)
-        const discA = aa?.requiredDiscount ?? Infinity;
-        const discB = ab?.requiredDiscount ?? Infinity;
-        return discA - discB;
+        // Then by required discount % ascending (closest to working = best)
+        const pctA = aa && aa.listPrice > 0 ? (aa.requiredDiscount ?? Infinity) / aa.listPrice : Infinity;
+        const pctB = ab && ab.listPrice > 0 ? (ab.requiredDiscount ?? Infinity) / ab.listPrice : Infinity;
+        return pctA - pctB;
       })
       .map(({ deal }) => deal);
-  }, [deals, filters]);
+  }, [analyzed, filters]);
 
-  // Stats — count only deals with at least one viable MAO scenario
+  // Stats over all analyzable deals (no time/discount filter — just totals)
   const stats = useMemo(() => {
-    const analyzable = deals.filter(d => {
-      if (!ACTIVE_STATUSES.has(d.status)) return false;
-      const analysis = analyzeAcquisition(d);
-      if (!analysis || analysis.flipMao.bestCase === null) return false;
-      if (!analysis || analysis.flipMao.bestCase === null) return false;
-      return true;
-    });
-    const withOffer = analyzable.filter(d => loadOffer(d.id).status !== 'not_sent');
-    const withResponse = analyzable.filter(d => {
-      const s = loadOffer(d.id).status;
+    const withOffer = analyzed.filter(d => loadOffer(d.deal.id).status !== 'not_sent');
+    const withResponse = analyzed.filter(({ deal }) => {
+      const s = loadOffer(deal.id).status;
       return s === 'responded' || s === 'counter' || s === 'accepted';
     });
-    const dueFollowup = analyzable.filter(d => {
-      const rec = loadOffer(d.id);
+    const dueFollowup = analyzed.filter(({ deal }) => {
+      const rec = loadOffer(deal.id);
       if (!rec.nextFollowUp) return false;
       return rec.nextFollowUp <= new Date().toISOString().split('T')[0];
     });
-    return { total: analyzable.length, withOffer: withOffer.length, withResponse: withResponse.length, dueFollowup: dueFollowup.length };
-  }, [deals]);
+    return { total: analyzed.length, withOffer: withOffer.length, withResponse: withResponse.length, dueFollowup: dueFollowup.length };
+  }, [analyzed]);
 
   const resetFilters = useCallback(() => {
-    setTimeRange('week');
+    setTimeRange('month');
     setDomMin(0);
     setOfferFilter('all');
     setStatusFilter('all');
+    setDiscountFilter('all');
   }, []);
 
   return (
-    <div className="container mx-auto p-4 max-w-4xl space-y-6">
+    <div className="container mx-auto p-4 max-w-4xl space-y-4">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Acquisition Engine</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            At what price does each deal work? Focus on offers, not scores.
-          </p>
+      <div>
+        <h1 className="text-2xl font-bold">Acquisition Engine</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          At what price does each deal work? Find the ones worth offering on.
+        </p>
+      </div>
+
+      {/* Primary filter: discount needed — the most important question */}
+      <div className="space-y-1.5">
+        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          How much does the seller need to drop their price for the deal to work?
         </div>
-        <div className="flex items-center rounded-lg border border-border bg-card p-1 gap-1 shrink-0">
-          {(['week', 'month', 'all'] as TimeRange[]).map(r => (
-            <button
-              key={r}
-              onClick={() => setTimeRange(r)}
-              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                timeRange === r
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {r === 'week' ? 'Last 7 days' : r === 'month' ? 'Last 30 days' : 'All time'}
-            </button>
+        <div className="flex flex-wrap gap-2">
+          {DISCOUNT_OPTIONS.map(opt => (
+            <Tooltip key={opt.value}>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setDiscountFilter(opt.value)}
+                  className={`px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${
+                    discountFilter === opt.value
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'border-border bg-card text-muted-foreground hover:text-foreground hover:border-primary/50'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{opt.desc}</TooltipContent>
+            </Tooltip>
           ))}
         </div>
       </div>
@@ -683,10 +722,10 @@ export default function AcquisitionPage() {
       {/* KPI bar */}
       <div className="grid grid-cols-4 gap-3">
         {[
-          { label: 'Analyzable Deals', value: stats.total },
-          { label: 'Offers Sent', value: stats.withOffer },
+          { label: 'Total analyzable', value: stats.total },
+          { label: 'Offers sent', value: stats.withOffer },
           { label: 'Responses', value: stats.withResponse },
-          { label: 'Follow-ups Due', value: stats.dueFollowup, highlight: stats.dueFollowup > 0 },
+          { label: 'Follow-ups due', value: stats.dueFollowup, highlight: stats.dueFollowup > 0 },
         ].map(s => (
           <div key={s.label} className={`rounded-lg border p-3 text-center ${s.highlight ? 'border-orange-500/40 bg-orange-500/5' : 'border-border bg-card'}`}>
             <div className={`text-2xl font-bold ${s.highlight ? 'text-orange-400' : ''}`}>{s.value}</div>
@@ -695,81 +734,92 @@ export default function AcquisitionPage() {
         ))}
       </div>
 
-      {/* Filters */}
-      <div className="border border-border rounded-lg">
+      {/* Secondary filters — time range + advanced */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center rounded-lg border border-border bg-card p-1 gap-1">
+          {(['week', 'month', 'all'] as TimeRange[]).map(r => (
+            <button
+              key={r}
+              onClick={() => setTimeRange(r)}
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                timeRange === r ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {r === 'week' ? 'Last 7d' : r === 'month' ? 'Last 30d' : 'All time'}
+            </button>
+          ))}
+        </div>
+
         <button
-          className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium hover:bg-muted/30 transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground transition-colors"
           onClick={() => setShowFilters(f => !f)}
         >
-          <span className="flex items-center gap-2">
-            <Filter className="w-4 h-4" />
-            Filters
-            {(domMin > 0 || offerFilter !== 'all' || statusFilter !== 'all') && (
-              <Badge variant="secondary" className="text-xs">Active</Badge>
-            )}
-          </span>
-          {showFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          <Filter className="w-3.5 h-3.5" />
+          More filters
+          {(domMin > 0 || offerFilter !== 'all' || statusFilter !== 'all') && (
+            <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+          )}
         </button>
-        {showFilters && (
-          <div className="border-t border-border px-4 py-3 grid grid-cols-3 gap-4">
-            <div>
-              <Label className="text-xs text-muted-foreground mb-1 block">Min Days on Market</Label>
-              <Select value={String(domMin)} onValueChange={v => setDomMin(Number(v))}>
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="0">Any DOM</SelectItem>
-                  <SelectItem value="14">14+ days</SelectItem>
-                  <SelectItem value="30">30+ days</SelectItem>
-                  <SelectItem value="45">45+ days (stale)</SelectItem>
-                  <SelectItem value="60">60+ days</SelectItem>
-                  <SelectItem value="90">90+ days</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground mb-1 block">Offer Status</Label>
-              <Select value={offerFilter} onValueChange={setOfferFilter}>
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="no_offer">No offer sent</SelectItem>
-                  <SelectItem value="has_offer">Offer sent</SelectItem>
-                  <SelectItem value="needs_followup">Follow-up due</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground mb-1 block">Deal Status</Label>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Active</SelectItem>
-                  <SelectItem value="new">New</SelectItem>
-                  <SelectItem value="under_analysis">Under Analysis</SelectItem>
-                  <SelectItem value="qualified">Qualified</SelectItem>
-                  <SelectItem value="offer_sent">Offer Sent</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="col-span-3 flex justify-end">
-              <Button size="sm" variant="ghost" onClick={resetFilters} className="text-xs">
-                Reset filters
-              </Button>
-            </div>
-          </div>
+
+        {(discountFilter !== 'all' || domMin > 0 || offerFilter !== 'all' || statusFilter !== 'all' || timeRange !== 'month') && (
+          <button onClick={resetFilters} className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2">
+            Reset all
+          </button>
         )}
       </div>
 
-      {/* Results */}
+      {showFilters && (
+        <div className="border border-border rounded-lg px-4 py-3 grid grid-cols-3 gap-4 bg-card/50">
+          <div>
+            <Label className="text-xs text-muted-foreground mb-1 block">Min Days on Market</Label>
+            <Select value={String(domMin)} onValueChange={v => setDomMin(Number(v))}>
+              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">Any DOM</SelectItem>
+                <SelectItem value="14">14+ days</SelectItem>
+                <SelectItem value="30">30+ days</SelectItem>
+                <SelectItem value="45">45+ days (stale)</SelectItem>
+                <SelectItem value="60">60+ days</SelectItem>
+                <SelectItem value="90">90+ days</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground mb-1 block">Offer Status</Label>
+            <Select value={offerFilter} onValueChange={setOfferFilter}>
+              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="no_offer">No offer sent</SelectItem>
+                <SelectItem value="has_offer">Offer sent</SelectItem>
+                <SelectItem value="needs_followup">Follow-up due</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground mb-1 block">Deal Status</Label>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Active</SelectItem>
+                <SelectItem value="new">New</SelectItem>
+                <SelectItem value="under_analysis">Under Analysis</SelectItem>
+                <SelectItem value="qualified">Qualified</SelectItem>
+                <SelectItem value="offer_sent">Offer Sent</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      )}
+
+      {/* Results count */}
       <div className="text-sm text-muted-foreground">
-        Showing {filtered.length} deal{filtered.length !== 1 ? 's' : ''}
-        {filtered.length < stats.total && ' (filtered)'}
+        Showing {filtered.length} of {stats.total} deal{stats.total !== 1 ? 's' : ''}
+        {discountFilter !== 'all' && (
+          <span className="ml-1 text-primary font-medium">
+            · needs ≤{discountFilter}% discount
+          </span>
+        )}
       </div>
 
       {filtered.length === 0 ? (
