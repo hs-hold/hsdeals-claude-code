@@ -5,6 +5,7 @@ import { useSettings } from '@/context/SettingsContext';
 import { isDealAnalyzed } from '@/utils/dealHelpers';
 import { coerceLotSizeSqft } from '@/utils/lotSize';
 import { detectSuspiciousData } from '@/utils/suspiciousData';
+import { analyzeArv, analyzeRehab } from '@/utils/maoCalculations';
 import { DealStatusBadge } from '@/components/deals/DealStatusBadge';
 import { PropertyMap } from '@/components/deals/PropertyMap';
 import { formatCurrency, formatPercent, getEffectiveValue, calculateFinancials, validateArvAgainstComps, calculateArvFromRecentComps, getEffectiveMonthlyInsurance } from '@/utils/financialCalculations';
@@ -4035,7 +4036,14 @@ BRRRR STRATEGY:
               const scoreTitleFee = localOverrides.titleFees ? parseFloat(localOverrides.titleFees) : FINANCIAL_CONFIG.titleFees;
               const flipNetProfit = arv - flipTotalInvestment - flipAgentCommission - (scoreNotaryFee * 2) - scoreTitleFee;
               const flipRoi = flipTotalInvestment > 0 ? (flipNetProfit / flipTotalInvestment) * 100 : 0;
-              
+
+              // Confidence-adjusted scoring: ARV and rehab uncertainty reduce the score
+              const _arvConf = analyzeArv(arv, apiData?.saleComps ?? []).confidence;
+              const _rehabConf = analyzeRehab(deal).confidence;
+              const _arvFactor = _arvConf === 'green' ? 1.0 : _arvConf === 'yellow' ? 0.85 : 0.70;
+              const _rehabFactor = _rehabConf === 'high' ? 1.0 : _rehabConf === 'medium' ? 0.88 : 0.75;
+              const _confMultiplier = _arvFactor * _rehabFactor;
+
               // RENTAL metrics
               const rentalMonthlyCashflow = liveFinancials?.monthlyCashflow ?? 0;
               const rentalCashOnCash = (liveFinancials?.cashOnCashReturn ?? 0) * 100;
@@ -4102,21 +4110,21 @@ BRRRR STRATEGY:
                   // Net Profit warnings/success indicators
                   netProfitWarning: flipNetProfit < 25000,
                   netProfitSuccess: flipNetProfit >= 50000,
-                  // Flip score 1-10 based on ROI % (cash deal, no financing)
-                  // ≤8% = 1, 8-10% = 1-2, 11-12% = 3-4, 13-14% = 5, 15-17% = 6
-                  // 18-20% = 7-8, 20-25% = 9, ≥25% = 10
+                  // Flip score 1-10 based on ROI %, penalised for low ARV/rehab confidence
                   score: (() => {
                     const roi = flipRoi;
-                    if (roi >= 25) return 10;
-                    if (roi >= 20) return 9;
-                    if (roi >= 18) return 8;
-                    if (roi >= 17) return 7; // 18-20% midpoint
-                    if (roi >= 15) return 6;
-                    if (roi >= 13) return 5;
-                    if (roi >= 11) return 4;
-                    if (roi >= 10) return 3; // 11-12% midpoint
-                    if (roi >= 8) return 2;
-                    return 1;
+                    let base: number;
+                    if (roi >= 25) base = 10;
+                    else if (roi >= 20) base = 9;
+                    else if (roi >= 18) base = 8;
+                    else if (roi >= 17) base = 7;
+                    else if (roi >= 15) base = 6;
+                    else if (roi >= 13) base = 5;
+                    else if (roi >= 11) base = 4;
+                    else if (roi >= 10) base = 3;
+                    else if (roi >= 8) base = 2;
+                    else base = 1;
+                    return Math.max(1, Math.round(base * _confMultiplier));
                   })(),
                   isProfitable: flipNetProfit > 0,
                 },

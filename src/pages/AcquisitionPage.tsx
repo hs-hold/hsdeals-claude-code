@@ -5,11 +5,15 @@ import { Deal } from '@/types/deal';
 import {
   analyzeAcquisition,
   generateOfferEmail,
-  safeNum,
   AcquisitionAnalysis,
   ArvConfidence,
   RehabConfidence,
   RehabTier,
+  AtAskAnalysis,
+  TargetMaoAnalysis,
+  RiskAdjustedOffer,
+  FlipVerdict,
+  BrrrrVerdict,
 } from '@/utils/maoCalculations';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -358,10 +362,12 @@ function AcquisitionCard({ deal }: { deal: Deal }) {
 
   const openEmail = () => {
     if (!analysis) return;
-    const price = offer.offerPrice ?? analysis.safeOfferHigh ?? analysis.flipMao.worstCase ?? 0;
+    const price = offer.offerPrice ?? analysis.safeOfferHigh ?? analysis.riskAdjustedOffer.conservative ?? 0;
     setEmailText(generateOfferEmail(deal, analysis, price));
     setEmailOpen(true);
   };
+
+  const [brrrrExpanded, setBrrrrExpanded] = useState(false);
 
   if (!analysis) {
     return (
@@ -373,17 +379,33 @@ function AcquisitionCard({ deal }: { deal: Deal }) {
     );
   }
 
-  const { arvAnalysis, rehabAnalysis, flipMao, brrrrMao, requiredDiscount, safeOfferLow, safeOfferHigh } = analysis;
+  const { arvAnalysis, rehabAnalysis, atAsk, targetMao, riskAdjustedOffer, flipVerdict, brrrrVerdict, safeOfferLow, safeOfferHigh } = analysis;
   const isHighRisk = arvAnalysis.confidence === 'red' || rehabAnalysis.confidence === 'low';
-  const dealWorks = flipMao.worstCase != null && analysis.listPrice <= (flipMao.worstCase ?? 0);
-  const discountPct = requiredDiscount != null && analysis.listPrice > 0
-    ? Math.round((requiredDiscount / analysis.listPrice) * 100)
-    : null;
+  const dealWorksAtAsk = atAsk.verdict === 'strong_flip' || atAsk.verdict === 'target_met' || atAsk.verdict === 'near_target';
+  const discountPct = targetMao.discountPctNeeded > 0 ? Math.round(targetMao.discountPctNeeded) : null;
   const isQualified = deal.status === 'qualified';
+
+  // Verdict badge colors
+  const atAskVerdictColor: Record<AtAskAnalysis['verdict'], string> = {
+    strong_flip: 'bg-green-500/15 text-green-400 border-green-500/30',
+    target_met: 'bg-green-500/15 text-green-400 border-green-500/30',
+    near_target: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+    marginal: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+    thin: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
+    not_a_flip: 'bg-red-500/15 text-red-400 border-red-500/30',
+  };
+  const flipActionColor: Record<FlipVerdict['action'], string> = {
+    send_offer: 'bg-green-500/15 text-green-400 border-green-500/30',
+    review_arv: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    review_rehab: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    contractor_review: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    lowball_only: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
+    pass: 'bg-red-500/15 text-red-400 border-red-500/30',
+  };
 
   return (
     <>
-      <Card className={`border ${isQualified ? 'border-primary/50 ring-1 ring-primary/20' : isHighRisk ? 'border-yellow-500/30' : ''} ${dealWorks ? 'border-green-500/30' : ''}`}>
+      <Card className={`border ${isQualified ? 'border-primary/50 ring-1 ring-primary/20' : isHighRisk ? 'border-yellow-500/30' : ''} ${dealWorksAtAsk ? 'border-green-500/30' : ''}`}>
         <CardHeader className="pb-2 pt-4 px-4">
           {/* Top row */}
           <div className="flex items-start justify-between gap-2">
@@ -453,43 +475,139 @@ function AcquisitionCard({ deal }: { deal: Deal }) {
             </div>
           </div>
 
-          {/* MAO Grid */}
-          <div className="grid grid-cols-3 gap-2">
-            <MaoBox label="Safe Offer ↓ Send This" value={flipMao.worstCase} listPrice={analysis.listPrice} highlight />
-            <MaoBox label="Base Case" value={flipMao.base} listPrice={analysis.listPrice} />
-            <MaoBox label="Best Case ↑ Ceiling" value={flipMao.bestCase} listPrice={analysis.listPrice} />
+          {/* Section A: At Asking Price */}
+          <div className="rounded-lg bg-muted/30 border border-border p-3 space-y-2">
+            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">At Asking Price</div>
+            <div className="flex items-center gap-4 text-sm flex-wrap">
+              <div>
+                <span className="text-xs text-muted-foreground">Total Investment</span>
+                <div className="font-medium">{fmt(atAsk.totalInvestment)}</div>
+              </div>
+              <div>
+                <span className="text-xs text-muted-foreground">Profit</span>
+                <div className={`font-bold ${atAsk.profit >= 50000 ? 'text-green-400' : atAsk.profit >= 20000 ? 'text-yellow-400' : atAsk.profit >= 0 ? 'text-orange-400' : 'text-red-400'}`}>
+                  {fmt(atAsk.profit)}
+                </div>
+              </div>
+              <div>
+                <span className="text-xs text-muted-foreground">ROI</span>
+                <div className="font-medium">{atAsk.roi.toFixed(1)}%</div>
+              </div>
+              <span className={`ml-auto inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${atAskVerdictColor[atAsk.verdict]}`}>
+                {atAsk.verdictLabel}
+              </span>
+            </div>
           </div>
 
-          {/* Works at / Recommendation */}
-          <div className="rounded-lg bg-muted/50 border border-border p-3 text-sm space-y-1.5">
+          {/* Section B: Target MAO */}
+          <div className="rounded-lg border border-border p-3 space-y-1.5 text-sm">
+            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Target Offer (for $50K profit)</div>
             <div className="flex justify-between">
               <span className="text-muted-foreground flex items-center gap-1">
-                <Target className="w-3.5 h-3.5" /> Works as Flip below
+                <Target className="w-3.5 h-3.5" /> Max price for $50K profit
               </span>
-              <span className="font-medium">{fmt(analysis.worksAsFlipBelow)}</span>
+              <span className="font-medium">{fmt(targetMao.mao)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground flex items-center gap-1">
-                <RefreshCw className="w-3.5 h-3.5" /> Works as BRRRR below
+                <TrendingDown className="w-3.5 h-3.5" /> Gap from ask
               </span>
-              <span className="font-medium">{fmt(analysis.worksAsBrrrrBelow)}</span>
+              {targetMao.gapFromAsk > 0
+                ? <span className="font-bold text-orange-400">{fmt(targetMao.gapFromAsk)} ({discountPct}% off ask)</span>
+                : <span className="font-bold text-green-400">Works at ask!</span>
+              }
             </div>
-            <div className="flex justify-between border-t border-border pt-1.5">
-              <span className="text-muted-foreground flex items-center gap-1">
-                <TrendingDown className="w-3.5 h-3.5" /> Required discount from ask
-              </span>
-              <span className={`font-bold ${requiredDiscount != null && requiredDiscount > 0 ? 'text-orange-400' : 'text-green-400'}`}>
-                {requiredDiscount != null
-                  ? requiredDiscount > 0
-                    ? `${fmt(requiredDiscount)} (${discountPct}% off ask)`
-                    : 'Already works!'
-                  : '—'}
-              </span>
+            <div className="flex justify-between font-semibold">
+              <span>Suggested range</span>
+              <span className="text-primary">{fmtShort(targetMao.offerLow)} – {fmtShort(targetMao.offerHigh)}</span>
             </div>
-            {safeOfferLow != null && safeOfferHigh != null && (
-              <div className="flex justify-between font-semibold">
-                <span>Send offer at</span>
-                <span className="text-primary">{fmtShort(safeOfferLow)} – {fmtShort(safeOfferHigh)}</span>
+            <div className="flex justify-between text-xs text-muted-foreground/60 border-t border-border pt-1">
+              <span>70% rule reference</span>
+              <span>{fmt(targetMao.ruleof70Ref)}</span>
+            </div>
+          </div>
+
+          {/* Section C: Risk-Adjusted Offer */}
+          <div className="rounded-lg border border-orange-500/20 bg-orange-500/5 p-3 space-y-2">
+            <div className="text-xs font-semibold text-orange-400/80 uppercase tracking-wide">Risk-Adjusted Offer</div>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { label: 'Conservative', value: riskAdjustedOffer.conservative },
+                { label: 'Base', value: riskAdjustedOffer.base },
+                { label: 'Ceiling', value: riskAdjustedOffer.ceiling },
+              ].map(({ label, value }) => (
+                <div key={label} className="rounded border border-border bg-card p-2 text-center">
+                  <div className="text-xs text-muted-foreground mb-1">{label}</div>
+                  <div className={`text-base font-bold ${value == null ? 'text-destructive' : 'text-foreground'}`}>
+                    {value == null ? 'No deal' : fmtShort(value)}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {riskAdjustedOffer.reasons.length > 0 && (
+              <div className="text-xs text-muted-foreground">
+                Adjusted for: {riskAdjustedOffer.reasons.join('; ')}
+              </div>
+            )}
+          </div>
+
+          {/* Section D: Flip Action Verdict */}
+          <div className="flex items-start gap-3 rounded-lg border border-border p-3">
+            <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-semibold shrink-0 ${flipActionColor[flipVerdict.action]}`}>
+              {flipVerdict.actionLabel}
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-muted-foreground">{flipVerdict.reasoning}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Score: {flipVerdict.finalScore}/10</p>
+            </div>
+          </div>
+
+          {/* Section E: BRRRR — collapsible */}
+          <div className="rounded-lg border border-border overflow-hidden">
+            <button
+              className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium hover:bg-muted/30 transition-colors"
+              onClick={() => setBrrrrExpanded(e => !e)}
+            >
+              <span className="flex items-center gap-2">
+                <RefreshCw className="w-3.5 h-3.5 text-muted-foreground" />
+                BRRRR — <span className="text-muted-foreground font-normal">{brrrrVerdict.classificationLabel}</span>
+              </span>
+              {brrrrExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+            {brrrrExpanded && (
+              <div className="px-3 pb-3 pt-1 border-t border-border grid grid-cols-2 gap-2 text-sm">
+                <div className="flex justify-between col-span-2">
+                  <span className="text-muted-foreground">Refi proceeds (75% LTV)</span>
+                  <span className="font-medium">{fmt(brrrrVerdict.refiProceeds)}</span>
+                </div>
+                <div className="flex justify-between col-span-2">
+                  <span className="text-muted-foreground">Cash left in deal</span>
+                  <span className={`font-bold ${brrrrVerdict.cashLeftInDeal <= 0 ? 'text-green-400' : brrrrVerdict.cashLeftPct <= 0.25 ? 'text-blue-400' : 'text-foreground'}`}>
+                    {brrrrVerdict.cashLeftInDeal <= 0 ? 'None (full BRRRR!)' : fmt(brrrrVerdict.cashLeftInDeal)}
+                  </span>
+                </div>
+                <div className="flex justify-between col-span-2">
+                  <span className="text-muted-foreground">Monthly mortgage</span>
+                  <span className="font-medium">{fmt(brrrrVerdict.monthlyMortgage)}/mo</span>
+                </div>
+                {brrrrVerdict.hasRentData ? (
+                  <>
+                    <div className="flex justify-between col-span-2">
+                      <span className="text-muted-foreground">Monthly cashflow (est.)</span>
+                      <span className={`font-bold ${(brrrrVerdict.monthlyCashflow ?? 0) > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {fmt(brrrrVerdict.monthlyCashflow)}/mo
+                      </span>
+                    </div>
+                    {brrrrVerdict.cocReturn != null && (
+                      <div className="flex justify-between col-span-2">
+                        <span className="text-muted-foreground">Cash-on-cash return</span>
+                        <span className="font-medium">{brrrrVerdict.cocReturn > 100 ? '∞' : `${brrrrVerdict.cocReturn.toFixed(1)}%`}</span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="col-span-2 text-xs text-muted-foreground italic">No rent data — add rent to see cashflow</div>
+                )}
               </div>
             )}
           </div>
@@ -606,13 +724,10 @@ function passesFilters(
     }
   }
 
-  // Discount filter — key filter: how much does seller need to drop for deal to work?
+  // Discount filter — key filter: how much does seller need to drop for deal to hit $50K profit?
   if (filters.discountFilter !== 'all' && analysis) {
     const maxDiscountPct = parseInt(filters.discountFilter);
-    const reqDisc = analysis.requiredDiscount;
-    const listPrice = analysis.listPrice;
-    if (reqDisc == null || listPrice <= 0) return false;
-    const discountPct = (reqDisc / listPrice) * 100;
+    const discountPct = analysis.targetMao.discountPctNeeded;
     if (discountPct > maxDiscountPct) return false;
   }
 
@@ -640,7 +755,7 @@ export default function AcquisitionPage() {
     deals
       .filter(d => ACTIVE_STATUSES.has(d.status))
       .map(d => ({ deal: d, analysis: analyzeAcquisition(d) }))
-      .filter(({ analysis }) => analysis !== null && analysis.flipMao.bestCase !== null),
+      .filter(({ analysis }) => analysis !== null),
     [deals],
   );
 
@@ -652,10 +767,10 @@ export default function AcquisitionPage() {
         const aQ = a.status === 'qualified' ? 0 : 1;
         const bQ = b.status === 'qualified' ? 0 : 1;
         if (aQ !== bQ) return aQ - bQ;
-        // Then by required discount % ascending (closest to working = best)
-        const pctA = aa && aa.listPrice > 0 ? (aa.requiredDiscount ?? Infinity) / aa.listPrice : Infinity;
-        const pctB = ab && ab.listPrice > 0 ? (ab.requiredDiscount ?? Infinity) / ab.listPrice : Infinity;
-        return pctA - pctB;
+        // Best profit first
+        const profitA = aa?.atAsk.profit ?? -Infinity;
+        const profitB = ab?.atAsk.profit ?? -Infinity;
+        return profitB - profitA;
       })
       .map(({ deal }) => deal);
   }, [analyzed, filters]);
@@ -817,7 +932,7 @@ export default function AcquisitionPage() {
         Showing {filtered.length} of {stats.total} deal{stats.total !== 1 ? 's' : ''}
         {discountFilter !== 'all' && (
           <span className="ml-1 text-primary font-medium">
-            · needs ≤{discountFilter}% discount
+            · needs ≤{discountFilter}% off for $50K profit
           </span>
         )}
       </div>

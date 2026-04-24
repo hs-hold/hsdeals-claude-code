@@ -33,20 +33,77 @@ export interface MaoScenarios {
   transactionCosts: number;
 }
 
+export interface AtAskAnalysis {
+  profit: number;
+  roi: number;
+  totalInvestment: number;
+  verdict: 'strong_flip' | 'target_met' | 'near_target' | 'marginal' | 'thin' | 'not_a_flip';
+  verdictLabel: string;
+}
+
+export interface TargetMaoAnalysis {
+  targetProfit: number;
+  mao: number;
+  gapFromAsk: number;
+  discountPctNeeded: number;
+  offerLow: number;
+  offerHigh: number;
+  ruleof70Ref: number;
+}
+
+export interface RiskAdjustedOffer {
+  conservative: number | null;
+  base: number | null;
+  ceiling: number | null;
+  arvHaircutPct: number;
+  reasons: string[];
+}
+
+export interface FlipVerdict {
+  action: 'send_offer' | 'review_arv' | 'review_rehab' | 'contractor_review' | 'lowball_only' | 'pass';
+  actionLabel: string;
+  reasoning: string;
+  profitScore: number;
+  arvConfScore: number;
+  rehabConfScore: number;
+  finalScore: number;
+}
+
+export interface BrrrrVerdict {
+  refiLtv: number;
+  refiProceeds: number;
+  totalCashIn: number;
+  cashLeftInDeal: number;
+  cashLeftPct: number;
+  monthlyMortgage: number;
+  monthlyCashflow: number | null;
+  annualCashflow: number | null;
+  cocReturn: number | null;
+  classification: 'full_brrrr' | 'partial_brrrr' | 'trapped_equity' | 'not_brrrr';
+  classificationLabel: string;
+  hasRentData: boolean;
+}
+
 export interface AcquisitionAnalysis {
   listPrice: number;
   arv: number;
+  rent: number | null;
   arvAnalysis: ArvAnalysis;
   rehabAnalysis: RehabAnalysis;
+  atAsk: AtAskAnalysis;
+  targetMao: TargetMaoAnalysis;
+  riskAdjustedOffer: RiskAdjustedOffer;
+  flipVerdict: FlipVerdict;
+  brrrrVerdict: BrrrrVerdict;
   flipMao: MaoScenarios;
   brrrrMao: MaoScenarios;
-  /** Max purchase price for flip to work with $50K profit — equals flipMao.worstCase */
+  /** Max purchase price for flip to work with $50K profit — uses actual calc (not 70% rule) */
   worksAsFlipBelow: number | null;
   /** Max purchase price for full BRRRR capital recovery */
   worksAsBrrrrBelow: number | null;
-  /** listPrice - worksAsFlipBelow; positive = need this discount; null if no MAO */
+  /** Gap from ask to targetMao; 0 if deal works at ask */
   requiredDiscount: number | null;
-  /** Offer range to send: 93%–100% of worstCase MAO */
+  /** Offer range to send */
   safeOfferLow: number | null;
   safeOfferHigh: number | null;
 }
@@ -56,6 +113,17 @@ const TARGET_FLIP_PROFIT = 50_000;
 // Transaction costs as % of ARV (closing in ~2%, holding ~4%, selling ~5%)
 const FLIP_TRANSACTION_RATE = 0.11;
 const BRRRR_TRANSACTION_RATE = 0.05; // No selling costs for BRRRR
+
+// Defaults for Acquisition Engine (no per-deal overrides available)
+const ACQ_CLOSING_PCT = 0.02;
+const ACQ_CONTINGENCY_PCT = 0.10;
+const ACQ_HOLDING_FLAT = 6_000;   // 4 months × ~$1,500/mo flat estimate
+const ACQ_AGENT_PCT = 0.05;
+const ACQ_NOTARY = 400;
+const ACQ_TITLE = 500;
+const ACQ_REFI_LTV = 0.75;
+const ACQ_REFI_INTEREST_RATE = 0.075;
+const ACQ_REFI_TERM_YEARS = 30;
 
 const DISTRESS_KEYWORDS = [
   'as-is', 'as is', 'cash only', 'cash-only', 'investor special', 'needs tlc',
@@ -231,31 +299,214 @@ export function safeNum(v: unknown): number | null {
   return isFinite(n) && !isNaN(n) ? n : null;
 }
 
+// ─── New Acquisition Engine helpers ─────────────────────────────────────────
+
+function calcAtAsk(arv: number, askPrice: number, rehabBase: number): AtAskAnalysis {
+  const closingCostsBuy = askPrice * ACQ_CLOSING_PCT;
+  const contingency = rehabBase * ACQ_CONTINGENCY_PCT;
+  const agentCommission = arv * ACQ_AGENT_PCT;
+  const totalInvestment = askPrice + closingCostsBuy + rehabBase + contingency + ACQ_HOLDING_FLAT;
+  const profit = arv - totalInvestment - agentCommission - ACQ_NOTARY - ACQ_TITLE;
+  const roi = totalInvestment > 0 ? (profit / totalInvestment) * 100 : 0;
+
+  let verdict: AtAskAnalysis['verdict'];
+  let verdictLabel: string;
+  if (profit >= 60_000) {
+    verdict = 'strong_flip'; verdictLabel = 'Strong Flip at Ask';
+  } else if (profit >= 50_000) {
+    verdict = 'target_met'; verdictLabel = 'Target Flip at Ask';
+  } else if (profit >= 40_000) {
+    verdict = 'near_target'; verdictLabel = 'Near Target Flip';
+  } else if (profit >= 20_000) {
+    verdict = 'marginal'; verdictLabel = 'Marginal Flip';
+  } else if (profit >= 0) {
+    verdict = 'thin'; verdictLabel = 'Thin Flip at Ask';
+  } else {
+    verdict = 'not_a_flip'; verdictLabel = 'Not a Flip at Ask';
+  }
+
+  return { profit: Math.round(profit), roi: Math.round(roi * 10) / 10, totalInvestment: Math.round(totalInvestment), verdict, verdictLabel };
+}
+
+function calcTargetMaoAnalysis(arv: number, rehab: RehabAnalysis, listPrice: number): TargetMaoAnalysis {
+  const calcMAO = (rehabAmt: number) => {
+    const n = arv - rehabAmt * (1 + ACQ_CONTINGENCY_PCT) - ACQ_HOLDING_FLAT
+              - arv * ACQ_AGENT_PCT - ACQ_NOTARY - ACQ_TITLE - TARGET_FLIP_PROFIT;
+    return Math.round(n / (1 + ACQ_CLOSING_PCT));
+  };
+  const mao = calcMAO(rehab.base);
+  const gapFromAsk = listPrice - mao;
+  const discountPctNeeded = gapFromAsk > 0 && listPrice > 0 ? (gapFromAsk / listPrice) * 100 : 0;
+  return {
+    targetProfit: TARGET_FLIP_PROFIT,
+    mao,
+    gapFromAsk,
+    discountPctNeeded,
+    offerLow: Math.round(mao * 0.95),
+    offerHigh: mao,
+    ruleof70Ref: Math.round(arv * 0.70 - rehab.base),
+  };
+}
+
+function calcRiskAdjustedOffer(arv: number, rehab: RehabAnalysis, arvConf: ArvConfidence): RiskAdjustedOffer {
+  const reasons: string[] = [];
+  let arvHaircutPct = 0;
+  if (arvConf === 'yellow') { arvHaircutPct = 5; reasons.push('ARV moderate confidence (-5% haircut)'); }
+  else if (arvConf === 'red') { arvHaircutPct = 10; reasons.push('ARV weak confidence (-10% haircut)'); }
+  if (rehab.confidence === 'low') reasons.push('Rehab confidence unknown (using 1.5× range)');
+  else if (rehab.confidence === 'medium') reasons.push('Rehab estimate uncertain (using 1.25× range)');
+
+  const adjArv = arv * (1 - arvHaircutPct / 100);
+  const calcMAO = (rehabAmt: number): number | null => {
+    const n = adjArv - rehabAmt * (1 + ACQ_CONTINGENCY_PCT) - ACQ_HOLDING_FLAT
+              - adjArv * ACQ_AGENT_PCT - ACQ_NOTARY - ACQ_TITLE - TARGET_FLIP_PROFIT;
+    const mao = Math.round(n / (1 + ACQ_CLOSING_PCT));
+    return mao > 0 ? mao : null;
+  };
+  return {
+    conservative: calcMAO(rehab.high),
+    base: calcMAO(rehab.base),
+    ceiling: calcMAO(rehab.low),
+    arvHaircutPct,
+    reasons,
+  };
+}
+
+function calcFlipVerdictFn(atAsk: AtAskAnalysis, arvConf: ArvConfidence, rehabConf: RehabConfidence): FlipVerdict {
+  const profitScore = (() => {
+    const p = atAsk.profit;
+    if (p >= 75000) return 10; if (p >= 60000) return 9; if (p >= 50000) return 8;
+    if (p >= 40000) return 7; if (p >= 30000) return 6; if (p >= 20000) return 5;
+    if (p >= 10000) return 4; if (p >= 0) return 3; if (p >= -20000) return 2; return 1;
+  })();
+  const arvConfScore = arvConf === 'green' ? 10 : arvConf === 'yellow' ? 6 : 2;
+  const rehabConfScore = rehabConf === 'high' ? 10 : rehabConf === 'medium' ? 6 : 2;
+  const finalScore = Math.round((profitScore * 0.4 + arvConfScore * 0.3 + rehabConfScore * 0.3) * 10) / 10;
+
+  let action: FlipVerdict['action'];
+  let actionLabel: string;
+  let reasoning: string;
+
+  if (atAsk.verdict === 'not_a_flip') {
+    action = 'pass'; actionLabel = 'Pass';
+    reasoning = 'Insufficient profit at asking price even with favorable assumptions.';
+  } else if (atAsk.verdict === 'thin') {
+    action = 'pass'; actionLabel = 'Pass';
+    reasoning = 'Very thin profit at ask. Only works with significant price reduction.';
+  } else if (atAsk.verdict === 'marginal') {
+    action = 'lowball_only'; actionLabel = 'Lowball Only';
+    reasoning = 'Marginal profit at ask — deal only works with meaningful discount.';
+  } else {
+    // near_target, target_met, strong_flip
+    if (rehabConf === 'low') {
+      action = 'contractor_review'; actionLabel = 'Contractor Review Needed';
+      reasoning = 'Good profit potential but rehab confidence is low — get a contractor quote before offering.';
+    } else if (arvConf === 'red') {
+      action = 'review_arv'; actionLabel = 'Review ARV First';
+      reasoning = 'Profit looks good but ARV data is weak — verify comps before committing.';
+    } else if (arvConf === 'yellow' || rehabConf === 'medium') {
+      action = 'review_rehab'; actionLabel = 'Review ARV & Rehab';
+      reasoning = `${atAsk.verdictLabel} — verify ARV and rehab estimate before offer.`;
+    } else {
+      action = 'send_offer'; actionLabel = 'Send Offer';
+      reasoning = `${atAsk.verdictLabel} with strong confidence.`;
+    }
+  }
+
+  return { action, actionLabel, reasoning, profitScore, arvConfScore, rehabConfScore, finalScore };
+}
+
+function calcBrrrrVerdictFn(arv: number, askPrice: number, rehab: RehabAnalysis, rent: number | null): BrrrrVerdict {
+  const closingCostsBuy = askPrice * ACQ_CLOSING_PCT;
+  const contingency = rehab.base * ACQ_CONTINGENCY_PCT;
+  const totalCashIn = askPrice + closingCostsBuy + rehab.base + contingency + ACQ_HOLDING_FLAT;
+
+  const refiLoanAmount = arv * ACQ_REFI_LTV;
+  const refiClosing = refiLoanAmount * 0.02;
+  const refiProceeds = refiLoanAmount - refiClosing - ACQ_NOTARY;
+  const cashLeftInDeal = totalCashIn - Math.max(0, refiProceeds);
+  const cashLeftPct = totalCashIn > 0 ? cashLeftInDeal / totalCashIn : 1;
+
+  const monthlyRate = ACQ_REFI_INTEREST_RATE / 12;
+  const numPmts = ACQ_REFI_TERM_YEARS * 12;
+  const monthlyMortgage = refiLoanAmount > 0
+    ? refiLoanAmount * (monthlyRate * Math.pow(1 + monthlyRate, numPmts)) / (Math.pow(1 + monthlyRate, numPmts) - 1)
+    : 0;
+
+  const monthlyCashflow = rent && rent > 0 ? rent * 0.65 - monthlyMortgage : null;
+  const annualCashflow = monthlyCashflow != null ? monthlyCashflow * 12 : null;
+  const cocReturn = monthlyCashflow != null && cashLeftInDeal > 0
+    ? (annualCashflow! / cashLeftInDeal) * 100
+    : (monthlyCashflow != null && cashLeftInDeal <= 0 && monthlyCashflow > 0 ? 999 : null);
+
+  let classification: BrrrrVerdict['classification'];
+  let classificationLabel: string;
+  if (cashLeftInDeal <= 0) {
+    classification = 'full_brrrr'; classificationLabel = 'Full BRRRR';
+  } else if (cashLeftPct <= 0.25) {
+    classification = 'partial_brrrr'; classificationLabel = 'Partial BRRRR';
+  } else if (cashLeftPct <= 0.75 && monthlyCashflow != null && monthlyCashflow > 100) {
+    classification = 'trapped_equity'; classificationLabel = 'Trapped Equity Hold';
+  } else {
+    classification = 'not_brrrr'; classificationLabel = 'Not a BRRRR';
+  }
+
+  return {
+    refiLtv: ACQ_REFI_LTV,
+    refiProceeds: Math.round(refiProceeds),
+    totalCashIn: Math.round(totalCashIn),
+    cashLeftInDeal: Math.round(cashLeftInDeal),
+    cashLeftPct,
+    monthlyMortgage: Math.round(monthlyMortgage),
+    monthlyCashflow: monthlyCashflow != null ? Math.round(monthlyCashflow) : null,
+    annualCashflow: annualCashflow != null ? Math.round(annualCashflow) : null,
+    cocReturn: cocReturn != null ? Math.round(cocReturn * 10) / 10 : null,
+    classification,
+    classificationLabel,
+    hasRentData: rent != null && rent > 0,
+  };
+}
+
 export function analyzeAcquisition(deal: Deal): AcquisitionAnalysis | null {
   const { apiData, overrides, financials } = deal;
   // safeNum guards against NaN, "NaN" strings, and other invalid values
   const arv = safeNum(overrides.arv) ?? safeNum(apiData.arv) ?? safeNum(financials?.arv);
   const listPrice = safeNum(overrides.purchasePrice) ?? safeNum(apiData.purchasePrice) ?? safeNum(financials?.purchasePrice);
+  const rent = safeNum(overrides.rent) ?? safeNum(apiData.rent) ?? null;
 
   if (!arv || arv <= 0 || !listPrice || listPrice <= 0) return null;
 
   const arvAnalysis = analyzeArv(arv, apiData.saleComps ?? []);
   const rehabAnalysis = analyzeRehab(deal);
+
+  const atAsk = calcAtAsk(arv, listPrice, rehabAnalysis.base);
+  const targetMao = calcTargetMaoAnalysis(arv, rehabAnalysis, listPrice);
+  const riskAdjustedOffer = calcRiskAdjustedOffer(arv, rehabAnalysis, arvAnalysis.confidence);
+  const flipVerdict = calcFlipVerdictFn(atAsk, arvAnalysis.confidence, rehabAnalysis.confidence);
+  const brrrrVerdict = calcBrrrrVerdictFn(arv, listPrice, rehabAnalysis, rent);
+
+  // Legacy 70% rule MAO (kept for backward compat only)
   const flipMao = calcFlipMao(arv, rehabAnalysis);
   const brrrrMao = calcBrrrrMao(arv, rehabAnalysis);
 
-  const worksAsFlipBelow = flipMao.worstCase;
+  // Updated legacy fields — now use TARGET MAO (actual calc), not 70% rule
+  const worksAsFlipBelow = targetMao.mao > 0 ? targetMao.mao : null;
   const worksAsBrrrrBelow = brrrrMao.worstCase;
-  const requiredDiscount = worksAsFlipBelow != null ? listPrice - worksAsFlipBelow : null;
-
-  const safeOfferHigh = worksAsFlipBelow;
-  const safeOfferLow = safeOfferHigh != null ? Math.round(safeOfferHigh * 0.93) : null;
+  const requiredDiscount = Math.max(0, targetMao.gapFromAsk);
+  const safeOfferHigh = riskAdjustedOffer.base ?? riskAdjustedOffer.conservative;
+  const safeOfferLow = safeOfferHigh != null ? Math.round(safeOfferHigh * 0.95) : null;
 
   return {
     listPrice,
     arv,
+    rent,
     arvAnalysis,
     rehabAnalysis,
+    atAsk,
+    targetMao,
+    riskAdjustedOffer,
+    flipVerdict,
+    brrrrVerdict,
     flipMao,
     brrrrMao,
     worksAsFlipBelow,
