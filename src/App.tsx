@@ -45,6 +45,7 @@ import ApiActivityPage from "./pages/ApiActivityPage";
 import EmailDealPreviewPage from "./pages/EmailDealPreviewPage";
 import PotentialDealsPage from "./pages/PotentialDealsPage";
 import PotentialMarketDealsPage from "./pages/PotentialMarketDealsPage";
+import AcquisitionPage from "./pages/AcquisitionPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({});
@@ -78,6 +79,7 @@ const App = () => (
                   <Route path="/deals" element={<ProtectedRoute><AppLayout><DealsListPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/deals/:id" element={<ProtectedRoute><AppLayout><DealDetailPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/pipeline" element={<ProtectedRoute><AppLayout><PipelinePage /></AppLayout></ProtectedRoute>} />
+                  <Route path="/acquisition" element={<ProtectedRoute><AppLayout><AcquisitionPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/not-relevant" element={<ProtectedRoute><AppLayout><NotRelevantPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/closed" element={<ProtectedRoute><AppLayout><ClosedDealsPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/settings" element={<ProtectedRoute><AppLayout><SettingsPage /></AppLayout></ProtectedRoute>} />

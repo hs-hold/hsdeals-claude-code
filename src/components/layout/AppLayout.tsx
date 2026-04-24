@@ -7,10 +7,10 @@ import { useAuth } from '@/context/AuthContext';
 import { useUserRole } from '@/hooks/useUserRole';
 import { StateSelector } from '@/components/layout/StateSelector';
 import { Button } from '@/components/ui/button';
-import { 
-  LayoutDashboard, 
-  Building2, 
-  Ban, 
+import {
+  LayoutDashboard,
+  Building2,
+  Ban,
   Columns3,
   TrendingUp,
   ScanSearch,
@@ -35,6 +35,7 @@ import {
   BookOpen,
   Activity,
   BarChart2,
+  Crosshair,
 } from 'lucide-react';
 import {
   Sidebar,
@@ -272,6 +273,20 @@ function AppSidebar() {
               <SidebarGroupLabel>Deals</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
+                  {/* Acquisition Engine */}
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={location.pathname === '/acquisition'}
+                      tooltip="Acquisition Engine"
+                    >
+                      <Link to="/acquisition" onClick={handleNavClick}>
+                        <Crosshair className="w-5 h-5" />
+                        <span>Acquisition Engine</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+
                   {/* Hot Deals */}
                   <Collapsible asChild defaultOpen={isHotDealsActive} className="group/collapsible">
                     <SidebarMenuItem>
