@@ -470,8 +470,19 @@ function calcBrrrrVerdictFn(arv: number, askPrice: number, rehab: RehabAnalysis,
 
 export function analyzeAcquisition(deal: Deal): AcquisitionAnalysis | null {
   const { apiData, overrides, financials } = deal;
-  // All values: manual override takes priority (user verified), then API analyzed value.
-  const arv = overrides.arv ?? apiData.arv ?? 0;
+  // ARV priority:
+  // 1. Manual override — user verified, most accurate
+  // 2. min(comp-derived, apiData.arv) — comps can only lower the API value, never inflate it
+  //    This handles both inflated API ARVs (Arctic Ct: 421K→227K) and
+  //    outlier comps that would raise above the API value (Lester St: 501K capped at 341K)
+  const arv = (() => {
+    if (overrides.arv != null && overrides.arv > 0) return overrides.arv;
+    const compFinancials = calculateFinancials(apiData, { ...overrides, arv: null });
+    const compArv = compFinancials.arv;
+    const apiArv = apiData.arv;
+    if (apiArv != null && apiArv > 0) return Math.min(compArv, apiArv);
+    return compArv;
+  })();
   const listPrice = safeNum(overrides.purchasePrice) ?? safeNum(apiData.purchasePrice) ?? safeNum(financials?.purchasePrice);
   const rent = safeNum(overrides.rent) ?? safeNum(apiData.rent) ?? null;
 
