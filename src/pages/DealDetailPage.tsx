@@ -6,6 +6,7 @@ import { isDealAnalyzed } from '@/utils/dealHelpers';
 import { coerceLotSizeSqft } from '@/utils/lotSize';
 import { detectSuspiciousData } from '@/utils/suspiciousData';
 import { analyzeArv, analyzeRehab } from '@/utils/maoCalculations';
+import { calculateInvestmentScore } from '@/utils/investmentScore';
 import { DealStatusBadge } from '@/components/deals/DealStatusBadge';
 import { PropertyMap } from '@/components/deals/PropertyMap';
 import { formatCurrency, formatPercent, getEffectiveValue, calculateFinancials, validateArvAgainstComps, calculateArvFromRecentComps, getEffectiveMonthlyInsurance } from '@/utils/financialCalculations';
@@ -200,6 +201,7 @@ export default function DealDetailPage() {
     rentalOtherFees: deal?.overrides?.rentalOtherFees?.toString() || '',
     rentalInterestOnly: (deal?.overrides as any)?.rentalInterestOnly?.toString() || '',
     brrrrInterestOnly: (deal?.overrides as any)?.brrrrInterestOnly?.toString() || '',
+    inventoryMonths: deal?.overrides?.inventoryMonths?.toString() || '',
   });
   const [isOverridesDirty, setIsOverridesDirty] = useState(false);
   const baselineOverridesRef = useRef(localOverrides);
@@ -310,6 +312,7 @@ export default function DealDetailPage() {
       rentalOtherFees: deal.overrides?.rentalOtherFees?.toString() || '',
       rentalInterestOnly: (deal.overrides as any)?.rentalInterestOnly?.toString() || '',
       brrrrInterestOnly: (deal.overrides as any)?.brrrrInterestOnly?.toString() || '',
+      inventoryMonths: deal.overrides?.inventoryMonths?.toString() || '',
     });
     baselineOverridesRef.current = {
       arv: deal.overrides?.arv?.toString() || '',
@@ -367,6 +370,7 @@ export default function DealDetailPage() {
       rentalOtherFees: deal.overrides?.rentalOtherFees?.toString() || '',
       rentalInterestOnly: (deal.overrides as any)?.rentalInterestOnly?.toString() || '',
       brrrrInterestOnly: (deal.overrides as any)?.brrrrInterestOnly?.toString() || '',
+      inventoryMonths: deal.overrides?.inventoryMonths?.toString() || '',
     };
     setNotes(deal.notes || '');
     setRejectionReason(deal.rejectionReason || '');
@@ -439,6 +443,7 @@ export default function DealDetailPage() {
         rentalOtherFees: deal.overrides?.rentalOtherFees?.toString() || '',
         rentalInterestOnly: (deal.overrides as any)?.rentalInterestOnly?.toString() || '',
         brrrrInterestOnly: (deal.overrides as any)?.brrrrInterestOnly?.toString() || '',
+        inventoryMonths: deal.overrides?.inventoryMonths?.toString() || '',
       };
       setLocalOverrides(synced);
       baselineOverridesRef.current = synced;
@@ -523,6 +528,7 @@ export default function DealDetailPage() {
       capexPercent: localOverrides.capexPercent ? parseFloat(localOverrides.capexPercent) : null,
       lotSizeSqft: localOverrides.lotSizeSqft ? parseFloat(localOverrides.lotSizeSqft) : null,
       holdingOtherMonthly: localOverrides.holdingOtherMonthly ? parseFloat(localOverrides.holdingOtherMonthly) : null,
+      inventoryMonths: localOverrides.inventoryMonths ? parseFloat(localOverrides.inventoryMonths) : null,
       rentalAppraisalCost: localOverrides.rentalAppraisalCost ? parseFloat(localOverrides.rentalAppraisalCost) : null,
       rentalUnderwritingFee: localOverrides.rentalUnderwritingFee ? parseFloat(localOverrides.rentalUnderwritingFee) : null,
       rentalPointsPercent: localOverrides.rentalPointsPercent ? parseFloat(localOverrides.rentalPointsPercent) : null,
@@ -1093,6 +1099,7 @@ export default function DealDetailPage() {
       rentalOtherFees: (saved as any).rentalOtherFees?.toString() || '',
       rentalInterestOnly: (saved as any).rentalInterestOnly?.toString() || '',
       brrrrInterestOnly: (saved as any).brrrrInterestOnly?.toString() || '',
+      inventoryMonths: (saved as any).inventoryMonths?.toString() || '',
     });
     baselineOverridesRef.current = {
       arv: (saved as any).arv?.toString() || '',
@@ -1148,6 +1155,7 @@ export default function DealDetailPage() {
       rentalOtherFees: (saved as any).rentalOtherFees?.toString() || '',
       rentalInterestOnly: (saved as any).rentalInterestOnly?.toString() || '',
       brrrrInterestOnly: (saved as any).brrrrInterestOnly?.toString() || '',
+      inventoryMonths: (saved as any).inventoryMonths?.toString() || '',
     };
     setIsOverridesDirty(false);
     toast.success('Changes discarded');
@@ -6376,6 +6384,100 @@ BRRRR STRATEGY:
                           </div>
                         </div>
                       </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── Investment Decision Score ── */}
+                {(() => {
+                  const invScore = calculateInvestmentScore({
+                    monthlyCashflow: brrrrMonthlyCashflow || null,
+                    cashLeftInDeal: brrrrCashLeftInDeal,
+                    arv,
+                    purchasePrice,
+                    rehabCost,
+                    schoolTotal: apiData?.schoolScore ?? null,
+                    inventoryMonths: localOverrides.inventoryMonths ? parseFloat(localOverrides.inventoryMonths) : null,
+                  });
+                  const isBuy = invScore?.decision === 'Buy';
+                  return (
+                    <div className="mt-4 rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-semibold text-base">Investment Decision Score</h3>
+                        {invScore ? (
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl font-bold">{invScore.finalScore.toFixed(1)}<span className="text-sm text-muted-foreground">/10</span></span>
+                            <span className={cn("text-sm font-bold px-3 py-1 rounded-full border", isBuy ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40" : "bg-red-500/20 text-red-400 border-red-500/40")}>
+                              {isBuy ? '✓ Buy' : '✗ Pass'}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">N/A — missing data</span>
+                        )}
+                      </div>
+
+                      {invScore && (
+                        <div className="grid grid-cols-1 gap-3 text-sm">
+                          {/* Cash Flow */}
+                          <div className="rounded-lg border border-border bg-card/60 p-3 space-y-1.5">
+                            <div className="flex justify-between font-medium">
+                              <span>1. Cash Flow Score</span>
+                              <span className={cn("font-bold", invScore.cashFlowScore >= 8 ? "text-emerald-400" : invScore.cashFlowScore >= 6 ? "text-amber-400" : "text-red-400")}>{invScore.cashFlowScore.toFixed(1)}/10</span>
+                            </div>
+                            <div className="flex justify-between text-muted-foreground pl-2">
+                              <span>Monthly cashflow</span>
+                              <span>{formatCurrency(invScore.monthlyCashflow)}/mo → <span className="text-foreground">{invScore.monthlyCashFlowScore.toFixed(1)}</span></span>
+                            </div>
+                            <div className="flex justify-between text-muted-foreground pl-2">
+                              <span>Annual CoC return</span>
+                              <span>{invScore.annualReturnPct > 100 ? '∞' : `${invScore.annualReturnPct.toFixed(1)}%`} → <span className="text-foreground">{invScore.annualReturnScore.toFixed(1)}</span></span>
+                            </div>
+                          </div>
+
+                          {/* Equity */}
+                          <div className="rounded-lg border border-border bg-card/60 p-3 space-y-1.5">
+                            <div className="flex justify-between font-medium">
+                              <span>2. True Equity Score</span>
+                              <span className={cn("font-bold", invScore.equityScore >= 8 ? "text-emerald-400" : invScore.equityScore >= 6 ? "text-amber-400" : "text-red-400")}>{invScore.equityScore.toFixed(1)}/10</span>
+                            </div>
+                            <div className="flex justify-between text-muted-foreground pl-2">
+                              <span>ARV − Purchase − Rehab</span>
+                              <span>{formatCurrency(invScore.trueEquity)}</span>
+                            </div>
+                          </div>
+
+                          {/* Location */}
+                          <div className="rounded-lg border border-border bg-card/60 p-3 space-y-1.5">
+                            <div className="flex justify-between font-medium">
+                              <span>3. Location Score</span>
+                              <span className={cn("font-bold", invScore.locationScore >= 8 ? "text-emerald-400" : invScore.locationScore >= 6 ? "text-amber-400" : "text-red-400")}>{invScore.locationScore.toFixed(1)}/10</span>
+                            </div>
+                            <div className="flex justify-between text-muted-foreground pl-2">
+                              <span>School score (cumulative)</span>
+                              <span>{invScore.schoolTotal.toFixed(1)} → <span className="text-foreground">{invScore.schoolScore.toFixed(1)}</span></span>
+                            </div>
+                            {invScore.inventoryScore != null && (
+                              <div className="flex justify-between text-muted-foreground pl-2">
+                                <span>Inventory</span>
+                                <span>{invScore.inventoryMonths} mo → <span className="text-foreground">{invScore.inventoryScore.toFixed(1)}</span></span>
+                              </div>
+                            )}
+                            {invScore.inventoryScore == null && (
+                              <div className="pl-2 text-xs text-muted-foreground/70 italic">Inventory not set — score based on schools only</div>
+                            )}
+                            <div className="flex items-center gap-2 pt-1.5">
+                              <Label className="text-xs text-muted-foreground shrink-0">Inventory (months)</Label>
+                              <Input
+                                type="number"
+                                placeholder="e.g. 4"
+                                className="h-7 text-xs w-24"
+                                value={localOverrides.inventoryMonths || ''}
+                                onChange={e => setLocalOverrides(prev => ({ ...prev, inventoryMonths: e.target.value }))}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })()}

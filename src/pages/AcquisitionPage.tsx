@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, Fragment } from 'react';
+import { calculateInvestmentScore } from '@/utils/investmentScore';
 import { Link } from 'react-router-dom';
 import { useDeals } from '@/context/DealsContext';
 import { Deal } from '@/types/deal';
@@ -578,6 +579,30 @@ function AcquisitionCard({ deal }: { deal: Deal }) {
             </button>
             {brrrrExpanded && (
               <div className="px-3 pb-3 pt-1 border-t border-border grid grid-cols-2 gap-2 text-sm">
+                {/* Investment score */}
+                {(() => {
+                  const invScore = calculateInvestmentScore({
+                    monthlyCashflow: brrrrVerdict.monthlyCashflow,
+                    cashLeftInDeal: brrrrVerdict.cashLeftInDeal,
+                    arv: analysis.arv,
+                    purchasePrice: deal.overrides.purchasePrice ?? deal.apiData.purchasePrice ?? 0,
+                    rehabCost: deal.overrides.rehabCost ?? deal.apiData.rehabCost ?? 0,
+                    schoolTotal: deal.apiData.schoolScore,
+                    inventoryMonths: deal.overrides.inventoryMonths ?? null,
+                  });
+                  if (!invScore) return null;
+                  return (
+                    <div className="col-span-2 flex items-center justify-between rounded-md px-2 py-1.5 bg-muted/30 border border-border">
+                      <span className="text-xs text-muted-foreground">Investment Score</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm">{invScore.finalScore.toFixed(1)}/10</span>
+                        <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${invScore.decision === 'Buy' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                          {invScore.decision}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div className="flex justify-between col-span-2">
                   <span className="text-muted-foreground">Refi proceeds (75% LTV)</span>
                   <span className="font-medium">{fmt(brrrrVerdict.refiProceeds)}</span>
@@ -746,6 +771,7 @@ export default function AcquisitionPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [discountFilter, setDiscountFilter] = useState<DiscountFilter>('all');
   const [showFilters, setShowFilters] = useState(false);
+  const [strategyFilter, setStrategyFilter] = useState<'all' | 'flip' | 'brrrr'>('all');
 
   const filters = useMemo(
     () => ({ domMin, offerFilter, statusFilter, timeRange, discountFilter }),
@@ -763,19 +789,25 @@ export default function AcquisitionPage() {
 
   const filtered = useMemo(() => {
     return analyzed
-      .filter(({ deal, analysis }) => passesFilters(deal, filters, analysis))
+      .filter(({ deal, analysis }) => {
+        if (!passesFilters(deal, filters, analysis)) return false;
+        if (strategyFilter === 'flip') return analysis!.flipVerdict.action !== 'pass';
+        if (strategyFilter === 'brrrr') {
+          const cls = analysis!.brrrrVerdict.classification;
+          return cls === 'full_brrrr' || cls === 'partial_brrrr';
+        }
+        return true;
+      })
       .sort(({ deal: a, analysis: aa }, { deal: b, analysis: ab }) => {
-        // Qualified deals always first
         const aQ = a.status === 'qualified' ? 0 : 1;
         const bQ = b.status === 'qualified' ? 0 : 1;
         if (aQ !== bQ) return aQ - bQ;
-        // Best profit first
         const profitA = aa?.atAsk.profit ?? -Infinity;
         const profitB = ab?.atAsk.profit ?? -Infinity;
         return profitB - profitA;
       })
       .map(({ deal }) => deal);
-  }, [analyzed, filters]);
+  }, [analyzed, filters, strategyFilter]);
 
   // Stats over all analyzable deals (no time/discount filter — just totals)
   const stats = useMemo(() => {
@@ -797,17 +829,36 @@ export default function AcquisitionPage() {
     setDomMin(0);
     setOfferFilter('all');
     setStatusFilter('all');
+    setStrategyFilter('all');
     setDiscountFilter('all');
   }, []);
 
   return (
     <div className="container mx-auto p-4 max-w-4xl space-y-4">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">Acquisition Engine</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          At what price does each deal work? Find the ones worth offering on.
-        </p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold">Acquisition Engine</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            At what price does each deal work? Find the ones worth offering on.
+          </p>
+        </div>
+        {/* Strategy filter */}
+        <div className="flex items-center rounded-lg border border-border bg-card p-1 gap-1 shrink-0">
+          {([['all', 'All Deals'], ['flip', 'Flip'], ['brrrr', 'BRRRR']] as const).map(([val, label]) => (
+            <button
+              key={val}
+              onClick={() => setStrategyFilter(val)}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                strategyFilter === val
+                  ? val === 'brrrr' ? 'bg-primary text-primary-foreground' : val === 'flip' ? 'bg-orange-500 text-white' : 'bg-muted text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Primary filter: discount needed — the most important question */}

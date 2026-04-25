@@ -182,6 +182,8 @@ export interface DealOverrides {
   capexPercent: number | null;              // CapEx reserve % (e.g., 5 = 5%)
   // Lot size override
   lotSizeSqft: number | null;               // Override lot size in square feet
+  // BRRRR location scoring
+  inventoryMonths: number | null;           // Manual: months of housing inventory (for location score)
   // Holding other costs
   holdingOtherMonthly: number | null;       // Other monthly holding costs (fixed $)
   // Rental loan fee overrides
