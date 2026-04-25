@@ -756,6 +756,7 @@ export default function DealDetailPage() {
     const rentalInsuranceDiff = rentalInsuranceVal - insuranceMonthly;
     const rentalMonthlyCashflow = liveFinancials.monthlyCashflow - rentalInsuranceDiff;
     const rentalAdjustedNOI = liveFinancials.yearlyNOI - (rentalInsuranceDiff * 12);
+    const rentalMonthlyNOI = rentalAdjustedNOI / 12;
     const rentalCapRate = flipTotalInvestment > 0 ? (rentalAdjustedNOI / flipTotalInvestment) * 100 : 0;
     
     // ========== BRRRR SUMMARY METRICS ==========
@@ -822,6 +823,7 @@ export default function DealDetailPage() {
       flipNetProfit,
       flipRoi,
       rentalMonthlyCashflow,
+      rentalMonthlyNOI,
       rentalCapRate,
       brrrrCashLeftInDeal,
       brrrrMonthlyCashflow,
@@ -846,6 +848,7 @@ export default function DealDetailPage() {
   const flipNetProfit        = safeNum(derivedValues?.flipNetProfit);
   const flipRoi              = safeNum(derivedValues?.flipRoi);
   const rentalMonthlyCashflow= safeNum(derivedValues?.rentalMonthlyCashflow);
+  const rentalMonthlyNOI     = safeNum(derivedValues?.rentalMonthlyNOI);
   const rentalCapRate        = safeNum(derivedValues?.rentalCapRate);
   const brrrrCashLeftInDeal  = safeNum(derivedValues?.brrrrCashLeftInDeal);
   const brrrrMonthlyCashflow = safeNum(derivedValues?.brrrrMonthlyCashflow);
@@ -2072,7 +2075,7 @@ export default function DealDetailPage() {
                 const brrrrMonthlyMortgage = refiLoanAmount > 0 
                   ? refiLoanAmount * ((loanDefaults.rentalInterestRate / 100 / 12) * Math.pow(1 + (loanDefaults.rentalInterestRate / 100 / 12), 360)) / (Math.pow(1 + (loanDefaults.rentalInterestRate / 100 / 12), 360) - 1)
                   : 0;
-                const brrrrMonthlyCashflow = rent - (liveFinancials?.monthlyExpenses ?? 0) + (liveFinancials?.monthlyDebtService ?? 0) - brrrrMonthlyMortgage;
+                const brrrrMonthlyCashflow = rent - (liveFinancials?.monthlyExpenses ?? 0) - brrrrMonthlyMortgage;
 
                 return (
                   <>
@@ -5243,9 +5246,9 @@ BRRRR STRATEGY:
                         <span className="text-cyan-400">Rental Analysis</span>
                         {!rentalAnalysisOpen && (
                           <div className="flex items-center gap-3 ml-2 text-xs">
-                            <span className="text-muted-foreground">Cashflow:</span>
-                            <span className={cn("font-bold", rentalMonthlyCashflow >= 200 ? "text-emerald-400" : rentalMonthlyCashflow >= 0 ? "text-amber-400" : "text-red-400")}>
-                              {formatCurrency(rentalMonthlyCashflow)}/mo
+                            <span className="text-muted-foreground">NOI:</span>
+                            <span className={cn("font-bold", rentalMonthlyNOI >= 200 ? "text-emerald-400" : rentalMonthlyNOI >= 0 ? "text-amber-400" : "text-red-400")}>
+                              {formatCurrency(rentalMonthlyNOI)}/mo
                             </span>
                             <span className="text-muted-foreground">Cap Rate:</span>
                             <span className={cn("font-bold", rentalCapRate >= 8 ? "text-emerald-400" : rentalCapRate >= 6 ? "text-amber-400" : "text-red-400")}>
