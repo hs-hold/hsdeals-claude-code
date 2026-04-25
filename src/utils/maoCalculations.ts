@@ -470,9 +470,10 @@ function calcBrrrrVerdictFn(arv: number, askPrice: number, rehab: RehabAnalysis,
 
 export function analyzeAcquisition(deal: Deal): AcquisitionAnalysis | null {
   const { apiData, overrides, financials } = deal;
-  // Use calculateFinancials — identical to what DealDetailPage uses — to get validated ARV.
-  // This is the only way to guarantee the Acquisition Engine shows the same ARV as Deal Detail.
-  const liveFinancials = calculateFinancials(apiData, overrides);
+  // Compute ARV the same way DealDetailPage does when the ARV field is empty:
+  // pass arv:null to force comp-based calculation from apiData.arv.
+  // We never trust overrides.arv here — it can be a stale value saved from an old API run.
+  const liveFinancials = calculateFinancials(apiData, { ...overrides, arv: null });
   const arv = liveFinancials.arv;
   const listPrice = safeNum(overrides.purchasePrice) ?? safeNum(apiData.purchasePrice) ?? safeNum(financials?.purchasePrice);
   const rent = safeNum(overrides.rent) ?? safeNum(apiData.rent) ?? null;
