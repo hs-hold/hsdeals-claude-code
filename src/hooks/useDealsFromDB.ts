@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { Deal, DealStatus, DealOverrides } from '@/types/deal';
+import { Deal, DealStatus, DealSource, DealOverrides } from '@/types/deal';
 import { calculateFinancials } from '@/utils/financialCalculations';
 import { extractArvFromSummary } from '@/utils/arv';
 import { useSettings } from '@/context/SettingsContext';
@@ -131,7 +131,7 @@ function mapDBDealToDeal(dbDeal: DBDeal, loanDefaults?: ReturnType<typeof import
       full: dbDeal.address_full,
     },
     status: dbDeal.status as DealStatus,
-    source: dbDeal.source as 'email' | 'manual',
+    source: (dbDeal.source as DealSource) ?? 'manual',
     apiData,
     overrides,
     financials,

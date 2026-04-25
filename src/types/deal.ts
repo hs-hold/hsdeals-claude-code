@@ -9,7 +9,7 @@ export type DealStatus =
   | 'not_relevant'
   | 'filtered_out';
 
-export type DealSource = 'email' | 'manual' | 'import' | 'api';
+export type DealSource = 'email' | 'manual' | 'import' | 'api' | 'scout';
 
 export type PropertyType = 'single_family' | 'multi_family' | 'condo' | 'townhouse' | 'duplex' | 'triplex' | 'fourplex' | 'other';
 
@@ -261,4 +261,5 @@ export const DEAL_SOURCE_LABELS: Record<DealSource, string> = {
   manual: 'Manual',
   import: 'Import',
   api: 'API',
+  scout: 'Scout',
 };
