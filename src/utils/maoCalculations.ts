@@ -1,5 +1,5 @@
 import { Deal, SaleComp } from '@/types/deal';
-import { validateArvAgainstComps, calculateArvFromRecentComps } from '@/utils/financialCalculations';
+import { validateArvAgainstComps, calculateArvFromRecentComps, calculateFinancials } from '@/utils/financialCalculations';
 
 export type ArvConfidence = 'green' | 'yellow' | 'red';
 export type RehabConfidence = 'high' | 'medium' | 'low';
@@ -470,28 +470,10 @@ function calcBrrrrVerdictFn(arv: number, askPrice: number, rehab: RehabAnalysis,
 
 export function analyzeAcquisition(deal: Deal): AcquisitionAnalysis | null {
   const { apiData, overrides, financials } = deal;
-  // Compute ARV using the same two-step process as calculateFinancials / DealDetailPage:
-  // 1. calculateArvFromRecentComps — averages recent comp prices (gives the "true" ARV from data)
-  // 2. validateArvAgainstComps — caps/adjusts against outlier comps
-  // Starting from apiData.arv (not financials.arv) avoids using a stale stored value.
-  const apiArv = safeNum(overrides.arv) ?? safeNum(apiData.arv) ?? 0;
-  const arv = (() => {
-    if (!apiArv || apiArv <= 0) return apiArv;
-    if (overrides.arv) return apiArv; // manual override: trust it as-is
-    const sqft = apiData.sqft ?? 0;
-    const beds = apiData.bedrooms ?? 0;
-    const baths = apiData.bathrooms ?? 0;
-    const comps = apiData.saleComps ?? [];
-    // Step 1: recalculate from comp averages
-    const arvCalc = calculateArvFromRecentComps(apiArv, comps, beds, baths);
-    let computedArv = arvCalc.calculatedArv;
-    // Step 2: validate/cap against comps
-    if (comps.length > 0 && sqft > 0) {
-      const { validatedArv } = validateArvAgainstComps(computedArv, comps, sqft, beds, baths);
-      computedArv = validatedArv;
-    }
-    return computedArv;
-  })();
+  // Use calculateFinancials — identical to what DealDetailPage uses — to get validated ARV.
+  // This is the only way to guarantee the Acquisition Engine shows the same ARV as Deal Detail.
+  const liveFinancials = calculateFinancials(apiData, overrides);
+  const arv = liveFinancials.arv;
   const listPrice = safeNum(overrides.purchasePrice) ?? safeNum(apiData.purchasePrice) ?? safeNum(financials?.purchasePrice);
   const rent = safeNum(overrides.rent) ?? safeNum(apiData.rent) ?? null;
 
