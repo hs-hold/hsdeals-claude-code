@@ -465,7 +465,9 @@ function AcquisitionCard({ deal }: { deal: Deal }) {
               <span className="text-muted-foreground text-xs">Rehab Est.</span>
               <div className="font-bold">
                 {rehabAnalysis.base > 0
-                  ? `${fmtShort(rehabAnalysis.low)} – ${fmtShort(rehabAnalysis.high)}`
+                  ? rehabAnalysis.isManualOverride
+                    ? fmt(rehabAnalysis.base)
+                    : `${fmtShort(rehabAnalysis.low)} – ${fmtShort(rehabAnalysis.high)}`
                   : '—'}
               </div>
             </div>

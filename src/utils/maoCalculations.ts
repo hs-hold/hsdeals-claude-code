@@ -22,6 +22,7 @@ export interface RehabAnalysis {
   base: number;
   high: number;
   signals: string[];
+  isManualOverride: boolean;
 }
 
 export interface MaoScenarios {
@@ -254,10 +255,16 @@ export function analyzeRehab(deal: Deal): RehabAnalysis {
     confidence = 'high';
   }
 
+  const isManualOverride = overrides.rehabCost != null;
+  if (isManualOverride) {
+    // User-verified number: use exact, mark as high confidence
+    return { confidence: 'high', tier, low: baseRehab, base: baseRehab, high: baseRehab, signals: [], isManualOverride: true };
+  }
+
   const low = baseRehab > 0 ? Math.round(baseRehab * 0.8) : 0;
   const high = baseRehab > 0 ? Math.round(baseRehab * 1.5) : 0;
 
-  return { confidence, tier, low, base: baseRehab, high, signals };
+  return { confidence, tier, low, base: baseRehab, high, signals, isManualOverride: false };
 }
 
 export function calcFlipMao(arv: number, rehabAnalysis: RehabAnalysis): MaoScenarios {
