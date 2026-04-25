@@ -46,7 +46,7 @@ export default function MarketSearchPage() {
 
       if (data?.success) {
         if (data.properties?.length === 0) {
-          toast.info('No properties found for this ZIP code');
+          toast.warning('No properties found. If this keeps happening for multiple ZIP codes, check your RapidAPI subscription for zillow-com1.');
         } else {
           toast.success(`Found ${data.properties?.length} properties`);
           navigate('/market-search-results', {

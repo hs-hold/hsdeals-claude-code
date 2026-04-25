@@ -5,7 +5,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
-const RAPIDAPI_HOST = 'real-estate101.p.rapidapi.com';
+// zillow-com1 is a reliable Zillow scraper on RapidAPI that includes Zestimate + RentZestimate
+const RAPIDAPI_HOST = 'zillow-com1.p.rapidapi.com';
 const RAPIDAPI_BASE = `https://${RAPIDAPI_HOST}`;
 
 interface SearchFilters {
@@ -54,7 +55,7 @@ serve(async (req) => {
 
   try {
     const filters: SearchFilters = await req.json();
-    
+
     console.log('Searching properties with filters:', filters);
 
     const apiKey = Deno.env.get('RAPIDAPI_KEY');
@@ -66,85 +67,60 @@ serve(async (req) => {
       );
     }
 
-    // Build query parameters for real-estate101 API
+    // Build query parameters for zillow-com1 API
     const params = new URLSearchParams();
-    
-    // Required: location
+
+    // Required: location (ZIP code, city name, or "City, State")
     params.append('location', filters.location.trim());
-    
-    // Pagination
+
+    // Pagination (1-indexed)
     params.append('page', (filters.page || 1).toString());
-    
-    // List type (for-sale, for-rent)
-    if (filters.listType) {
-      params.append('listType', filters.listType);
+
+    // Status: for-sale is default, only add if explicitly for-rent
+    // zillow-com1 uses 'status_type' parameter
+    if (filters.listType === 'for-rent') {
+      params.append('status_type', 'ForRent');
+    } else {
+      params.append('status_type', 'ForSale');
     }
-    
+
     // Price range
     if (filters.minPrice) params.append('minPrice', filters.minPrice.toString());
     if (filters.maxPrice) params.append('maxPrice', filters.maxPrice.toString());
-    
+
     // Beds & Baths
-    if (filters.minBeds) params.append('beds', filters.minBeds.toString());
-    if (filters.minBaths) params.append('baths', filters.minBaths.toString());
-    
+    if (filters.minBeds) params.append('bedsMin', filters.minBeds.toString());
+    if (filters.maxBeds) params.append('bedsMax', filters.maxBeds.toString());
+    if (filters.minBaths) params.append('bathsMin', filters.minBaths.toString());
+
     // Square feet
-    if (filters.minSqft) params.append('minSqft', filters.minSqft.toString());
-    if (filters.maxSqft) params.append('maxSqft', filters.maxSqft.toString());
-    
-    // Lot size
-    if (filters.minLotSize) params.append('minLot', filters.minLotSize.toString());
-    if (filters.maxLotSize) params.append('maxLot', filters.maxLotSize.toString());
-    
+    if (filters.minSqft) params.append('sqftMin', filters.minSqft.toString());
+    if (filters.maxSqft) params.append('sqftMax', filters.maxSqft.toString());
+
     // Year built
-    if (filters.minYearBuilt) params.append('minBuilt', filters.minYearBuilt.toString());
-    if (filters.maxYearBuilt) params.append('maxBuilt', filters.maxYearBuilt.toString());
-    
+    if (filters.minYearBuilt) params.append('built_min', filters.minYearBuilt.toString());
+    if (filters.maxYearBuilt) params.append('built_max', filters.maxYearBuilt.toString());
+
     // Days on market
-    if (filters.maxDaysOnMarket) params.append('daysOnZillow', filters.maxDaysOnMarket.toString());
-    
-    // HOA
-    if (filters.maxHOA) params.append('maxHOA', filters.maxHOA.toString());
-    
-    // Parking
-    if (filters.parkingSpots) params.append('parkingSpots', filters.parkingSpots.toString());
-    
-    // Property type filters
+    if (filters.maxDaysOnMarket) params.append('daysOn', filters.maxDaysOnMarket.toString());
+
+    // Property type — zillow-com1 uses home_type
     if (filters.homeType) {
       const typeMap: Record<string, string> = {
-        'SingleFamily': 'isSingleFamily',
-        'Condo': 'isCondo',
-        'Townhouse': 'isTownhouse',
-        'Apartment': 'isApartment',
-        'LotLand': 'isLotLand',
-        'Manufactured': 'isManufactured',
+        'SingleFamily': 'SINGLE_FAMILY',
+        'Condo': 'CONDO',
+        'Townhouse': 'TOWNHOUSE',
+        'Apartment': 'APARTMENT',
+        'LotLand': 'LOT_LAND',
+        'Manufactured': 'MANUFACTURED',
+        'MultiFamily': 'MULTI_FAMILY',
       };
-      const paramName = typeMap[filters.homeType];
-      if (paramName) {
-        params.append(paramName, 'true');
-      }
+      const apiType = typeMap[filters.homeType] || filters.homeType;
+      params.append('home_type', apiType);
     }
-    
-    // Boolean filters
-    if (filters.isComingSoon) params.append('isComingSoon', 'true');
-    if (filters.isForSaleForeclosure) params.append('isForSaleForeclosure', 'true');
-    if (filters.isAuction) params.append('isAuction', 'true');
-    if (filters.isOpenHousesOnly) params.append('isOpenHousesOnly', 'true');
-    if (filters.singleStory) params.append('singleStory', 'true');
-    if (filters.hasPool) params.append('hasPool', 'true');
-    if (filters.hasGarage) params.append('hasGarage', 'true');
-    if (filters.is3dHome) params.append('is3dHome', 'true');
-    if (filters.isBasementFinished) params.append('isBasementFinished', 'true');
-    if (filters.isBasementUnfinished) params.append('isBasementUnfinished', 'true');
-    
-    // View filters
-    if (filters.isWaterView) params.append('isWaterView', 'true');
-    if (filters.isParkView) params.append('isParkView', 'true');
-    if (filters.isCityView) params.append('isCityView', 'true');
-    if (filters.isMountainView) params.append('isMountainView', 'true');
 
-    const url = `${RAPIDAPI_BASE}/api/search?${params.toString()}`;
-    console.log('Calling RapidAPI:', url);
+    const url = `${RAPIDAPI_BASE}/propertyExtendedSearch?${params.toString()}`;
+    console.log('Calling Zillow API:', url);
 
     const response = await fetch(url, {
       method: 'GET',
@@ -154,16 +130,16 @@ serve(async (req) => {
       },
     });
 
-    console.log('RapidAPI response status:', response.status);
+    console.log('Zillow API response status:', response.status);
 
     const responseText = await response.text();
-    console.log('RapidAPI raw response:', responseText.substring(0, 500));
+    console.log('Zillow API raw response:', responseText.substring(0, 500));
 
     if (!response.ok) {
-      console.error('RapidAPI error:', response.status, responseText);
+      console.error('Zillow API error:', response.status, responseText);
       return new Response(
-        JSON.stringify({ 
-          success: false, 
+        JSON.stringify({
+          success: false,
           error: `API error: ${response.status}`,
           details: responseText,
           rawResponse: responseText
@@ -177,8 +153,8 @@ serve(async (req) => {
       data = JSON.parse(responseText);
     } catch (e) {
       return new Response(
-        JSON.stringify({ 
-          success: false, 
+        JSON.stringify({
+          success: false,
           error: 'Invalid JSON response',
           rawResponse: responseText
         }),
@@ -186,38 +162,42 @@ serve(async (req) => {
       );
     }
 
-    console.log('RapidAPI response received, properties:', data?.results?.length || 0);
+    // zillow-com1 returns results in listResults array
+    const rawList: any[] = data?.listResults || data?.searchResults?.listResults || data?.results || [];
+    console.log('Zillow API response received, properties:', rawList.length, '| totalResultCount:', data?.totalResultCount || 0);
 
-    // Transform the response to our format - API returns data in "results" array
-    const properties = (data?.results || []).map((prop: any) => ({
-      zpid: prop.id || prop.zpid,
-      address: prop.address?.street || prop.address || prop.streetAddress || '',
-      city: prop.address?.city || prop.city || '',
-      state: prop.address?.state || prop.state || '',
-      zipcode: prop.address?.zipcode || prop.zipcode || '',
-      price: prop.unformattedPrice || prop.price,
-      bedrooms: prop.beds || prop.bedrooms,
-      bathrooms: prop.baths || prop.bathrooms,
-      sqft: prop.livingArea || prop.area,
-      lotSize: prop.lotAreaValue,
-      lotSizeUnit: prop.lotAreaUnit,
-      yearBuilt: prop.yearBuilt,
-      propertyType: prop.homeType || prop.propertyType,
-      daysOnZillow: prop.daysOnZillow,
-      imgSrc: prop.imgSrc,
-      detailUrl: prop.detailUrl,
-      latitude: prop.latLong?.latitude || prop.latitude,
-      longitude: prop.latLong?.longitude || prop.longitude,
-      listingStatus: prop.homeStatus || prop.statusText || prop.listingStatus,
-      zestimate: prop.zestimate,
-      rentZestimate: prop.rentZestimate,
-      taxAssessedValue: prop.taxAssessedValue,
-    }));
+    const properties = rawList.map((prop: any) => {
+      const homeInfo = prop.hdpData?.homeInfo || {};
+      return {
+        zpid:          prop.zpid || prop.id,
+        address:       homeInfo.streetAddress || prop.address || prop.streetAddress || '',
+        city:          homeInfo.city || prop.city || '',
+        state:         homeInfo.state || prop.state || '',
+        zipcode:       homeInfo.zipcode || prop.zipcode || '',
+        price:         prop.unformattedPrice || (typeof prop.price === 'number' ? prop.price : null),
+        bedrooms:      prop.beds || homeInfo.bedrooms,
+        bathrooms:     prop.baths || homeInfo.bathrooms,
+        sqft:          prop.area || homeInfo.livingArea,
+        lotSize:       prop.lotAreaValue || homeInfo.lotAreaValue,
+        lotSizeUnit:   prop.lotAreaUnit || homeInfo.lotAreaUnit,
+        yearBuilt:     prop.yearBuilt || homeInfo.yearBuilt,
+        propertyType:  homeInfo.homeType || prop.homeType || prop.propertyType,
+        daysOnZillow:  prop.daysOnZillow || homeInfo.daysOnZillow,
+        imgSrc:        prop.imgSrc,
+        detailUrl:     prop.detailUrl,
+        latitude:      prop.latLong?.latitude || homeInfo.latitude,
+        longitude:     prop.latLong?.longitude || homeInfo.longitude,
+        listingStatus: prop.statusType || prop.statusText || homeInfo.homeStatus,
+        zestimate:     prop.zestimate || homeInfo.zestimate,
+        rentZestimate: prop.rentZestimate || homeInfo.rentZestimate,
+        taxAssessedValue: prop.taxAssessedValue || homeInfo.taxAssessedValue,
+      };
+    });
 
     return new Response(
       JSON.stringify({
         success: true,
-        totalResultCount: data?.totalCount || properties.length,
+        totalResultCount: data?.totalResultCount || properties.length,
         properties,
         rawResponse: data,
       }),
