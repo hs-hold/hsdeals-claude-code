@@ -470,17 +470,8 @@ function calcBrrrrVerdictFn(arv: number, askPrice: number, rehab: RehabAnalysis,
 
 export function analyzeAcquisition(deal: Deal): AcquisitionAnalysis | null {
   const { apiData, overrides, financials } = deal;
-  // Compute ARV the same way DealDetailPage does when the ARV field is empty:
-  // pass arv:null to force comp-based calculation from apiData.arv.
-  // We never trust overrides.arv here — it can be a stale value saved from an old API run.
-  // If user manually set an ARV override — it's the most accurate value, use it directly.
-  // Otherwise compute from comps but cap at apiData.arv: comps can only lower, never inflate.
-  const arv = (() => {
-    if (overrides.arv != null && overrides.arv > 0) return overrides.arv;
-    const liveFinancials = calculateFinancials(apiData, { ...overrides, arv: null });
-    const compArv = liveFinancials.arv;
-    return apiData.arv != null && apiData.arv > 0 ? Math.min(compArv, apiData.arv) : compArv;
-  })();
+  // All values: manual override takes priority (user verified), then API analyzed value.
+  const arv = overrides.arv ?? apiData.arv ?? 0;
   const listPrice = safeNum(overrides.purchasePrice) ?? safeNum(apiData.purchasePrice) ?? safeNum(financials?.purchasePrice);
   const rent = safeNum(overrides.rent) ?? safeNum(apiData.rent) ?? null;
 
