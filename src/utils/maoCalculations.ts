@@ -226,8 +226,8 @@ export function analyzeRehab(deal: Deal): RehabAnalysis {
     signals.push(`${apiData.daysOnMarket} days on market`);
   }
 
-  // High rehab ratio
-  const arv = overrides.arv ?? apiData.arv ?? 0;
+  // High rehab ratio — prefer validated financials.arv over raw apiData.arv
+  const arv = overrides.arv ?? deal.financials?.arv ?? apiData.arv ?? 0;
   const rehabRatio = arv > 0 ? baseRehab / arv : 0;
   if (rehabRatio > 0.20) signals.push(`Rehab is ${Math.round(rehabRatio * 100)}% of ARV`);
 
@@ -470,7 +470,8 @@ function calcBrrrrVerdictFn(arv: number, askPrice: number, rehab: RehabAnalysis,
 export function analyzeAcquisition(deal: Deal): AcquisitionAnalysis | null {
   const { apiData, overrides, financials } = deal;
   // safeNum guards against NaN, "NaN" strings, and other invalid values
-  const arv = safeNum(overrides.arv) ?? safeNum(apiData.arv) ?? safeNum(financials?.arv);
+  // Prefer validated financials.arv over raw apiData.arv — financials goes through validateArvAgainstComps
+  const arv = safeNum(overrides.arv) ?? safeNum(financials?.arv) ?? safeNum(apiData.arv);
   const listPrice = safeNum(overrides.purchasePrice) ?? safeNum(apiData.purchasePrice) ?? safeNum(financials?.purchasePrice);
   const rent = safeNum(overrides.rent) ?? safeNum(apiData.rent) ?? null;
 
