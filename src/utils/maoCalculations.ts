@@ -1,4 +1,5 @@
 import { Deal, SaleComp } from '@/types/deal';
+import { validateArvAgainstComps } from '@/utils/financialCalculations';
 
 export type ArvConfidence = 'green' | 'yellow' | 'red';
 export type RehabConfidence = 'high' | 'medium' | 'low';
@@ -470,8 +471,20 @@ function calcBrrrrVerdictFn(arv: number, askPrice: number, rehab: RehabAnalysis,
 export function analyzeAcquisition(deal: Deal): AcquisitionAnalysis | null {
   const { apiData, overrides, financials } = deal;
   // safeNum guards against NaN, "NaN" strings, and other invalid values
-  // Prefer validated financials.arv over raw apiData.arv — financials goes through validateArvAgainstComps
-  const arv = safeNum(overrides.arv) ?? safeNum(financials?.arv) ?? safeNum(apiData.arv);
+  // If no manual override, validate raw ARV against comps (same logic as Deal Detail liveFinancials)
+  // This ensures the Acquisition Engine always uses the same ARV as the Deal Detail page.
+  const rawArv = safeNum(overrides.arv) ?? safeNum(financials?.arv) ?? safeNum(apiData.arv);
+  const arv = (() => {
+    if (!rawArv || rawArv <= 0) return rawArv;
+    if (overrides.arv) return rawArv; // manual override: trust it as-is
+    const sqft = apiData.sqft ?? 0;
+    const beds = apiData.bedrooms ?? 0;
+    const baths = apiData.bathrooms ?? 0;
+    const comps = apiData.saleComps ?? [];
+    if (comps.length === 0 || sqft <= 0) return rawArv;
+    const { validatedArv } = validateArvAgainstComps(rawArv, comps, sqft, beds, baths);
+    return validatedArv;
+  })();
   const listPrice = safeNum(overrides.purchasePrice) ?? safeNum(apiData.purchasePrice) ?? safeNum(financials?.purchasePrice);
   const rent = safeNum(overrides.rent) ?? safeNum(apiData.rent) ?? null;
 
