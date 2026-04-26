@@ -12,6 +12,7 @@ export interface InvestmentScoreResult {
   inventoryScore: number | null;
   finalScore: number;
   decision: 'Buy' | 'Pass';
+  missingFields: string[];   // fields missing but not fatal (partial score)
   // source values
   monthlyCashflow: number;
   annualReturnPct: number;
@@ -149,6 +150,10 @@ export function calculateInvestmentScore(
 
   const finalScore = (cashFlowScore + equityScore + locationScore) / 3;
 
+  const missingFields: string[] = [];
+  if (schoolTotal == null) missingFields.push('School score');
+  if (inventoryMonths == null) missingFields.push('Inventory months');
+
   return {
     cashFlowScore,
     monthlyCashFlowScore,
@@ -158,7 +163,8 @@ export function calculateInvestmentScore(
     schoolScore: location.schoolScore,
     inventoryScore: location.inventoryScore,
     finalScore,
-    decision: finalScore >= 8 ? 'Buy' : 'Pass',
+    decision: finalScore >= 7 ? 'Buy' : 'Pass',
+    missingFields,
     monthlyCashflow,
     annualReturnPct: Math.min(annualReturnPct, 999),
     trueEquity,

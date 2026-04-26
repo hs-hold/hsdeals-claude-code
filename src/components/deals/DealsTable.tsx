@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Deal, DealStatus } from '@/types/deal';
 import { formatCurrency, formatPercent } from '@/utils/financialCalculations';
 import { detectSuspiciousData } from '@/utils/suspiciousData';
+import { calculateInvestmentScore } from '@/utils/investmentScore';
 import { DealStatusBadge } from './DealStatusBadge';
 import { formatIL as format } from '@/utils/dateFormat';
 import { useDeals } from '@/context/DealsContext';
@@ -367,6 +368,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
               <TableHead className="text-right">
                 <SortHeader field="yield">CoC Return</SortHeader>
               </TableHead>
+              <TableHead className="text-center w-[90px] text-xs text-muted-foreground">Inv. Score</TableHead>
               <TableHead>Source</TableHead>
               <TableHead>Seller / Agent</TableHead>
               <TableHead className="text-right">
@@ -378,7 +380,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
           <TableBody>
             {filteredAndSorted.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={11} className="h-32 text-center text-muted-foreground">
+                <TableCell colSpan={12} className="h-32 text-center text-muted-foreground">
                   No deals found
                 </TableCell>
               </TableRow>
@@ -491,6 +493,85 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                       cocReturn >= 0.08 ? "text-success" : cocReturn > 0 ? "text-warning" : "text-destructive"
                     )}>
                       {formatPercent(cocReturn)}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {(() => {
+                        const fin = deal.financials;
+                        const arv = deal.overrides?.arv ?? fin?.arv ?? deal.apiData?.arv ?? 0;
+                        const purchasePrice = deal.overrides?.purchasePrice ?? fin?.purchasePrice ?? deal.apiData?.purchasePrice ?? 0;
+                        const rehabCost = deal.overrides?.rehabCost ?? fin?.rehabCost ?? deal.apiData?.rehabCost ?? 0;
+                        const monthlyCashflow = fin?.monthlyCashflow ?? null;
+                        const cashLeftInDeal = fin?.totalCashRequired ?? null;
+
+                        const missing: string[] = [];
+                        if (!monthlyCashflow && monthlyCashflow !== 0) missing.push('Cash flow');
+                        if (!arv) missing.push('ARV');
+                        if (!purchasePrice) missing.push('Price');
+
+                        if (missing.length > 0 && !fin) {
+                          return (
+                            <Tooltip>
+                              <TooltipTrigger>
+                                <span className="text-[10px] text-muted-foreground/60">—</span>
+                              </TooltipTrigger>
+                              <TooltipContent>Not analyzed yet</TooltipContent>
+                            </Tooltip>
+                          );
+                        }
+
+                        if (missing.length > 0) {
+                          return (
+                            <Tooltip>
+                              <TooltipTrigger>
+                                <span className="text-[10px] text-orange-400 font-medium">Missing</span>
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-[200px]">
+                                <p className="font-semibold mb-1">Missing for score:</p>
+                                {missing.map(f => <p key={f} className="text-xs">• {f}</p>)}
+                              </TooltipContent>
+                            </Tooltip>
+                          );
+                        }
+
+                        const score = calculateInvestmentScore({
+                          monthlyCashflow: monthlyCashflow!,
+                          cashLeftInDeal,
+                          arv,
+                          purchasePrice,
+                          rehabCost,
+                          schoolTotal: deal.apiData?.schoolScore ?? null,
+                          inventoryMonths: deal.overrides?.inventoryMonths ?? null,
+                        });
+
+                        if (!score) return <span className="text-[10px] text-muted-foreground/60">—</span>;
+
+                        const isBuy = score.decision === 'Buy';
+                        return (
+                          <Tooltip>
+                            <TooltipTrigger>
+                              <span className={cn(
+                                "inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full border",
+                                isBuy
+                                  ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                                  : score.finalScore >= 5
+                                    ? "bg-yellow-500/15 text-yellow-400 border-yellow-500/30"
+                                    : "bg-red-500/15 text-red-400 border-red-500/30"
+                              )}>
+                                {score.finalScore.toFixed(1)}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-[220px] space-y-1">
+                              <p className="font-semibold">{isBuy ? '✓ Buy' : '✗ Pass'} — {score.finalScore.toFixed(1)}/10</p>
+                              <p className="text-xs">Cash Flow: {score.cashFlowScore.toFixed(1)}</p>
+                              <p className="text-xs">Equity: {score.equityScore.toFixed(1)}</p>
+                              <p className="text-xs">Location: {score.locationScore.toFixed(1)}</p>
+                              {score.missingFields.length > 0 && (
+                                <p className="text-xs text-orange-400">⚠ Partial: {score.missingFields.join(', ')} missing</p>
+                              )}
+                            </TooltipContent>
+                          </Tooltip>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
                       {deal.source === 'email' ? (
