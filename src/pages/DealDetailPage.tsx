@@ -72,7 +72,8 @@ import {
   Lock,
   Unlock,
   RefreshCw,
-  ShieldAlert
+  ShieldAlert,
+  BarChart3
 } from 'lucide-react';
 import { ZillowIcon } from '@/components/icons/ZillowIcon';
 import { generateDealPDF } from '@/utils/pdfExport';
@@ -859,6 +860,20 @@ export default function DealDetailPage() {
   const brrrrCashLeftInDeal  = safeNum(derivedValues?.brrrrCashLeftInDeal);
   const brrrrMonthlyCashflow = safeNum(derivedValues?.brrrrMonthlyCashflow);
   const brrrrEquity          = safeNum(derivedValues?.brrrrEquity);
+
+  // Investment Score for header badge — computed once, shared everywhere
+  const headerInvestmentScore = useMemo(() => {
+    if (!arv || !purchasePrice) return null;
+    return calculateInvestmentScore({
+      monthlyCashflow: brrrrMonthlyCashflow || null,
+      cashLeftInDeal: brrrrCashLeftInDeal || null,
+      arv,
+      purchasePrice,
+      rehabCost,
+      schoolTotal: apiData?.schoolScore ?? null,
+      inventoryMonths: localOverrides.inventoryMonths ? parseFloat(localOverrides.inventoryMonths) : null,
+    }, settings.investmentScoreSettings);
+  }, [arv, purchasePrice, rehabCost, brrrrMonthlyCashflow, brrrrCashLeftInDeal, apiData?.schoolScore, localOverrides.inventoryMonths, settings.investmentScoreSettings]);
 
   // Build display-default map: what shows in each input when override is empty
   const fieldDisplayDefaults = useMemo((): Record<string, string> => {
@@ -1773,8 +1788,8 @@ export default function DealDetailPage() {
               {apiData.grade && (
                 <HoverCard>
                   <HoverCardTrigger asChild>
-                    <Badge 
-                      variant="outline" 
+                    <Badge
+                      variant="outline"
                       className={cn(
                         "cursor-pointer text-xs font-semibold",
                         apiData.grade === 'A' && "border-emerald-500 text-emerald-500",
@@ -1807,6 +1822,76 @@ export default function DealDetailPage() {
                     </div>
                   </HoverCardContent>
                 </HoverCard>
+              )}
+              {/* Investment Decision Score badge */}
+              {headerInvestmentScore ? (
+                <HoverCard>
+                  <HoverCardTrigger asChild>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "cursor-pointer text-xs font-semibold",
+                        headerInvestmentScore.decision === 'Buy'
+                          ? "border-emerald-500 text-emerald-400 bg-emerald-500/10"
+                          : headerInvestmentScore.finalScore >= 5
+                            ? "border-yellow-500 text-yellow-400 bg-yellow-500/10"
+                            : "border-red-500 text-red-400 bg-red-500/10"
+                      )}
+                    >
+                      <BarChart3 className="w-3 h-3 mr-1" />
+                      Score: {headerInvestmentScore.finalScore.toFixed(1)}/10
+                      <span className="ml-1.5 font-bold">
+                        {headerInvestmentScore.decision === 'Buy' ? '✓' : '✗'}
+                      </span>
+                    </Badge>
+                  </HoverCardTrigger>
+                  <HoverCardContent className="w-64" side="bottom" align="start">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold">Investment Score</span>
+                        <span className={cn(
+                          "text-sm font-bold",
+                          headerInvestmentScore.decision === 'Buy' ? "text-emerald-400" : "text-red-400"
+                        )}>
+                          {headerInvestmentScore.decision === 'Buy' ? '✓ Buy' : '✗ Pass'}
+                        </span>
+                      </div>
+                      <div className="space-y-1 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Cash Flow</span>
+                          <span className={cn("font-medium", headerInvestmentScore.cashFlowScore >= 7 ? "text-emerald-400" : headerInvestmentScore.cashFlowScore >= 5 ? "text-yellow-400" : "text-red-400")}>
+                            {headerInvestmentScore.cashFlowScore.toFixed(1)}/10
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Equity</span>
+                          <span className={cn("font-medium", headerInvestmentScore.equityScore >= 7 ? "text-emerald-400" : headerInvestmentScore.equityScore >= 5 ? "text-yellow-400" : "text-red-400")}>
+                            {headerInvestmentScore.equityScore.toFixed(1)}/10
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Location</span>
+                          <span className={cn("font-medium", headerInvestmentScore.locationScore >= 7 ? "text-emerald-400" : headerInvestmentScore.locationScore >= 5 ? "text-yellow-400" : "text-red-400")}>
+                            {headerInvestmentScore.locationScore.toFixed(1)}/10
+                          </span>
+                        </div>
+                      </div>
+                      {headerInvestmentScore.missingFields.length > 0 && (
+                        <p className="text-xs text-orange-400">
+                          ⚠ Partial: {headerInvestmentScore.missingFields.join(', ')} missing
+                        </p>
+                      )}
+                      <p className="text-xs text-muted-foreground pt-1 border-t border-border">
+                        Configure weights in Settings
+                      </p>
+                    </div>
+                  </HoverCardContent>
+                </HoverCard>
+              ) : liveFinancials && (
+                <Badge variant="outline" className="text-xs text-muted-foreground border-muted-foreground/30">
+                  <BarChart3 className="w-3 h-3 mr-1" />
+                  Score: N/A
+                </Badge>
               )}
             </div>
             <p className="text-muted-foreground flex items-center gap-1">
