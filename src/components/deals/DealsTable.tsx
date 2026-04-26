@@ -4,6 +4,7 @@ import { Deal, DealStatus } from '@/types/deal';
 import { formatCurrency, formatPercent } from '@/utils/financialCalculations';
 import { detectSuspiciousData } from '@/utils/suspiciousData';
 import { calculateInvestmentScore } from '@/utils/investmentScore';
+import { useSettings } from '@/context/SettingsContext';
 import { DealStatusBadge } from './DealStatusBadge';
 import { formatIL as format } from '@/utils/dateFormat';
 import { useDeals } from '@/context/DealsContext';
@@ -53,6 +54,8 @@ interface DealsTableProps {
 
 export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true, showAnalyzeButton = true }: DealsTableProps) {
   const { analyzeDeal, updateDealStatus, deleteDeal } = useDeals();
+  const { settings } = useSettings();
+  const scoreSettings = settings.investmentScoreSettings;
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [markingNotRelevantId, setMarkingNotRelevantId] = useState<string | null>(null);
   const [closingDealId, setClosingDealId] = useState<string | null>(null);
@@ -541,7 +544,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                           rehabCost,
                           schoolTotal: deal.apiData?.schoolScore ?? null,
                           inventoryMonths: deal.overrides?.inventoryMonths ?? null,
-                        });
+                        }, scoreSettings);
 
                         if (!score) return <span className="text-[10px] text-muted-foreground/60">—</span>;
 

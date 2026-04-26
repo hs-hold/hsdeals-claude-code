@@ -1,6 +1,20 @@
 // BRRRR Investment Decision Score
-// Scores a BRRRR deal on 3 parameters (1–10 each), final = average.
-// Score >= 8 → Buy, < 8 → Pass.
+// Scores a BRRRR deal on 3 parameters (1–10 each), final = weighted average.
+// Score >= buyThreshold → Buy, else Pass.
+
+export interface InvestmentScoreSettings {
+  buyThreshold: number;      // default 7.0
+  cashFlowWeight: number;    // relative weight (1–100), default 33
+  equityWeight: number;      // relative weight (1–100), default 33
+  locationWeight: number;    // relative weight (1–100), default 34
+}
+
+export const DEFAULT_INVESTMENT_SCORE_SETTINGS: InvestmentScoreSettings = {
+  buyThreshold: 7,
+  cashFlowWeight: 33,
+  equityWeight: 33,
+  locationWeight: 34,
+};
 
 export interface InvestmentScoreResult {
   cashFlowScore: number;
@@ -124,6 +138,7 @@ export function calculateLocationScore(params: {
 
 export function calculateInvestmentScore(
   params: InvestmentScoreParams,
+  settings: InvestmentScoreSettings = DEFAULT_INVESTMENT_SCORE_SETTINGS,
 ): InvestmentScoreResult | null {
   const { monthlyCashflow, cashLeftInDeal, arv, purchasePrice, rehabCost, schoolTotal, inventoryMonths } = params;
 
@@ -148,7 +163,11 @@ export function calculateInvestmentScore(
   const location = calculateLocationScore({ schoolTotal, inventoryMonths });
   const locationScore = location.score;
 
-  const finalScore = (cashFlowScore + equityScore + locationScore) / 3;
+  const wCF = settings.cashFlowWeight;
+  const wEQ = settings.equityWeight;
+  const wLO = settings.locationWeight;
+  const totalWeight = wCF + wEQ + wLO || 1;
+  const finalScore = (cashFlowScore * wCF + equityScore * wEQ + locationScore * wLO) / totalWeight;
 
   const missingFields: string[] = [];
   if (schoolTotal == null) missingFields.push('School score');
@@ -163,7 +182,7 @@ export function calculateInvestmentScore(
     schoolScore: location.schoolScore,
     inventoryScore: location.inventoryScore,
     finalScore,
-    decision: finalScore >= 7 ? 'Buy' : 'Pass',
+    decision: finalScore >= settings.buyThreshold ? 'Buy' : 'Pass',
     missingFields,
     monthlyCashflow,
     annualReturnPct: Math.min(annualReturnPct, 999),

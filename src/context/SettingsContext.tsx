@@ -1,5 +1,8 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { FINANCIAL_CONFIG } from '@/config/financial';
+import { InvestmentScoreSettings, DEFAULT_INVESTMENT_SCORE_SETTINGS } from '@/utils/investmentScore';
+
+export type { InvestmentScoreSettings };
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
 export type DesignTheme = 'default' | 'ocean' | 'sunset' | 'forest';
@@ -57,12 +60,14 @@ interface Settings {
   autoSaveOverrides: boolean;
   numberFormat: NumberFormat;
   loanDefaults: LoanDefaults;
+  investmentScoreSettings: InvestmentScoreSettings;
 }
 
 interface SettingsContextType {
   settings: Settings;
   updateSettings: (updates: Partial<Settings>) => void;
   updateLoanDefaults: (updates: Partial<LoanDefaults>) => void;
+  updateInvestmentScoreSettings: (updates: Partial<InvestmentScoreSettings>) => void;
   effectiveTheme: 'light' | 'dark';
 }
 
@@ -122,6 +127,7 @@ const defaultSettings: Settings = {
   autoSaveOverrides: false,
   numberFormat: 'comma',
   loanDefaults: defaultLoanDefaults,
+  investmentScoreSettings: DEFAULT_INVESTMENT_SCORE_SETTINGS,
 };
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
@@ -131,10 +137,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const stored = localStorage.getItem('dealflow-settings');
     if (stored) {
       const parsed = JSON.parse(stored);
-      return { 
-        ...defaultSettings, 
+      return {
+        ...defaultSettings,
         ...parsed,
-        loanDefaults: { ...defaultLoanDefaults, ...(parsed.loanDefaults || {}) }
+        loanDefaults: { ...defaultLoanDefaults, ...(parsed.loanDefaults || {}) },
+        investmentScoreSettings: { ...DEFAULT_INVESTMENT_SCORE_SETTINGS, ...(parsed.investmentScoreSettings || {}) },
       };
     }
     return defaultSettings;
@@ -203,8 +210,15 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     }));
   };
 
+  const updateInvestmentScoreSettings = (updates: Partial<InvestmentScoreSettings>) => {
+    setSettings(prev => ({
+      ...prev,
+      investmentScoreSettings: { ...prev.investmentScoreSettings, ...updates }
+    }));
+  };
+
   return (
-    <SettingsContext.Provider value={{ settings, updateSettings, updateLoanDefaults, effectiveTheme }}>
+    <SettingsContext.Provider value={{ settings, updateSettings, updateLoanDefaults, updateInvestmentScoreSettings, effectiveTheme }}>
       {children}
     </SettingsContext.Provider>
   );

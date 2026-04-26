@@ -6398,7 +6398,7 @@ BRRRR STRATEGY:
                     rehabCost,
                     schoolTotal: apiData?.schoolScore ?? null,
                     inventoryMonths: localOverrides.inventoryMonths ? parseFloat(localOverrides.inventoryMonths) : null,
-                  });
+                  }, settings.investmentScoreSettings);
                   const isBuy = invScore?.decision === 'Buy';
                   return (
                     <div className="mt-4 rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-4">

@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, Fragment } from 'react';
 import { calculateInvestmentScore } from '@/utils/investmentScore';
+import { useSettings } from '@/context/SettingsContext';
 import { Link } from 'react-router-dom';
 import { useDeals } from '@/context/DealsContext';
 import { Deal } from '@/types/deal';
@@ -589,7 +590,7 @@ function AcquisitionCard({ deal }: { deal: Deal }) {
                     rehabCost: deal.overrides.rehabCost ?? deal.apiData.rehabCost ?? 0,
                     schoolTotal: deal.apiData.schoolScore,
                     inventoryMonths: deal.overrides.inventoryMonths ?? null,
-                  });
+                  }, settings.investmentScoreSettings);
                   if (!invScore) return null;
                   return (
                     <div className="col-span-2 flex items-center justify-between rounded-md px-2 py-1.5 bg-muted/30 border border-border">
@@ -765,6 +766,7 @@ function passesFilters(
 
 export default function AcquisitionPage() {
   const { deals } = useDeals();
+  const { settings } = useSettings();
   const [timeRange, setTimeRange] = useState<TimeRange>('month');
   const [domMin, setDomMin] = useState(0);
   const [offerFilter, setOfferFilter] = useState('all');
