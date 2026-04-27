@@ -58,7 +58,14 @@ const defaultOverrides: DealOverrides = {
 };
 
 
-function mapToDealApiData(analysis: PropertyAnalysis, property?: PropertyData): DealApiData {
+interface AgentFallback {
+  agentName: string | null;
+  agentEmail: string | null;
+  agentPhone: string | null;
+  brokerName: string | null;
+}
+
+function mapToDealApiData(analysis: PropertyAnalysis, property?: PropertyData, agentFallback?: AgentFallback): DealApiData {
   const mapPropertyType = (type?: string): DealApiData['propertyType'] => {
     const typeMap: Record<string, DealApiData['propertyType']> = {
       SINGLE_FAMILY: 'single_family',
@@ -124,12 +131,12 @@ function mapToDealApiData(analysis: PropertyAnalysis, property?: PropertyData): 
     wholesalePrice: analysis.metrics?.wholesale_price ?? null,
     arvMargin: analysis.metrics?.arv_margin ?? null,
 
-    // Agent / Broker info
-    agentName: property?.attributionInfo?.agentName ?? null,
-    agentEmail: property?.attributionInfo?.agentEmail ?? property?.attributionInfo?.listingAgentEmail ?? null,
-    agentPhone: property?.attributionInfo?.agentPhoneNumber ?? null,
+    // Agent / Broker info — prefer DealBeast API data, fall back to listing API data
+    agentName: property?.attributionInfo?.agentName ?? agentFallback?.agentName ?? null,
+    agentEmail: property?.attributionInfo?.agentEmail ?? property?.attributionInfo?.listingAgentEmail ?? agentFallback?.agentEmail ?? null,
+    agentPhone: property?.attributionInfo?.agentPhoneNumber ?? agentFallback?.agentPhone ?? null,
     agentLicense: property?.attributionInfo?.agentLicenseNumber ?? null,
-    brokerName: property?.attributionInfo?.brokerName ?? null,
+    brokerName: property?.attributionInfo?.brokerName ?? agentFallback?.brokerName ?? null,
     brokerPhone: property?.attributionInfo?.brokerPhoneNumber ?? null,
     mlsId: property?.attributionInfo?.mlsId ?? null,
     mlsName: property?.attributionInfo?.mlsName ?? null,
@@ -184,15 +191,25 @@ function mapToDealApiData(analysis: PropertyAnalysis, property?: PropertyData): 
   };
 }
 
-async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: PropertyData, scoutAiData?: Record<string, any>): Promise<string | null> {
+async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: PropertyData, scoutAiData?: Record<string, any>, agentFallback?: AgentFallback): Promise<string | null> {
   try {
+    // Require address and purchase price — can't work a deal without them
+    if (!analysisData.address?.trim()) {
+      console.warn('[saveDealToDb] Skipping deal — no address');
+      return null;
+    }
+    if (!analysisData.asking_price || analysisData.asking_price <= 0) {
+      console.warn('[saveDealToDb] Skipping deal — no purchase price', analysisData.address);
+      return null;
+    }
+
     const addressParts = analysisData.address?.split(',').map((s) => s.trim()) || [];
     const street = addressParts[0] || analysisData.address || '';
     const city = analysisData.city || addressParts[1] || '';
     const stateZip = addressParts[2] || '';
     const [state, zip] = stateZip.split(' ').filter(Boolean);
 
-    const apiData = mapToDealApiData(analysisData, propertyData);
+    const apiData = mapToDealApiData(analysisData, propertyData, agentFallback);
     const financials = calculateFinancials(apiData, defaultOverrides);
 
     // Get current user for created_by
@@ -231,7 +248,11 @@ async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: Prope
   }
 }
 
-export async function analyzeAndCreateDeal(address: string, scoutAiData?: Record<string, any>): Promise<{ dealId: string | null; error?: string; alreadyExists?: boolean }> {
+export async function analyzeAndCreateDeal(address: string, scoutAiData?: Record<string, any>, agentFallback?: AgentFallback): Promise<{ dealId: string | null; error?: string; alreadyExists?: boolean }> {
+  if (!address.trim()) {
+    return { dealId: null, error: 'Address is required' };
+  }
+
   try {
     // Dedup check — skip if this address was already analyzed
     const { data: existing } = await supabase
@@ -262,38 +283,9 @@ export async function analyzeAndCreateDeal(address: string, scoutAiData?: Record
       return { dealId: null, error: apiResponse?.error || 'Analysis failed' };
     }
 
-    // DealBeast doesn't return agent email — supplement from zillow-search (fire-and-forget, best-effort)
-    if (!apiResponse.data.property?.attributionInfo?.agentEmail &&
-        !apiResponse.data.property?.attributionInfo?.listingAgentEmail) {
-      try {
-        const analysis = apiResponse.data.analysis;
-        const city = analysis.city || '';
-        const stateFromAddr = address.split(',').slice(-1)[0]?.trim()?.split(' ')[0] || '';
-        const location = city ? `${city}, ${stateFromAddr}` : stateFromAddr;
-        if (location.length > 2) {
-          const { data: searchData } = await supabase.functions.invoke('zillow-search', {
-            body: { location, minPrice: (analysis.asking_price ?? 50000) * 0.7, maxPrice: (analysis.asking_price ?? 500000) * 1.3 },
-          });
-          const match = (searchData?.properties ?? []).find((p: any) => {
-            const pAddr = (p.address || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-            const qAddr = address.toLowerCase().replace(/[^a-z0-9]/g, '').split(',')[0];
-            return pAddr.includes(qAddr.slice(0, 10));
-          });
-          if (match?.agentEmail) {
-            if (!apiResponse.data.property) apiResponse.data.property = {} as any;
-            if (!apiResponse.data.property.attributionInfo) apiResponse.data.property.attributionInfo = {};
-            apiResponse.data.property.attributionInfo.agentEmail = match.agentEmail;
-            if (match.agentPhone) apiResponse.data.property.attributionInfo.agentPhoneNumber ||= match.agentPhone;
-          }
-        }
-      } catch {
-        // best-effort — don't block deal save if lookup fails
-      }
-    }
-
     let dealId: string | null;
     try {
-      dealId = await saveDealToDb(apiResponse.data.analysis, apiResponse.data.property, scoutAiData);
+      dealId = await saveDealToDb(apiResponse.data.analysis, apiResponse.data.property, scoutAiData, agentFallback);
     } catch (saveErr) {
       const msg = saveErr instanceof Error ? saveErr.message : 'Database error';
       return { dealId: null, error: `Property analyzed but failed to save: ${msg}` };

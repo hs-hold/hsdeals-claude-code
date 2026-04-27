@@ -142,6 +142,10 @@ interface RawListing {
   propertyType: string | null;
   imgSrc: string | null;
   detailUrl: string | null;
+  agentName: string | null;
+  agentEmail: string | null;
+  agentPhone: string | null;
+  brokerName: string | null;
 }
 
 type AiStatus = 'pending' | 'pass' | 'fail' | 'error';
@@ -271,6 +275,8 @@ function loadSavedSession(): { results: ScoredListing[]; stage: Stage; totalScan
       localStorage.removeItem(STORAGE_KEY);
       return null;
     }
+    // Stage 5 = DealBeast running — can't survive a page reload, reset to 4
+    if (parsed.stage === 5) parsed.stage = 4;
     return parsed;
   } catch { return null; }
 }
@@ -375,6 +381,10 @@ export default function MarketScanPage() {
               propertyType:  p.propertyType ?? null,
               imgSrc:        p.imgSrc ?? null,
               detailUrl:     p.detailUrl ?? null,
+              agentName:     p.agentName ?? null,
+              agentEmail:    p.agentEmail ?? null,
+              agentPhone:    p.agentPhone ?? null,
+              brokerName:    p.brokerName ?? null,
             });
           }
         } else if (error) {
@@ -444,32 +454,54 @@ export default function MarketScanPage() {
 
     let newCount = 0;
     let skippedCount = 0;
+    let errorCount = 0;
 
-    for (let i = 0; i < toAnalyze.length; i++) {
-      if (dbAbortRef.current) break;
-      const r = toAnalyze[i];
-      const fullAddress = [r.address, r.city, r.state, r.zipcode].filter(Boolean).join(', ');
-      setDbProgress({ current: i + 1, total: toAnalyze.length, address: r.address });
+    try {
+      for (let i = 0; i < toAnalyze.length; i++) {
+        if (dbAbortRef.current) break;
+        const r = toAnalyze[i];
+        const fullAddress = [r.address, r.city, r.state, r.zipcode].filter(Boolean).join(', ');
+        setDbProgress({ current: i + 1, total: toAnalyze.length, address: r.address });
 
-      const scoutAiData = r.aiResult?.raw || null;
-      const { dealId, alreadyExists } = await analyzeAndCreateDeal(fullAddress, scoutAiData ?? undefined);
-      if (dealId) {
-        if (alreadyExists) skippedCount++;
-        else newCount++;
+        try {
+          const scoutAiData = r.aiResult?.raw || null;
+          const agentInfo = {
+            agentName:  r.agentName  ?? null,
+            agentEmail: r.agentEmail ?? null,
+            agentPhone: r.agentPhone ?? null,
+            brokerName: r.brokerName ?? null,
+          };
+          // 90-second timeout per property so a hung AI call never blocks the loop
+          const timeoutPromise = new Promise<{ dealId: null; error: string }>(res =>
+            setTimeout(() => res({ dealId: null, error: 'timeout' }), 90_000)
+          );
+          const { dealId, alreadyExists } = await Promise.race([
+            analyzeAndCreateDeal(fullAddress, scoutAiData ?? undefined, agentInfo),
+            timeoutPromise,
+          ]);
+          if (dealId) {
+            if (alreadyExists) skippedCount++;
+            else newCount++;
+          } else {
+            errorCount++;
+          }
+        } catch {
+          errorCount++;
+        }
+
+        if (i < toAnalyze.length - 1) await new Promise(r => setTimeout(r, 800));
       }
-
-      if (i < toAnalyze.length - 1) await new Promise(r => setTimeout(r, 800));
+    } finally {
+      setDbProgress(null);
+      setDbDone(newCount + skippedCount);
+      setStage(6);
+      const msg = skippedCount > 0
+        ? `${newCount} new deals added · ${skippedCount} already existed${errorCount ? ` · ${errorCount} failed` : ''}`
+        : `${newCount} deals analyzed and added${errorCount ? ` · ${errorCount} failed` : ''}`;
+      toast.success(msg, {
+        action: { label: 'View Deals', onClick: () => navigate('/deals') },
+      });
     }
-
-    setDbProgress(null);
-    setDbDone(newCount + skippedCount);
-    setStage(6);
-    const msg = skippedCount > 0
-      ? `${newCount} new deals added · ${skippedCount} already existed`
-      : `${newCount} deals analyzed and added`;
-    toast.success(msg, {
-      action: { label: 'View Deals', onClick: () => navigate('/deals') },
-    });
   }, [nonDupeResults, navigate, sentZpids, maxToSend]);
 
   // ── Toggle helpers ────────────────────────────────────────────────────────

@@ -456,16 +456,17 @@ export default function DealDetailPage() {
     setRejectionReason(deal.rejectionReason || '');
   }, [deal?.updatedAt]);
 
-  // Auto-apply rehab minimums: $60k for API deals, $80k for email deals
-  // Also applies when existing override is below the floor
+  // Auto-apply rehab minimums only when value comes from the API (not a manual override)
   useEffect(() => {
     if (!deal) return;
     let floor = 0;
     if (deal.source === 'api') floor = 60_000;
     else if (deal.source === 'email') floor = 80_000;
     if (floor === 0) return;
-    const currentRehab = deal.overrides?.rehabCost ?? deal.apiData?.rehabCost ?? 0;
-    if (currentRehab >= floor) return;
+    // Never override a value the user manually entered
+    if (deal.overrides?.rehabCost != null) return;
+    const apiRehab = deal.apiData?.rehabCost ?? 0;
+    if (apiRehab >= floor) return;
     updateDealOverrides(deal.id, { rehabCost: floor });
     setLocalOverrides(prev => ({ ...prev, rehabCost: floor.toString() }));
   }, [deal?.id]);
@@ -801,8 +802,9 @@ export default function DealDetailPage() {
     const brrrrCashOut = brrrrRefiLoanAmount - brrrrHmlTotalLoan - (brrrrRefiLoanAmount * 0.02) - notaryFee; // Refi signing
     const brrrrCashLeftInDeal = brrrrTotalCashIn - Math.max(0, brrrrCashOut);
     
-    const brrrrMonthlyMortgage = brrrrRefiLoanAmount > 0 
-      ? brrrrRefiLoanAmount * ((loanDefaults.interestRate / 100 / 12) * Math.pow(1 + (loanDefaults.interestRate / 100 / 12), 360)) / (Math.pow(1 + (loanDefaults.interestRate / 100 / 12), 360) - 1)
+    const brrrrRefiTermMonths = (localOverrides.loanTermYears ? parseFloat(localOverrides.loanTermYears) : loanDefaults.loanTermYears) * 12;
+    const brrrrMonthlyMortgage = brrrrRefiLoanAmount > 0
+      ? brrrrRefiLoanAmount * ((loanDefaults.interestRate / 100 / 12) * Math.pow(1 + (loanDefaults.interestRate / 100 / 12), brrrrRefiTermMonths)) / (Math.pow(1 + (loanDefaults.interestRate / 100 / 12), brrrrRefiTermMonths) - 1)
       : 0;
     const brrrrNoi = rent - (liveFinancials.monthlyExpenses ?? 0);
     const brrrrMonthlyCashflow = brrrrNoi - brrrrMonthlyMortgage;
@@ -2171,8 +2173,9 @@ export default function DealDetailPage() {
                 const brrrrEquityCaptured = arv - refiLoanAmount;
                 
                 // BRRRR monthly cashflow
-                const brrrrMonthlyMortgage = refiLoanAmount > 0 
-                  ? refiLoanAmount * ((loanDefaults.rentalInterestRate / 100 / 12) * Math.pow(1 + (loanDefaults.rentalInterestRate / 100 / 12), 360)) / (Math.pow(1 + (loanDefaults.rentalInterestRate / 100 / 12), 360) - 1)
+                const refiTermMonths2 = (localOverrides.loanTermYears ? parseFloat(localOverrides.loanTermYears) : loanDefaults.loanTermYears) * 12;
+                const brrrrMonthlyMortgage = refiLoanAmount > 0
+                  ? refiLoanAmount * ((loanDefaults.rentalInterestRate / 100 / 12) * Math.pow(1 + (loanDefaults.rentalInterestRate / 100 / 12), refiTermMonths2)) / (Math.pow(1 + (loanDefaults.rentalInterestRate / 100 / 12), refiTermMonths2) - 1)
                   : 0;
                 const brrrrMonthlyCashflow = rent - (liveFinancials?.monthlyExpenses ?? 0) - brrrrMonthlyMortgage;
 
@@ -4188,8 +4191,9 @@ BRRRR STRATEGY:
               const brrrrCashLeftInDeal = brrrrTotalCashIn - Math.max(0, brrrrCashOut);
               
               // BRRRR monthly cashflow (simplified)
-              const brrrrMonthlyMortgage = brrrrRefiLoanAmount > 0 
-                ? brrrrRefiLoanAmount * ((loanDefaults.interestRate / 100 / 12) * Math.pow(1 + (loanDefaults.interestRate / 100 / 12), 360)) / (Math.pow(1 + (loanDefaults.interestRate / 100 / 12), 360) - 1)
+              const refiTermMonths3 = (localOverrides.loanTermYears ? parseFloat(localOverrides.loanTermYears) : loanDefaults.loanTermYears) * 12;
+              const brrrrMonthlyMortgage = brrrrRefiLoanAmount > 0
+                ? brrrrRefiLoanAmount * ((loanDefaults.interestRate / 100 / 12) * Math.pow(1 + (loanDefaults.interestRate / 100 / 12), refiTermMonths3)) / (Math.pow(1 + (loanDefaults.interestRate / 100 / 12), refiTermMonths3) - 1)
                 : 0;
               const brrrrNoi = rent - (liveFinancials?.monthlyExpenses ?? 0);
               const brrrrMonthlyCashflow = brrrrNoi - brrrrMonthlyMortgage;
@@ -6786,18 +6790,22 @@ BRRRR STRATEGY:
                 ? parseFloat(localOverrides.agentCommissionPercent) / 100 
                 : loanDefaults.agentCommissionPercent / 100;
               
-              // MAO calculation (conservative approach)
-              const targetProfitMargin = 0.70; // 70% of ARV rule
+              // MAO = ARV × 75% - rehab - holding costs, with minimum $50k profit guarantee
               const rehabWithContingency = rehabCost * (1 + contingencyPercent);
-              const estimatedClosingCosts = purchasePrice * closingPercent;
               const estimatedSellingCosts = arv * agentPercent + 1000; // Agent + closing
-              
-              // MAO = (ARV × 70%) - Rehab (with contingency) - Holding Costs
-              const mao = Math.round((arv * targetProfitMargin) - rehabWithContingency - totalHoldingCosts);
-              
-              // Calculate expected profit at MAO
+              const MIN_PROFIT = 50000;
+
+              // 75% rule MAO
+              let mao = Math.round((arv * 0.75) - rehabWithContingency - totalHoldingCosts);
+
+              // Verify profit at this MAO; if < $50k, solve backwards for MAO that yields $50k
+              // profit = ARV - MAO - MAO*closingPercent - rehab - holdingCosts - sellingCosts
+              // MAO*(1+closingPercent) = ARV - rehab - holdingCosts - sellingCosts - MIN_PROFIT
               const maoTotalInvestment = mao + (mao * closingPercent) + rehabWithContingency + totalHoldingCosts;
               const maoExpectedProfit = arv - maoTotalInvestment - estimatedSellingCosts;
+              if (maoExpectedProfit < MIN_PROFIT) {
+                mao = Math.round((arv - rehabWithContingency - totalHoldingCosts - estimatedSellingCosts - MIN_PROFIT) / (1 + closingPercent));
+              }
               
               const loiText = `Subject: Letter of Intent - ${deal?.address.full}
 

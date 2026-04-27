@@ -402,7 +402,8 @@ const addBRRRRAnalysis = (
     ? parseFloat(localOverrides.interestRate) 
     : 7;
   const monthlyRate = (interestRate / 100) / 12;
-  const numPayments = 30 * 12;
+  const refiTermYears = localOverrides.loanTermYears ? parseFloat(localOverrides.loanTermYears) : 30;
+  const numPayments = refiTermYears * 12;
   const refiMortgage = refiLoanAmount > 0 && monthlyRate > 0
     ? (refiLoanAmount * monthlyRate * Math.pow(1 + monthlyRate, numPayments)) / (Math.pow(1 + monthlyRate, numPayments) - 1)
     : 0;
