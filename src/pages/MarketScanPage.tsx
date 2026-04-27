@@ -464,6 +464,19 @@ export default function MarketScanPage() {
             </Button>
           )}
 
+          {/* Stage 2–5: Re-scan button (secondary) */}
+          {stage >= 2 && stage <= 5 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs gap-1.5"
+              onClick={startScan}
+              disabled={scanInProgress || dbRunning}
+            >
+              <ScanLine className="w-3.5 h-3.5" /> Re-scan
+            </Button>
+          )}
+
           {/* Stage 4–5: DealBeast */}
           {(stage === 4 || stage === 5) && (
             <div className="flex items-center gap-2">
