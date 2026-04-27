@@ -10,7 +10,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Search, Loader2, ChevronDown, ChevronUp, Home, DollarSign, Bed, Bath, Ruler, Calendar, Clock, Car, Building, Eye, Waves, Mountain, Trees, MapPin } from 'lucide-react';
-import { useUserRole } from '@/hooks/useUserRole';
 
 export interface SearchFilters {
   location: string;
@@ -66,34 +65,21 @@ const LIST_TYPES = [
 
 export function MarketSearch() {
   const navigate = useNavigate();
-  const { isAgent, loading: roleLoading } = useUserRole();
   const [loading, setLoading] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
-  const [defaultsApplied, setDefaultsApplied] = useState(false);
   
   const [filters, setFilters] = useState<SearchFilters>({
     location: '',
     homeType: 'SingleFamily',
     listType: 'for-sale',
+    minPrice: 80000,
+    maxPrice: 200000,
+    minBeds: 2,
+    maxBeds: 4,
+    minBaths: 1,
+    minSqft: 1200,
+    maxSqft: 2000,
   });
-
-  // Apply agent defaults once role is loaded
-  useEffect(() => {
-    if (!roleLoading && isAgent && !defaultsApplied) {
-      setFilters(prev => ({
-        ...prev,
-        minPrice: 80000,
-        maxPrice: 250000,
-        minBeds: 2,
-        maxBeds: 4,
-        minBaths: 1,
-        minSqft: 1150,
-        maxSqft: 2300,
-      }));
-      setShowFilters(true);
-      setDefaultsApplied(true);
-    }
-  }, [roleLoading, isAgent, defaultsApplied]);
 
   const updateFilter = <K extends keyof SearchFilters>(key: K, value: SearchFilters[K]) => {
     setFilters(prev => ({ ...prev, [key]: value }));
