@@ -81,29 +81,37 @@ serve(async (req) => {
     }
 
     // Build query parameters for new API
+    // Verified working filters: price_min, price_max, beds_min, beds_max, baths_min, property_type
+    // NOT supported by API (applied client-side below): sqft, lot_size, year_built, days_on_market, hoa
     const params = new URLSearchParams();
     params.append('location', filters.location.trim());
 
-    // Price range
+    // Price range — server-side ✅
     if (filters.minPrice) params.append('price_min', filters.minPrice.toString());
     if (filters.maxPrice) params.append('price_max', filters.maxPrice.toString());
 
-    // Beds & Baths
+    // Beds & Baths — server-side ✅
     if (filters.minBeds) params.append('beds_min', filters.minBeds.toString());
     if (filters.maxBeds) params.append('beds_max', filters.maxBeds.toString());
     if (filters.minBaths) params.append('baths_min', filters.minBaths.toString());
 
-    // Square feet
-    if (filters.minSqft) params.append('sqft_min', filters.minSqft.toString());
-    if (filters.maxSqft) params.append('sqft_max', filters.maxSqft.toString());
+    // Property type — server-side ✅ (use 'property_type' param)
+    if (filters.homeType) {
+      const typeMap: Record<string, string> = {
+        'SingleFamily': 'single_family',
+        'Condo': 'condos',
+        'Townhouse': 'townhomes',
+        'MultiFamily': 'multi_family',
+      };
+      const apiType = typeMap[filters.homeType];
+      if (apiType) params.append('property_type', apiType);
+    }
 
-    // Limit — new API uses limit, not page
-    // Each "page" is 42 results; offset via page number
-    const limit = 42;
+    // Fetch extra results to allow client-side filtering (sqft etc may filter some out)
+    const limit = 100;
     params.append('limit', limit.toString());
 
-    // Endpoint is /for-sale for for-sale listings (default), for-rent not supported
-    const endpoint = (filters.listType === 'for-rent') ? '/for-sale' : '/for-sale';
+    const endpoint = '/for-sale';
 
     const url = `https://${RAPIDAPI_HOST}${endpoint}?${params.toString()}`;
     console.log('Calling API:', url);
@@ -146,7 +154,7 @@ serve(async (req) => {
     // Map listings to the same shape callers expect from the old zillow-search
     const rawList: any[] = (data?.listings || []).filter((l: any) => l.status === 'for_sale');
 
-    const properties = rawList.map((listing: any) => {
+    const mappedList = rawList.map((listing: any) => {
       const addr = listing.location?.address || {};
       const desc = listing.description || {};
       const agent = extractAgentInfo(listing);
@@ -189,7 +197,19 @@ serve(async (req) => {
       };
     });
 
-    console.log(`Mapped ${properties.length} properties`);
+    // Client-side filtering for params the API ignores
+    const properties = mappedList.filter(p => {
+      if (filters.minSqft && p.sqft && p.sqft < filters.minSqft) return false;
+      if (filters.maxSqft && p.sqft && p.sqft > filters.maxSqft) return false;
+      if (filters.minLotSize && p.lotSize && p.lotSize < filters.minLotSize) return false;
+      if (filters.maxLotSize && p.lotSize && p.lotSize > filters.maxLotSize) return false;
+      if (filters.minYearBuilt && p.yearBuilt && p.yearBuilt < filters.minYearBuilt) return false;
+      if (filters.maxYearBuilt && p.yearBuilt && p.yearBuilt > filters.maxYearBuilt) return false;
+      if (filters.maxDaysOnMarket && p.daysOnZillow && p.daysOnZillow > filters.maxDaysOnMarket) return false;
+      return true;
+    });
+
+    console.log(`Mapped ${mappedList.length} → ${properties.length} after client-side filter`);
 
     return new Response(
       JSON.stringify({
