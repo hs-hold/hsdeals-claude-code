@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useDeals } from '@/context/DealsContext';
 import { useSettings } from '@/context/SettingsContext';
 import { DealAgeFilter, AgeFilterType, applyDealAgeFilter } from '@/components/deals/DealAgeFilter';
-import { formatCurrency, getEffectiveMonthlyInsurance } from '@/utils/financialCalculations';
+import { formatCurrency, getEffectiveMonthlyInsurance, calculateFinancials } from '@/utils/financialCalculations';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -26,7 +26,9 @@ function calculateFlipScore(deal: Deal, loanDefaults: any) {
   const purchasePrice = deal.overrides?.purchasePrice ?? apiData.purchasePrice ?? 0;
   if (purchasePrice > MAX_PRICE || purchasePrice <= 0) return null;
 
-  const arv = deal.overrides?.arv ?? financials.arv ?? apiData.arv ?? 0;
+  // Recalculate live so ARV is comps-validated (same as DealDetailPage)
+  const liveFinancials = calculateFinancials(apiData, deal.overrides ?? {}, loanDefaults);
+  const arv = liveFinancials.arv;
 
   const baseRehabCost = deal.overrides?.rehabCost ?? apiData.rehabCost ?? 0;
   const bedroomsAdded = deal.overrides?.targetBedrooms != null
