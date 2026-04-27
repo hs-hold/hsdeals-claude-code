@@ -765,7 +765,7 @@ export default function DealDetailPage() {
     const rentalMonthlyCashflow = liveFinancials.monthlyCashflow - rentalInsuranceDiff;
     const rentalAdjustedNOI = liveFinancials.yearlyNOI - (rentalInsuranceDiff * 12);
     const rentalMonthlyNOI = rentalAdjustedNOI / 12;
-    const rentalCapRate = flipTotalInvestment > 0 ? (rentalAdjustedNOI / flipTotalInvestment) * 100 : 0;
+    const rentalCapRate = purchasePrice > 0 ? (rentalAdjustedNOI / purchasePrice) * 100 : 0;
     
     // ========== BRRRR SUMMARY METRICS ==========
     const brrrrHmlLtvPurchase = localOverrides.hmlLtvPurchasePercent 
@@ -806,7 +806,7 @@ export default function DealDetailPage() {
       : 0;
     const brrrrNoi = rent - (liveFinancials.monthlyExpenses ?? 0);
     const brrrrMonthlyCashflow = brrrrNoi - brrrrMonthlyMortgage;
-    const brrrrEquity = arv - brrrrRefiLoanAmount - brrrrCashLeftInDeal;
+    const brrrrEquity = arv - brrrrRefiLoanAmount;
     
     return {
       purchasePrice,

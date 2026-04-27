@@ -71,8 +71,8 @@ const MONTHLY_CF_TABLE: Table = [
 ];
 
 const ANNUAL_RETURN_TABLE: Table = [
-  [4, 1], [5, 2], [6, 3], [7, 4], [7.5, 5],
-  [8, 6], [9, 7], [10, 8], [11, 9], [12, 10],
+  [4, 1], [5, 2], [6, 3], [7, 4], [8, 5],
+  [9, 6], [10, 7], [12, 8], [15, 9], [20, 10],
 ];
 
 const EQUITY_TABLE: Table = [
@@ -156,7 +156,7 @@ export function calculateInvestmentScore(
 
   const monthlyCashFlowScore = calculateMonthlyCashFlowScore(monthlyCashflow);
   const isFullBrrrr = cashLeftInDeal != null && cashLeftInDeal <= 0;
-  const annualReturnScore = isFullBrrrr ? 10 : calculateAnnualReturnScore(Math.min(annualReturnPct, 12));
+  const annualReturnScore = isFullBrrrr ? 10 : calculateAnnualReturnScore(annualReturnPct);
   const cashFlowScore = (monthlyCashFlowScore + annualReturnScore) / 2;
 
   const trueEquity = arv - purchasePrice - rehabCost;
