@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,10 +6,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Checkbox } from '@/components/ui/checkbox';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { Search, Loader2, ChevronDown, ChevronUp, Home, DollarSign, Bed, Bath, Ruler, Calendar, Clock, Car, Building, Eye, Waves, Mountain, Trees, MapPin } from 'lucide-react';
+import { Search, Loader2, ChevronDown, ChevronUp, Home, DollarSign, Bed, Bath, Ruler, Calendar, Clock, Car, Building, MapPin } from 'lucide-react';
 
 export interface SearchFilters {
   location: string;
@@ -31,37 +30,15 @@ export interface SearchFilters {
   parkingSpots?: number;
   homeType?: string;
   listType?: string;
-  // Boolean filters
-  isComingSoon?: boolean;
-  isForSaleForeclosure?: boolean;
-  isAuction?: boolean;
-  isOpenHousesOnly?: boolean;
-  singleStory?: boolean;
-  hasPool?: boolean;
-  hasGarage?: boolean;
-  is3dHome?: boolean;
-  isBasementFinished?: boolean;
-  isBasementUnfinished?: boolean;
-  // View filters
-  isWaterView?: boolean;
-  isParkView?: boolean;
-  isCityView?: boolean;
-  isMountainView?: boolean;
 }
 
 const HOME_TYPES = [
   { value: 'SingleFamily', label: 'Single Family' },
   { value: 'Condo', label: 'Condo' },
   { value: 'Townhouse', label: 'Townhouse' },
-  { value: 'Apartment', label: 'Apartment' },
-  { value: 'LotLand', label: 'Lot/Land' },
-  { value: 'Manufactured', label: 'Manufactured' },
+  { value: 'MultiFamily', label: 'Multi Family' },
 ];
 
-const LIST_TYPES = [
-  { value: 'for-sale', label: 'For Sale' },
-  { value: 'for-rent', label: 'For Rent' },
-];
 
 export function MarketSearch() {
   const navigate = useNavigate();
@@ -83,10 +60,6 @@ export function MarketSearch() {
 
   const updateFilter = <K extends keyof SearchFilters>(key: K, value: SearchFilters[K]) => {
     setFilters(prev => ({ ...prev, [key]: value }));
-  };
-
-  const toggleBooleanFilter = (key: keyof SearchFilters) => {
-    setFilters(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
   const handleSearch = async () => {
@@ -162,23 +135,7 @@ export function MarketSearch() {
                 className="mt-1.5"
               />
             </div>
-            <div className="w-32">
-              <Label className="text-sm font-medium">List Type</Label>
-              <Select
-                value={filters.listType || 'for-sale'}
-                onValueChange={v => updateFilter('listType', v)}
-              >
-                <SelectTrigger className="mt-1.5">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {LIST_TYPES.map(t => (
-                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-end">
+<div className="flex items-end">
               <Button onClick={handleSearch} disabled={loading} size="lg">
                 {loading ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -466,149 +423,6 @@ export function MarketSearch() {
                 </div>
               </div>
 
-              {/* Boolean Filters - Listing Types */}
-              <div>
-                <Label className="text-sm font-medium mb-3 block">Listing Options</Label>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="isComingSoon"
-                      checked={filters.isComingSoon || false}
-                      onCheckedChange={() => toggleBooleanFilter('isComingSoon')}
-                    />
-                    <label htmlFor="isComingSoon" className="text-sm cursor-pointer">Coming Soon</label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="isForSaleForeclosure"
-                      checked={filters.isForSaleForeclosure || false}
-                      onCheckedChange={() => toggleBooleanFilter('isForSaleForeclosure')}
-                    />
-                    <label htmlFor="isForSaleForeclosure" className="text-sm cursor-pointer">Foreclosure</label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="isAuction"
-                      checked={filters.isAuction || false}
-                      onCheckedChange={() => toggleBooleanFilter('isAuction')}
-                    />
-                    <label htmlFor="isAuction" className="text-sm cursor-pointer">Auction</label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="isOpenHousesOnly"
-                      checked={filters.isOpenHousesOnly || false}
-                      onCheckedChange={() => toggleBooleanFilter('isOpenHousesOnly')}
-                    />
-                    <label htmlFor="isOpenHousesOnly" className="text-sm cursor-pointer">Open Houses Only</label>
-                  </div>
-                </div>
-              </div>
-
-              {/* Boolean Filters - Features */}
-              <div>
-                <Label className="text-sm font-medium mb-3 block">Property Features</Label>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="singleStory"
-                      checked={filters.singleStory || false}
-                      onCheckedChange={() => toggleBooleanFilter('singleStory')}
-                    />
-                    <label htmlFor="singleStory" className="text-sm cursor-pointer">Single Story</label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="hasPool"
-                      checked={filters.hasPool || false}
-                      onCheckedChange={() => toggleBooleanFilter('hasPool')}
-                    />
-                    <label htmlFor="hasPool" className="text-sm cursor-pointer">Has Pool</label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="hasGarage"
-                      checked={filters.hasGarage || false}
-                      onCheckedChange={() => toggleBooleanFilter('hasGarage')}
-                    />
-                    <label htmlFor="hasGarage" className="text-sm cursor-pointer">Has Garage</label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="is3dHome"
-                      checked={filters.is3dHome || false}
-                      onCheckedChange={() => toggleBooleanFilter('is3dHome')}
-                    />
-                    <label htmlFor="is3dHome" className="text-sm cursor-pointer">3D Home Tour</label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="isBasementFinished"
-                      checked={filters.isBasementFinished || false}
-                      onCheckedChange={() => toggleBooleanFilter('isBasementFinished')}
-                    />
-                    <label htmlFor="isBasementFinished" className="text-sm cursor-pointer">Finished Basement</label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="isBasementUnfinished"
-                      checked={filters.isBasementUnfinished || false}
-                      onCheckedChange={() => toggleBooleanFilter('isBasementUnfinished')}
-                    />
-                    <label htmlFor="isBasementUnfinished" className="text-sm cursor-pointer">Unfinished Basement</label>
-                  </div>
-                </div>
-              </div>
-
-              {/* View Filters */}
-              <div>
-                <Label className="text-sm font-medium mb-3 block flex items-center gap-1.5">
-                  <Eye className="w-3.5 h-3.5" />
-                  View Options
-                </Label>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="isWaterView"
-                      checked={filters.isWaterView || false}
-                      onCheckedChange={() => toggleBooleanFilter('isWaterView')}
-                    />
-                    <label htmlFor="isWaterView" className="text-sm cursor-pointer flex items-center gap-1">
-                      <Waves className="w-3 h-3" /> Water View
-                    </label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="isParkView"
-                      checked={filters.isParkView || false}
-                      onCheckedChange={() => toggleBooleanFilter('isParkView')}
-                    />
-                    <label htmlFor="isParkView" className="text-sm cursor-pointer flex items-center gap-1">
-                      <Trees className="w-3 h-3" /> Park View
-                    </label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="isCityView"
-                      checked={filters.isCityView || false}
-                      onCheckedChange={() => toggleBooleanFilter('isCityView')}
-                    />
-                    <label htmlFor="isCityView" className="text-sm cursor-pointer flex items-center gap-1">
-                      <Building className="w-3 h-3" /> City View
-                    </label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="isMountainView"
-                      checked={filters.isMountainView || false}
-                      onCheckedChange={() => toggleBooleanFilter('isMountainView')}
-                    />
-                    <label htmlFor="isMountainView" className="text-sm cursor-pointer flex items-center gap-1">
-                      <Mountain className="w-3 h-3" /> Mountain View
-                    </label>
-                  </div>
-                </div>
-              </div>
             </CollapsibleContent>
           </Collapsible>
         </CardContent>

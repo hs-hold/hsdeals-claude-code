@@ -111,23 +111,19 @@ function filterListings(listings: RawListing[]): PassedListing[] {
 
   for (const l of listings) {
     if (l.price < MIN_PRICE || l.price > MAX_PRICE) continue;
-    if (l.propertyType && l.propertyType !== 'SINGLE_FAMILY') continue;
-    if (!l.rentZestimate) continue;
-    if (!l.zestimate) continue;
-    if (l.price / l.zestimate > MAX_PRICE_RATIO) continue;
-    // Year built — only filter if we have the value
+    // Normalize type: old API returns 'SINGLE_FAMILY', new API returns 'single_family'
+    const pType = (l.propertyType || '').toUpperCase().replace(/[^A-Z]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+    if (pType && pType !== 'SINGLE_FAMILY') continue;
+    // ARV-based margin filter only when we actually have ARV data
+    if (l.zestimate && l.price / l.zestimate > MAX_PRICE_RATIO) continue;
     if (l.yearBuilt && l.yearBuilt < MIN_YEAR) continue;
-    // Sqft — only filter if we have the value
-    if (l.sqft) {
-      if (l.sqft < MIN_SQFT || l.sqft > MAX_SQFT) continue;
-    }
-    // Beds — only filter if we have the value
+    if (l.sqft && (l.sqft < MIN_SQFT || l.sqft > MAX_SQFT)) continue;
     if (l.bedrooms !== null && l.bedrooms < MIN_BEDS) continue;
 
     passed.push({
       ...l,
       margin:     l.zestimate ? 1 - l.price / l.zestimate : 0,
-      grossYield: (l.rentZestimate! * 12) / l.price,
+      grossYield: l.rentZestimate ? (l.rentZestimate * 12) / l.price : 0,
       dealScore:  calcDealScore(l),
       aiResult:   null,
     });
@@ -413,7 +409,6 @@ export default function DealScannerPage() {
             minSqft: MIN_SQFT,
             maxSqft: MAX_SQFT,
             minYearBuilt: MIN_YEAR,
-            page: currentPage,
           },
         });
         if (!error && data?.properties) {
