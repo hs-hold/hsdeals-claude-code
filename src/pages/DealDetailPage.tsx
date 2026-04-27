@@ -448,16 +448,17 @@ export default function DealDetailPage() {
     setRejectionReason(deal.rejectionReason || '');
   }, [deal?.updatedAt]);
 
-  // Auto-apply rehab minimums: $60k for API deals, $80k for email deals
-  // Also applies when existing override is below the floor
+  // Auto-apply rehab minimums only when value comes from the API (not a manual override)
   useEffect(() => {
     if (!deal) return;
     let floor = 0;
     if (deal.source === 'api') floor = 60_000;
     else if (deal.source === 'email') floor = 80_000;
     if (floor === 0) return;
-    const currentRehab = deal.overrides?.rehabCost ?? deal.apiData?.rehabCost ?? 0;
-    if (currentRehab >= floor) return;
+    // Never override a value the user manually entered
+    if (deal.overrides?.rehabCost != null) return;
+    const apiRehab = deal.apiData?.rehabCost ?? 0;
+    if (apiRehab >= floor) return;
     updateDealOverrides(deal.id, { rehabCost: floor });
     setLocalOverrides(prev => ({ ...prev, rehabCost: floor.toString() }));
   }, [deal?.id]);
