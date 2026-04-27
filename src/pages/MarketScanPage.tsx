@@ -189,17 +189,26 @@ function PipelineStep({
 
 const STORAGE_KEY = 'market_scan_session';
 
-function loadSavedSession(): { results: ScoredListing[]; stage: Stage; totalScanned: number; dbDone: number } | null {
+function loadSavedSession(): { results: ScoredListing[]; stage: Stage; totalScanned: number; dbDone: number; sentZpids: string[] } | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    // Expire at midnight — discard if saved on a different calendar day
+    if (!parsed.savedDate || parsed.savedDate !== new Date().toDateString()) {
+      localStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
+    return parsed;
   } catch { return null; }
 }
 
-function saveSession(results: ScoredListing[], stage: Stage, totalScanned: number, dbDone: number) {
+function saveSession(results: ScoredListing[], stage: Stage, totalScanned: number, dbDone: number, sentZpids: string[]) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ results, stage, totalScanned, dbDone }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      results, stage, totalScanned, dbDone, sentZpids,
+      savedDate: new Date().toDateString(),
+    }));
   } catch { /* storage full — ignore */ }
 }
 
@@ -216,17 +225,17 @@ export default function MarketScanPage() {
   const [dbDone, setDbDone] = useState(saved?.dbDone ?? 0);
   const [totalScanned, setTotalScanned] = useState(saved?.totalScanned ?? 0);
   const [maxToSend, setMaxToSend] = useState(MAX_TO_SEND);
-  const [sentZpids, setSentZpids] = useState<Set<string>>(new Set());
+  const [sentZpids, setSentZpids] = useState<Set<string>>(new Set(saved?.sentZpids ?? []));
 
   const aiAbortRef = useRef(false);
   const dbAbortRef = useRef(false);
 
-  // Persist to localStorage whenever results/stage change
+  // Persist to localStorage whenever results/stage/sentZpids change
   useEffect(() => {
     if (results.length > 0 || stage > 0) {
-      saveSession(results, stage, totalScanned, dbDone);
+      saveSession(results, stage, totalScanned, dbDone, [...sentZpids]);
     }
-  }, [results, stage, totalScanned, dbDone]);
+  }, [results, stage, totalScanned, dbDone, sentZpids]);
 
   // ── Derived state ─────────────────────────────────────────────────────────
 
