@@ -221,13 +221,13 @@ async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: Prope
 
     if (error) {
       console.error('Error saving deal:', error);
-      return null;
+      throw new Error(error.message || 'Database insert failed');
     }
 
     return insertedDeal.id;
   } catch (err) {
-    console.error('Error:', err);
-    return null;
+    console.error('Error saving deal to DB:', err);
+    throw err;
   }
 }
 
@@ -262,7 +262,13 @@ export async function analyzeAndCreateDeal(address: string, scoutAiData?: Record
       return { dealId: null, error: apiResponse?.error || 'Analysis failed' };
     }
 
-    const dealId = await saveDealToDb(apiResponse.data.analysis, apiResponse.data.property, scoutAiData);
+    let dealId: string | null;
+    try {
+      dealId = await saveDealToDb(apiResponse.data.analysis, apiResponse.data.property, scoutAiData);
+    } catch (saveErr) {
+      const msg = saveErr instanceof Error ? saveErr.message : 'Database error';
+      return { dealId: null, error: `Property analyzed but failed to save: ${msg}` };
+    }
     if (!dealId) return { dealId: null, error: 'Property analyzed but failed to save' };
 
     return { dealId };
