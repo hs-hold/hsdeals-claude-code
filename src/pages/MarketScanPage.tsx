@@ -237,58 +237,54 @@ export default function MarketScanPage() {
   const startScan = useCallback(async () => {
     setStage(1);
     setResults([]);
-    setScanProgress(null);
+    setScanProgress({ current: 1, total: 1, zip: 'Atlanta, GA' });
     setDbDone(0);
     setTotalScanned(0);
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
     aiAbortRef.current = false;
     dbAbortRef.current = false;
 
-    const zips = DEFAULT_ZIPS.map(z => z.zip);
     const allRaw: RawListing[] = [];
 
-    for (let i = 0; i < zips.length; i++) {
-      const zip = zips[i];
-      setScanProgress({ current: i + 1, total: zips.length, zip });
-
-      try {
-        const { data, error } = await supabase.functions.invoke('zillow-search', {
-          body: {
-            location: zip,
-            homeType: 'SingleFamily',
-            minPrice: MIN_PRICE,
-            maxPrice: MAX_PRICE,
-            minBeds: MIN_BEDS,
-            minSqft: MIN_SQFT,
-            maxSqft: MAX_SQFT,
-            minYearBuilt: MIN_YEAR,
-            page: 1,
-          },
-        });
-        if (!error && data?.properties) {
-          allRaw.push(...data.properties.map((p: any) => ({
-            zpid:          p.zpid ?? '',
-            address:       p.address ?? '',
-            city:          p.city ?? '',
-            state:         p.state ?? '',
-            zipcode:       p.zipcode ?? zip,
-            price:         p.price ?? 0,
-            zestimate:     p.zestimate ?? null,
-            rentZestimate: p.rentZestimate ?? null,
-            daysOnZillow:  p.daysOnZillow ?? null,
-            bedrooms:      p.bedrooms ?? null,
-            bathrooms:     p.bathrooms ?? null,
-            sqft:          p.sqft ?? null,
-            yearBuilt:     p.yearBuilt ?? null,
-            propertyType:  p.propertyType ?? null,
-            imgSrc:        p.imgSrc ?? null,
-            detailUrl:     p.detailUrl ?? null,
-          })));
-        }
-      } catch (e) { console.error(`ZIP ${zip}:`, e); }
-
-      if (i < zips.length - 1) await new Promise(r => setTimeout(r, 300));
-    }
+    try {
+      const { data, error } = await supabase.functions.invoke('zillow-search', {
+        body: {
+          location: 'Atlanta, GA',
+          homeType: 'SingleFamily',
+          minPrice: MIN_PRICE,
+          maxPrice: MAX_PRICE,
+          minBeds: MIN_BEDS,
+          minSqft: MIN_SQFT,
+          maxSqft: MAX_SQFT,
+          minYearBuilt: MIN_YEAR,
+        },
+      });
+      if (error) {
+        toast.error('Search failed: ' + (error.message || 'unknown error'));
+      } else if (data?.properties) {
+        allRaw.push(...data.properties.map((p: any) => ({
+          zpid:          p.zpid ?? '',
+          address:       p.address ?? '',
+          city:          p.city ?? '',
+          state:         p.state ?? '',
+          zipcode:       p.zipcode ?? '',
+          price:         p.price ?? 0,
+          zestimate:     p.zestimate ?? null,
+          rentZestimate: p.rentZestimate ?? null,
+          daysOnZillow:  p.daysOnZillow ?? null,
+          bedrooms:      p.bedrooms ?? null,
+          bathrooms:     p.bathrooms ?? null,
+          sqft:          p.sqft ?? null,
+          yearBuilt:     p.yearBuilt ?? null,
+          propertyType:  p.propertyType ?? null,
+          imgSrc:        p.imgSrc ?? null,
+          detailUrl:     p.detailUrl ?? null,
+        })));
+      } else if (data?._debug) {
+        console.error('Scan debug:', data._debug);
+        toast.error('API returned 0 results. Check console for debug info.');
+      }
+    } catch (e) { console.error('Scan error:', e); }
 
     const filtered = filterListings(allRaw);
     setTotalScanned(allRaw.length);
@@ -487,7 +483,7 @@ export default function MarketScanPage() {
             </Badge>
           </div>
           <div className="text-xs text-muted-foreground">
-            {DEFAULT_ZIPS.length} ZIPs · ${MIN_PRICE.toLocaleString()}–${MAX_PRICE.toLocaleString()} · {MIN_SQFT}–{MAX_SQFT} sqft
+            Atlanta, GA · ${MIN_PRICE.toLocaleString()}–${MAX_PRICE.toLocaleString()} · {MIN_SQFT}–{MAX_SQFT} sqft
           </div>
         </div>
 
@@ -605,7 +601,7 @@ export default function MarketScanPage() {
         {scanInProgress && scanProgress && (
           <div className="space-y-1">
             <div className="flex justify-between text-[11px] text-muted-foreground">
-              <span>Scanning ZIP {scanProgress.zip}…</span>
+              <span>Scanning {scanProgress.zip}…</span>
               <span>{scanProgress.current} / {scanProgress.total}</span>
             </div>
             <Progress value={(scanProgress.current / scanProgress.total) * 100} className="h-1" />
@@ -640,7 +636,7 @@ export default function MarketScanPage() {
         {stage === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center p-8 text-muted-foreground gap-3">
             <MapPin className="w-10 h-10 text-blue-400/40" />
-            <p className="text-sm">Click <strong>Configure &amp; Scan</strong> to scan {DEFAULT_ZIPS.length} Atlanta ZIPs for deals.</p>
+            <p className="text-sm">Click <strong>Scan</strong> to search Atlanta, GA metro for deals.</p>
             <p className="text-xs opacity-60">Filters: ${MIN_PRICE.toLocaleString()}–${MAX_PRICE.toLocaleString()} · {MIN_SQFT}–{MAX_SQFT} sqft · {MIN_BEDS}+ beds · Built {MIN_YEAR}+ · ARV margin ≥ {((1 - MAX_PRICE_RATIO) * 100).toFixed(0)}%</p>
           </div>
         )}
@@ -648,7 +644,7 @@ export default function MarketScanPage() {
         {stage === 1 && (
           <div className="flex flex-col items-center justify-center h-full text-center p-8 text-muted-foreground gap-3">
             <Loader2 className="w-10 h-10 text-blue-400 animate-spin" />
-            <p className="text-sm">Scanning ZIPs…</p>
+            <p className="text-sm">Scanning Atlanta metro (~800 listings)…</p>
           </div>
         )}
 

@@ -118,6 +118,9 @@ serve(async (req) => {
     const needsExtraForDom = filters.maxDaysOnMarket && filters.maxDaysOnMarket <= 30;
     const pageCount = needsExtraForDom ? 20 : (isBroadSearch ? 20 : 3);
 
+    let firstPageError: string | null = null;
+    let firstPageRaw: any = null;
+
     const fetchPage = async (page: number) => {
       const p = new URLSearchParams(params);
       if (page > 1) p.set('page', String(page));
@@ -127,13 +130,19 @@ serve(async (req) => {
         headers: { 'X-RapidAPI-Key': apiKey, 'X-RapidAPI-Host': RAPIDAPI_HOST },
       });
       if (!r.ok) {
-        console.error(`API error page ${page}:`, r.status);
+        const body = await r.text();
+        console.error(`API error page ${page}:`, r.status, body);
+        if (page === 1) firstPageError = `HTTP ${r.status}: ${body.slice(0, 200)}`;
         return [];
       }
       try {
         const d = await r.json();
+        if (page === 1) firstPageRaw = { keys: Object.keys(d), listingsCount: (d?.listings || []).length, statusSample: (d?.listings || []).slice(0,2).map((l: any) => l.status) };
         return (d?.listings || []).filter((l: any) => l.status === 'for_sale');
-      } catch { return []; }
+      } catch (e) {
+        if (page === 1) firstPageError = String(e);
+        return [];
+      }
     };
 
     // Fetch all pages in parallel
@@ -212,6 +221,7 @@ serve(async (req) => {
         success: true,
         totalResultCount: properties.length,
         properties,
+        _debug: { firstPageError, firstPageRaw },
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
