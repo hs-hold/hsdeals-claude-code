@@ -19,14 +19,12 @@ import { Deal, DealStatus, DEAL_STATUS_CONFIG } from '@/types/deal';
 const MAX_PRICE = 300000;
 
 function calculateFlipScore(deal: Deal, loanDefaults: any) {
-  const financials = deal.financials;
   const apiData = deal.apiData;
-  if (!financials || !apiData) return null;
+  if (!deal.financials || !apiData) return null;
 
   const purchasePrice = deal.overrides?.purchasePrice ?? apiData.purchasePrice ?? 0;
   if (purchasePrice > MAX_PRICE || purchasePrice <= 0) return null;
 
-  // Recalculate live so ARV is comps-validated (same as DealDetailPage)
   const liveFinancials = calculateFinancials(apiData, deal.overrides ?? {}, loanDefaults);
   const arv = liveFinancials.arv;
 
@@ -39,7 +37,6 @@ function calculateFlipScore(deal: Deal, loanDefaults: any) {
     : 0;
   const layoutRehabCost = (bedroomsAdded * 20_000) + (bathroomsAdded * 15_000);
   const rehabFloor = deal.source === 'email' ? 80_000 : 60_000;
-  // Only apply floor when value is from API; respect manual overrides as-is
   const rehabCost = deal.overrides?.rehabCost != null
     ? baseRehabCost + layoutRehabCost
     : Math.max(baseRehabCost + layoutRehabCost, rehabFloor);
