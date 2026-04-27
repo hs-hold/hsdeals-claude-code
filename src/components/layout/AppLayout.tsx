@@ -24,7 +24,6 @@ import {
   Wifi,
   ChevronRight,
   Bot,
-  Telescope,
   Calendar,
   CalendarDays,
   Star,
@@ -91,7 +90,6 @@ const dealsNavItems = [
 ];
 
 const otherNavItems = [
-  { to: '/scout', icon: Telescope, label: 'Scout (Beta)' },
   { to: '/gmail-history', icon: Mail, label: 'Gmail History' },
   { to: '/investors', icon: Users, label: 'Investors' },
 ];

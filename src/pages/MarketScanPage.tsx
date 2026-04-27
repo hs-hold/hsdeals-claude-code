@@ -8,7 +8,7 @@ import { analyzeAndCreateDeal } from '@/services/deals/analyzeAndCreateDeal';
 import { useNavigate } from 'react-router-dom';
 import {
   ScanLine, ExternalLink, CheckCircle2, XCircle,
-  Loader2, Home, Zap, Brain, Filter,
+  Loader2, Home, Zap, Filter,
   ArrowRight, AlertTriangle, Check, X, MapPin,
 } from 'lucide-react';
 import atlantaZipsRaw from '@/data/atlantaZips.json';
@@ -95,8 +95,8 @@ interface ScoredListing extends RawListing {
   includeAnyway: boolean;
 }
 
-// Stage: 0=idle 1=scanning 2=results 3=ai-running 4=ai-done 5=dealbeast-running 6=done
-type Stage = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+// Stage: 0=idle 1=scanning 2=results 4=dealbeast-ready 5=dealbeast-running 6=done
+type Stage = 0 | 1 | 2 | 4 | 5 | 6;
 
 // ─── Filter listings ─────────────────────────────────────────────────────────
 
@@ -220,14 +220,12 @@ export default function MarketScanPage() {
   const [stage, setStage] = useState<Stage>(saved?.stage ?? 0);
   const [results, setResults] = useState<ScoredListing[]>(saved?.results ?? []);
   const [scanProgress, setScanProgress] = useState<{ current: number; total: number; zip: string } | null>(null);
-  const [aiProgress, setAiProgress] = useState<{ current: number; total: number } | null>(null);
   const [dbProgress, setDbProgress] = useState<{ current: number; total: number; address: string } | null>(null);
   const [dbDone, setDbDone] = useState(saved?.dbDone ?? 0);
   const [totalScanned, setTotalScanned] = useState(saved?.totalScanned ?? 0);
   const [maxToSend, setMaxToSend] = useState(MAX_TO_SEND);
   const [sentZpids, setSentZpids] = useState<Set<string>>(new Set(saved?.sentZpids ?? []));
 
-  const aiAbortRef = useRef(false);
   const dbAbortRef = useRef(false);
 
   // Persist to localStorage whenever results/stage/sentZpids change
@@ -254,7 +252,6 @@ export default function MarketScanPage() {
     setDbDone(0);
     setTotalScanned(0);
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
-    aiAbortRef.current = false;
     dbAbortRef.current = false;
 
     const allRaw: RawListing[] = [];
@@ -319,100 +316,14 @@ export default function MarketScanPage() {
     }));
 
     setResults(withDedup);
-    setStage(2);
+    setStage(4);
     toast.success(`Scan complete — ${filtered.length} properties passed filters`);
   }, []);
-
-  // ── AI Screen ─────────────────────────────────────────────────────────────
-
-  const runAiScreen = useCallback(async () => {
-    // Only send to AI if we have the minimum required data
-    const toCheck = results.filter(r =>
-      !r.excluded &&
-      (!r.alreadyAnalyzed || r.includeAnyway) &&
-      r.price > 0 &&
-      r.zestimate && r.zestimate > 0 &&
-      r.rentZestimate && r.rentZestimate > 0 &&
-      r.margin >= 0.20
-    );
-    if (!toCheck.length) {
-      toast.error('No properties with complete data (ARV + rent + margin ≥ 20%) to screen');
-      return;
-    }
-
-    aiAbortRef.current = false;
-    setStage(3);
-    setAiProgress({ current: 0, total: toCheck.length });
-
-    // Mark all as pending
-    setResults(prev => prev.map(r => {
-      if (!r.excluded && (!r.alreadyAnalyzed || r.includeAnyway)) {
-        return { ...r, aiResult: { status: 'pending', type: '', summary: '' } };
-      }
-      return r;
-    }));
-
-    const updatedMap = new Map<string, AiResult>();
-
-    for (let i = 0; i < toCheck.length; i++) {
-      if (aiAbortRef.current) break;
-      const r = toCheck[i];
-      setAiProgress({ current: i + 1, total: toCheck.length });
-
-      try {
-        const { data, error } = await supabase.functions.invoke('scout-ai-analyze', {
-          body: {
-            deal: {
-              address: [r.address, r.city, r.state, r.zipcode].filter(Boolean).join(', '),
-              price: r.price,
-              zpid: r.zpid,
-              beds: r.bedrooms,
-              baths: r.bathrooms,
-              sqft: r.sqft,
-              arv: r.zestimate,
-              rent: r.rentZestimate,
-              score: r.dealScore,
-              zip: r.zipcode,
-              days_on_market: r.daysOnZillow,
-            },
-          },
-        });
-
-        if (error || !data) {
-          updatedMap.set(r.zpid, { status: 'error', type: 'unknown', summary: 'API error', raw: undefined });
-        } else {
-          const isGood = data.isHabitableStructure !== false &&
-            !['land', 'fire_damaged', 'teardown'].includes(data.propertyTypeDetected);
-          updatedMap.set(r.zpid, {
-            status: isGood ? 'pass' : 'fail',
-            type: data.propertyTypeDetected || 'house',
-            summary: data.rehabAnalysis?.scopeDetails || data.arvAnalysis?.reasoning || '',
-            raw: data,
-          });
-        }
-      } catch {
-        updatedMap.set(r.zpid, { status: 'error', type: 'unknown', summary: 'Error', raw: undefined });
-      }
-
-      setResults(prev => prev.map(item => {
-        const upd = updatedMap.get(item.zpid);
-        return upd ? { ...item, aiResult: upd } : item;
-      }));
-
-      if (i < toCheck.length - 1) await new Promise(r => setTimeout(r, 500));
-    }
-
-    setAiProgress(null);
-    setStage(4);
-    const passed = [...updatedMap.values()].filter(v => v.status === 'pass').length;
-    const failed = [...updatedMap.values()].filter(v => v.status === 'fail').length;
-    toast.success(`AI screen done — ${passed} passed, ${failed} rejected`);
-  }, [results]);
 
   // ── Send to DealBeast ─────────────────────────────────────────────────────
 
   const sendToDealBeast = useCallback(async () => {
-    const candidates = aiPassed.length > 0 ? aiPassed : nonDupeResults;
+    const candidates = nonDupeResults;
 
     // Only send deals that score above threshold, haven't been sent yet, and have a valid address
     const toAnalyze = candidates
@@ -463,7 +374,7 @@ export default function MarketScanPage() {
     toast.success(msg, {
       action: { label: 'View Deals', onClick: () => navigate('/deals') },
     });
-  }, [aiPassed, nonDupeResults, navigate, sentZpids, maxToSend]);
+  }, [nonDupeResults, navigate, sentZpids, maxToSend]);
 
   // ── Toggle helpers ────────────────────────────────────────────────────────
 
@@ -487,7 +398,6 @@ export default function MarketScanPage() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   const scanInProgress = scanProgress !== null;
-  const aiRunning = stage === 3;
   const dbRunning = stage === 5;
 
   return (
@@ -522,20 +432,12 @@ export default function MarketScanPage() {
             num={2} icon={Filter} label="Filter + Dedup"
             colorClass="bg-violet-500/15 text-violet-400 border-violet-400/50"
             active={stage === 2}
-            done={stage >= 3}
-            count={stage >= 2 ? `${visibleResults.length} results` : null}
-          />
-          <ArrowRight className="w-3 h-3 text-muted-foreground/30 flex-shrink-0" />
-          <PipelineStep
-            num={3} icon={Brain} label="AI Screen"
-            colorClass="bg-amber-500/15 text-amber-400 border-amber-400/50"
-            active={stage === 3}
             done={stage >= 4}
-            count={stage >= 4 ? `${aiPassed.length} passed` : null}
+            count={stage >= 4 ? `${visibleResults.length} results` : null}
           />
           <ArrowRight className="w-3 h-3 text-muted-foreground/30 flex-shrink-0" />
           <PipelineStep
-            num={4} icon={Zap} label="DealBeast"
+            num={3} icon={Zap} label="DealBeast"
             colorClass="bg-emerald-500/15 text-emerald-400 border-emerald-400/50"
             active={stage === 5}
             done={stage === 6}
@@ -552,29 +454,12 @@ export default function MarketScanPage() {
               variant="default"
               className="h-8 text-xs gap-1.5"
               onClick={startScan}
-              disabled={scanInProgress || aiRunning || dbRunning}
+              disabled={scanInProgress || dbRunning}
             >
               {scanInProgress ? (
                 <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Scanning…</>
               ) : (
                 <><ScanLine className="w-3.5 h-3.5" /> Scan</>
-              )}
-            </Button>
-          )}
-
-          {/* Stage 2–3: AI Screen */}
-          {(stage === 2 || stage === 3) && (
-            <Button
-              size="sm"
-              variant="default"
-              className="h-8 text-xs gap-1.5"
-              onClick={runAiScreen}
-              disabled={aiRunning || dbRunning || scanInProgress}
-            >
-              {aiRunning ? (
-                <><Loader2 className="w-3.5 h-3.5 animate-spin" /> AI Running…</>
-              ) : (
-                <><Brain className="w-3.5 h-3.5" /> Run AI Screen <span className="opacity-60">({nonDupeResults.length} to check)</span></>
               )}
             </Button>
           )}
@@ -596,12 +481,12 @@ export default function MarketScanPage() {
                 size="sm"
                 className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
                 onClick={sendToDealBeast}
-                disabled={dbRunning || scanInProgress || aiRunning}
+                disabled={dbRunning || scanInProgress}
               >
                 {dbRunning ? (
                   <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Analyzing…</>
                 ) : (
-                  <><Zap className="w-3.5 h-3.5" /> Analyze in DealBeast <span className="opacity-70">({Math.min(maxToSend, (aiPassed.length > 0 ? aiPassed : nonDupeResults).filter(r => r.dealScore >= MIN_DEAL_SCORE).length)} deals)</span></>
+                  <><Zap className="w-3.5 h-3.5" /> Analyze in DealBeast <span className="opacity-70">({Math.min(maxToSend, nonDupeResults.filter(r => r.dealScore >= MIN_DEAL_SCORE).length)} deals)</span></>
                 )}
               </Button>
             </div>
@@ -609,7 +494,7 @@ export default function MarketScanPage() {
 
           {/* Stage 6: Done — View Deals + Re-scan + more deals */}
           {stage === 6 && (() => {
-            const candidates = aiPassed.length > 0 ? aiPassed : nonDupeResults;
+            const candidates = nonDupeResults;
             const remaining = candidates.filter(r => r.price > 0 && r.address && r.dealScore >= MIN_DEAL_SCORE && !sentZpids.has(r.zpid));
             return (
               <>
@@ -656,17 +541,6 @@ export default function MarketScanPage() {
               <span>{scanProgress.current} / {scanProgress.total}</span>
             </div>
             <Progress value={(scanProgress.current / scanProgress.total) * 100} className="h-1" />
-          </div>
-        )}
-
-        {/* AI progress */}
-        {aiRunning && aiProgress && (
-          <div className="space-y-1">
-            <div className="flex justify-between text-[11px] text-muted-foreground">
-              <span>AI screening properties…</span>
-              <span>{aiProgress.current} / {aiProgress.total}</span>
-            </div>
-            <Progress value={(aiProgress.current / aiProgress.total) * 100} className="h-1 bg-amber-500/20 [&>[data-slot=progress-indicator]]:bg-amber-400" />
           </div>
         )}
 

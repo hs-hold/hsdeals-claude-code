@@ -28,14 +28,7 @@ import InvestorsPage from "./pages/InvestorsPage";
 import InvestorDealViewPage from "./pages/InvestorDealViewPage";
 import HotDealsPage from "./pages/HotDealsPage";
 import ClaudePicksPage from "./pages/ClaudePicksPage";
-import ScoutPage from "./pages/ScoutPage";
-import ScoutAiDealsPage from "./pages/ScoutAiDealsPage";
-import ScoutFavoritesPage from "./pages/ScoutFavoritesPage";
-import ScoutNotRelevantPage from "./pages/ScoutNotRelevantPage";
-import DealScannerPage from "./pages/DealScannerPage";
 import MarketScanPage from "./pages/MarketScanPage";
-import DealScannerQueuePage from "./pages/DealScannerQueuePage";
-import { ScoutLayout } from "./layouts/ScoutLayout";
 import SyncProgressPage from "./pages/SyncProgressPage";
 import ApiDealsPage from "./pages/ApiDealsPage";
 import AgentDealsPage from "./pages/AgentDealsPage";
@@ -86,12 +79,6 @@ const App = () => (
                   <Route path="/gmail-history" element={<ProtectedRoute><AppLayout><GmailHistoryPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/investors" element={<ProtectedRoute><AppLayout><InvestorsPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/investor/deals/:id" element={<ProtectedRoute><AppLayout><InvestorDealViewPage /></AppLayout></ProtectedRoute>} />
-                  <Route path="/scout" element={<ProtectedRoute><ScoutLayout><ScoutPage /></ScoutLayout></ProtectedRoute>} />
-                  <Route path="/scout/ai-analyzed" element={<ProtectedRoute><ScoutLayout><ScoutAiDealsPage /></ScoutLayout></ProtectedRoute>} />
-                  <Route path="/scout/favorites" element={<ProtectedRoute><ScoutLayout><ScoutFavoritesPage /></ScoutLayout></ProtectedRoute>} />
-                  <Route path="/scout/not-relevant" element={<ProtectedRoute><ScoutLayout><ScoutNotRelevantPage /></ScoutLayout></ProtectedRoute>} />
-                  <Route path="/scout/deal-scanner" element={<ProtectedRoute><ScoutLayout><DealScannerPage /></ScoutLayout></ProtectedRoute>} />
-                  <Route path="/scout/deal-scanner/queue" element={<ProtectedRoute><DealScannerQueuePage /></ProtectedRoute>} />
                   <Route path="/api-deals" element={<ProtectedRoute><AppLayout><ApiDealsPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/agent-deals" element={<ProtectedRoute><AppLayout><AgentDealsPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/agent-management" element={<ProtectedRoute><AppLayout><AgentManagementPage /></AppLayout></ProtectedRoute>} />
