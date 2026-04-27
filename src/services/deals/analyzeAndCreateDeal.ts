@@ -209,8 +209,8 @@ async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: Prope
       api_data: apiData,
       financials: financials,
       created_by: currentUser?.id || null,
-      scout_ai_data: scoutAiData || null,
       analyzed_at: new Date().toISOString(),
+      ...(scoutAiData ? { scout_ai_data: scoutAiData } : {}),
     };
 
     const { data: insertedDeal, error } = await supabase
