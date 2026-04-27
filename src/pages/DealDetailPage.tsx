@@ -791,8 +791,9 @@ export default function DealDetailPage() {
     const brrrrCashOut = brrrrRefiLoanAmount - brrrrHmlTotalLoan - (brrrrRefiLoanAmount * 0.02) - notaryFee; // Refi signing
     const brrrrCashLeftInDeal = brrrrTotalCashIn - Math.max(0, brrrrCashOut);
     
-    const brrrrMonthlyMortgage = brrrrRefiLoanAmount > 0 
-      ? brrrrRefiLoanAmount * ((loanDefaults.interestRate / 100 / 12) * Math.pow(1 + (loanDefaults.interestRate / 100 / 12), 360)) / (Math.pow(1 + (loanDefaults.interestRate / 100 / 12), 360) - 1)
+    const brrrrRefiTermMonths = (localOverrides.loanTermYears ? parseFloat(localOverrides.loanTermYears) : loanDefaults.loanTermYears) * 12;
+    const brrrrMonthlyMortgage = brrrrRefiLoanAmount > 0
+      ? brrrrRefiLoanAmount * ((loanDefaults.interestRate / 100 / 12) * Math.pow(1 + (loanDefaults.interestRate / 100 / 12), brrrrRefiTermMonths)) / (Math.pow(1 + (loanDefaults.interestRate / 100 / 12), brrrrRefiTermMonths) - 1)
       : 0;
     const brrrrNoi = rent - (liveFinancials.monthlyExpenses ?? 0);
     const brrrrMonthlyCashflow = brrrrNoi - brrrrMonthlyMortgage;
@@ -2068,8 +2069,9 @@ export default function DealDetailPage() {
                 const brrrrEquityCaptured = arv - refiLoanAmount;
                 
                 // BRRRR monthly cashflow
-                const brrrrMonthlyMortgage = refiLoanAmount > 0 
-                  ? refiLoanAmount * ((loanDefaults.rentalInterestRate / 100 / 12) * Math.pow(1 + (loanDefaults.rentalInterestRate / 100 / 12), 360)) / (Math.pow(1 + (loanDefaults.rentalInterestRate / 100 / 12), 360) - 1)
+                const refiTermMonths2 = (localOverrides.loanTermYears ? parseFloat(localOverrides.loanTermYears) : loanDefaults.loanTermYears) * 12;
+                const brrrrMonthlyMortgage = refiLoanAmount > 0
+                  ? refiLoanAmount * ((loanDefaults.rentalInterestRate / 100 / 12) * Math.pow(1 + (loanDefaults.rentalInterestRate / 100 / 12), refiTermMonths2)) / (Math.pow(1 + (loanDefaults.rentalInterestRate / 100 / 12), refiTermMonths2) - 1)
                   : 0;
                 const brrrrMonthlyCashflow = rent - (liveFinancials?.monthlyExpenses ?? 0) + (liveFinancials?.monthlyDebtService ?? 0) - brrrrMonthlyMortgage;
 
@@ -4075,8 +4077,9 @@ BRRRR STRATEGY:
               const brrrrCashLeftInDeal = brrrrTotalCashIn - Math.max(0, brrrrCashOut);
               
               // BRRRR monthly cashflow (simplified)
-              const brrrrMonthlyMortgage = brrrrRefiLoanAmount > 0 
-                ? brrrrRefiLoanAmount * ((loanDefaults.interestRate / 100 / 12) * Math.pow(1 + (loanDefaults.interestRate / 100 / 12), 360)) / (Math.pow(1 + (loanDefaults.interestRate / 100 / 12), 360) - 1)
+              const refiTermMonths3 = (localOverrides.loanTermYears ? parseFloat(localOverrides.loanTermYears) : loanDefaults.loanTermYears) * 12;
+              const brrrrMonthlyMortgage = brrrrRefiLoanAmount > 0
+                ? brrrrRefiLoanAmount * ((loanDefaults.interestRate / 100 / 12) * Math.pow(1 + (loanDefaults.interestRate / 100 / 12), refiTermMonths3)) / (Math.pow(1 + (loanDefaults.interestRate / 100 / 12), refiTermMonths3) - 1)
                 : 0;
               const brrrrNoi = rent - (liveFinancials?.monthlyExpenses ?? 0);
               const brrrrMonthlyCashflow = brrrrNoi - brrrrMonthlyMortgage;
