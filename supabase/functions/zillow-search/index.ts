@@ -113,9 +113,8 @@ serve(async (req) => {
 
     params.append('limit', '42'); // API hard-caps at ~42 per page regardless of higher values
 
-    // 5 pages × 42 = ~210 listings per city — enough after server-side filters
-    const isBroadSearch = !filters.location.trim().match(/^\d{5}/);
-    const pageCount = isBroadSearch ? 5 : 2;
+    // 1 page per city (~42 listings, already filtered server-side)
+    const pageCount = 1;
 
     let firstPageError: string | null = null;
     let firstPageRaw: any = null;
