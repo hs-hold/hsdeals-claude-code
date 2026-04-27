@@ -193,6 +193,16 @@ function mapToDealApiData(analysis: PropertyAnalysis, property?: PropertyData, a
 
 async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: PropertyData, scoutAiData?: Record<string, any>, agentFallback?: AgentFallback): Promise<string | null> {
   try {
+    // Require address and purchase price — can't work a deal without them
+    if (!analysisData.address?.trim()) {
+      console.warn('[saveDealToDb] Skipping deal — no address');
+      return null;
+    }
+    if (!analysisData.asking_price || analysisData.asking_price <= 0) {
+      console.warn('[saveDealToDb] Skipping deal — no purchase price', analysisData.address);
+      return null;
+    }
+
     const addressParts = analysisData.address?.split(',').map((s) => s.trim()) || [];
     const street = addressParts[0] || analysisData.address || '';
     const city = analysisData.city || addressParts[1] || '';
@@ -239,6 +249,10 @@ async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: Prope
 }
 
 export async function analyzeAndCreateDeal(address: string, scoutAiData?: Record<string, any>, agentFallback?: AgentFallback): Promise<{ dealId: string | null; error?: string; alreadyExists?: boolean }> {
+  if (!address.trim()) {
+    return { dealId: null, error: 'Address is required' };
+  }
+
   try {
     // Dedup check — skip if this address was already analyzed
     const { data: existing } = await supabase

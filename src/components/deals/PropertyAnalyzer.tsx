@@ -315,6 +315,11 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
       toast.error('Please enter a property address');
       return;
     }
+    // Basic validation before hitting the API
+    if (address.trim().length < 10) {
+      toast.error('Please enter a complete address including city and state');
+      return;
+    }
 
     setLoading(true);
     setShowSuggestions(false);
@@ -380,6 +385,12 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
       }
 
       try {
+        const purchasePrice = (analysis as any).asking_price ?? (analysis as any).purchasePrice ?? null;
+        if (!purchasePrice || purchasePrice <= 0) {
+          toast.error('This property has no purchase price — cannot save');
+          setLoading(false);
+          return;
+        }
         const agentFallback = await fetchListingAgentInfo(address.trim());
         dealId = await saveDealToDb(analysis, property, agentFallback);
       } catch (saveError) {
