@@ -78,11 +78,19 @@ function getAreasToScan(cooldownDays: number): string[] {
   const history = loadAreaHistory();
   const now = Date.now();
   const cooldownMs = cooldownDays * 86_400_000;
-  // Sort by most overdue first, take up to MAX_AREAS_PER_SCAN
   return SCAN_AREAS
     .filter(a => now - (history[a] || 0) >= cooldownMs)
     .sort((a, b) => (history[a] || 0) - (history[b] || 0))
     .slice(0, MAX_AREAS_PER_SCAN);
+}
+
+function getNextScanMs(cooldownDays: number): number | null {
+  const history = loadAreaHistory();
+  const cooldownMs = cooldownDays * 86_400_000;
+  const nextTimes = SCAN_AREAS
+    .map(a => (history[a] || 0) + cooldownMs)
+    .filter(t => t > Date.now());
+  return nextTimes.length ? Math.min(...nextTimes) : null;
 }
 
 // ─── ZIP median lookup (used as ARV proxy when API returns no zestimate) ─────
@@ -404,11 +412,19 @@ export default function MarketScanPage() {
 
   const sendToDealBeast = useCallback(async () => {
     const candidates = nonDupeResults;
+    const eligible = candidates.filter(r => r.price > 0 && r.address && !sentZpids.has(r.zpid));
 
-    // Only send deals that score above threshold, haven't been sent yet, and have a valid address
-    const toAnalyze = candidates
-      .filter(r => r.price > 0 && r.address && r.dealScore >= MIN_DEAL_SCORE && !sentZpids.has(r.zpid))
-      .slice(0, maxToSend);
+    // Primary pool: score >= MIN_DEAL_SCORE
+    const primary = eligible.filter(r => r.dealScore >= MIN_DEAL_SCORE).slice(0, maxToSend);
+    // If primary pool is thin, fill remaining slots from next-best unanalyzed
+    const toAnalyze = primary.length >= maxToSend
+      ? primary
+      : [
+          ...primary,
+          ...eligible
+            .filter(r => r.dealScore < MIN_DEAL_SCORE && !primary.includes(r))
+            .slice(0, maxToSend - primary.length),
+        ];
 
     setSentZpids(prev => {
       const next = new Set(prev);
@@ -538,35 +554,35 @@ export default function MarketScanPage() {
 
         {/* Action bar — one button per stage */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Stage 0–1: Scan */}
-          {(stage === 0 || stage === 1) && (
-            <Button
-              size="sm"
-              variant="default"
-              className="h-8 text-xs gap-1.5"
-              onClick={startScan}
-              disabled={scanInProgress || dbRunning}
-            >
-              {scanInProgress ? (
-                <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Scanning…</>
-              ) : (
-                <><ScanLine className="w-3.5 h-3.5" /> Scan</>
-              )}
-            </Button>
-          )}
-
-          {/* Stage 2–5: Re-scan button (secondary) */}
-          {stage >= 2 && stage <= 5 && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 text-xs gap-1.5"
-              onClick={startScan}
-              disabled={scanInProgress || dbRunning}
-            >
-              <ScanLine className="w-3.5 h-3.5" /> Scan
-            </Button>
-          )}
+          {/* Scan button — shown at all stages except DealBeast running */}
+          {stage !== 5 && (() => {
+            const dueCnt = getAreasToScan(scanCooldownDays).length;
+            const allOnCooldown = dueCnt === 0;
+            const nextMs = allOnCooldown ? getNextScanMs(scanCooldownDays) : null;
+            const nextDays = nextMs ? Math.ceil((nextMs - Date.now()) / 86_400_000) : null;
+            return (
+              <div className="flex items-center gap-1.5">
+                <Button
+                  size="sm"
+                  variant={stage === 0 ? 'default' : 'outline'}
+                  className={cn('h-8 text-xs gap-1.5', allOnCooldown && 'border-amber-500/60 text-amber-400 hover:bg-amber-500/10')}
+                  onClick={startScan}
+                  disabled={scanInProgress || dbRunning}
+                >
+                  {scanInProgress ? (
+                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Scanning…</>
+                  ) : (
+                    <><ScanLine className="w-3.5 h-3.5" /> Scan</>
+                  )}
+                </Button>
+                {allOnCooldown && !scanInProgress && (
+                  <span className="text-[10px] text-amber-400/80">
+                    All areas scanned · next in {nextDays ?? '?'}d
+                  </span>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Stage 4–5: DealBeast */}
           {(stage === 4 || stage === 5) && (
