@@ -473,7 +473,7 @@ export default function MarketScanPage() {
               onClick={startScan}
               disabled={scanInProgress || dbRunning}
             >
-              <ScanLine className="w-3.5 h-3.5" /> Re-scan
+              <ScanLine className="w-3.5 h-3.5" /> Scan
             </Button>
           )}
 
@@ -539,7 +539,7 @@ export default function MarketScanPage() {
                   onClick={startScan}
                   disabled={scanInProgress}
                 >
-                  <ScanLine className="w-3.5 h-3.5" /> Re-scan
+                  <ScanLine className="w-3.5 h-3.5" /> Scan
                 </Button>
               </>
             );
