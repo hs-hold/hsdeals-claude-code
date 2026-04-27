@@ -36,6 +36,11 @@ export interface ScoutResult {
   rent_override?: number | null;
   notes?: string | null;
   is_starred?: boolean;
+  // Agent info
+  agent_name?: string | null;
+  agent_email?: string | null;
+  agent_phone?: string | null;
+  broker_name?: string | null;
   // From joins
   zip?: string;
 }
@@ -83,6 +88,10 @@ export async function saveSearch(
     days_on_market: r.days_on_market,
     img_src: r.img_src,
     detail_url: r.detail_url,
+    agent_name: r.agent_name || null,
+    agent_email: r.agent_email || null,
+    agent_phone: r.agent_phone || null,
+    broker_name: r.broker_name || null,
   }));
 
   await supabase.from('scout_results').insert(rows);

@@ -22,6 +22,8 @@ function getRehabCost(sqft: number, yearBuilt: number | null): number {
 function mapListing(l: any): any {
   const addr = l.location?.address || {};
   const desc = l.description || {};
+  const advertisers: any[] = l.advertisers || [];
+  const agent = advertisers[0] || {};
   return {
     id: l.property_id || l.listing_id,
     price: l.list_price || 0,
@@ -40,6 +42,10 @@ function mapListing(l: any): any {
     imgSrc: l.primary_photo?.href || null,
     detailUrl: l.href || null,
     description: desc.text || '',
+    agentName: agent.name || null,
+    agentEmail: agent.email || null,
+    agentPhone: agent.phones?.[0]?.number || null,
+    brokerName: agent.office?.name || null,
   };
 }
 
@@ -144,6 +150,10 @@ serve(async (req) => {
           grade,
           compsUsed: 0,
           description: p.description,
+          agentName: p.agentName,
+          agentEmail: p.agentEmail,
+          agentPhone: p.agentPhone,
+          brokerName: p.brokerName,
         };
       })
       .sort((a, b) => b.score - a.score);

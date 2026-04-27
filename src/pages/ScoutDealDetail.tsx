@@ -503,6 +503,28 @@ export default function ScoutDealDetail({ deal: initialDeal, onBack, onStatusCha
             </a>
           )}
 
+          {/* Agent contact */}
+          {(deal.agent_email || deal.agent_name) && (
+            <div className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded border border-border/40 bg-muted/10">
+              {deal.agent_email ? (
+                <a
+                  href={`mailto:${deal.agent_email}`}
+                  className="text-primary hover:underline truncate max-w-[160px]"
+                  title={`${deal.agent_name || ''} ${deal.broker_name ? '· ' + deal.broker_name : ''}`.trim()}
+                >
+                  {deal.agent_email}
+                </a>
+              ) : (
+                <span className="text-muted-foreground">{deal.agent_name}</span>
+              )}
+              {deal.agent_phone && (
+                <a href={`tel:${deal.agent_phone}`} className="text-muted-foreground hover:text-foreground">
+                  · {deal.agent_phone}
+                </a>
+              )}
+            </div>
+          )}
+
           {/* AI Analysis button */}
           <button
             onClick={() => aiAnalysis ? setShowAiView(v => !v) : runAiAnalysis()}

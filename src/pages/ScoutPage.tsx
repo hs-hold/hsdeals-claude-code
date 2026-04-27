@@ -802,6 +802,10 @@ export default function ScoutPage() {
       sqft: r.sqft, beds: r.beds, baths: r.baths,
       days_on_market: r.daysOnMarket || 0,
       img_src: r.imgSrc || '', detail_url: r.detailUrl || '',
+      agent_name: r.agentName || null,
+      agent_email: r.agentEmail || null,
+      agent_phone: r.agentPhone || null,
+      broker_name: r.brokerName || null,
     }));
   };
 
