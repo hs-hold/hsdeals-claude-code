@@ -186,7 +186,10 @@ function loadSavedSession(): { results: ScoredListing[]; stage: Stage; totalScan
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    // Stage 5 = DealBeast running — can't survive a page reload, reset to 4
+    if (parsed.stage === 5) parsed.stage = 4;
+    return parsed;
   } catch { return null; }
 }
 
