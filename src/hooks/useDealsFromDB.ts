@@ -628,6 +628,15 @@ export function useDealsFromDB() {
       rawResponse: data,
     };
 
+    // Preserve agent info from prior analysis if DealBeast returns different/worse data on re-analyze.
+    // Agent identity (name, phone, broker, MLS) that was already saved is treated as authoritative.
+    const existingAgent = (deal.apiData as any) || {};
+    if (existingAgent.agentName && !apiData.agentName)   apiData.agentName   = existingAgent.agentName;
+    if (existingAgent.agentPhone && !apiData.agentPhone) apiData.agentPhone  = existingAgent.agentPhone;
+    if (existingAgent.brokerName && !apiData.brokerName) apiData.brokerName  = existingAgent.brokerName;
+    if (existingAgent.mlsId      && !apiData.mlsId)      apiData.mlsId       = existingAgent.mlsId;
+    if (existingAgent.agentEmail && !apiData.agentEmail) apiData.agentEmail  = existingAgent.agentEmail;
+
     // DealBeast doesn't return agent email — supplement from zillow-search (best-effort)
     if (!apiData.agentEmail) {
       try {
