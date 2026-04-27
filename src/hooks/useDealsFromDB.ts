@@ -170,7 +170,7 @@ export function useDealsFromDB() {
   const fetchDeals = useCallback(async () => {
     try {
       const { data, error } = await supabase
-        .from('deals')
+        .from('deals_list')
         .select('*')
         .order('created_at', { ascending: false });
 
