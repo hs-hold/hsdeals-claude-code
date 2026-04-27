@@ -575,7 +575,7 @@ export function useDealsFromDB() {
       
       // Agent / Broker info
       agentName: attribution.agentName || listedBy.display_name || null,
-      agentEmail: attribution.agentEmail || null,
+      agentEmail: attribution.agentEmail || attribution.listingAgentEmail || null,
       agentPhone: attribution.agentPhoneNumber || listedBy.phone || null,
       agentLicense: attribution.agentLicenseNumber || null,
       brokerName: attribution.brokerName || listedBy.business_name || null,
@@ -627,6 +627,33 @@ export function useDealsFromDB() {
       // Store the full API response for reference
       rawResponse: data,
     };
+
+    // DealBeast doesn't return agent email — supplement from zillow-search (best-effort)
+    if (!apiData.agentEmail) {
+      try {
+        const city = analysis.city || property.city || deal.address.city || '';
+        const state = analysis.state || property.state || deal.address.state || '';
+        const location = city ? `${city}, ${state}` : state;
+        const askingPrice = apiData.purchasePrice ?? 0;
+        if (location.length > 2 && askingPrice > 0) {
+          const { data: searchData } = await supabase.functions.invoke('zillow-search', {
+            body: { location, minPrice: askingPrice * 0.7, maxPrice: askingPrice * 1.3 },
+          });
+          const streetRaw = (deal.address.street || deal.address.full || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const streetKey = streetRaw.slice(0, 12);
+          const match = (searchData?.properties ?? []).find((p: any) => {
+            const pAddr = (p.address || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            return pAddr.includes(streetKey);
+          });
+          if (match?.agentEmail) {
+            apiData.agentEmail = match.agentEmail;
+            if (!apiData.agentPhone && match.agentPhone) apiData.agentPhone = match.agentPhone;
+          }
+        }
+      } catch {
+        // best-effort — don't block analysis if lookup fails
+      }
+    }
 
     // Merge trusted email-extracted fields into API data gaps.
     // Factual property attributes from the seller's own listing are often more accurate
