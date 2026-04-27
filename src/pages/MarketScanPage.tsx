@@ -38,6 +38,8 @@ const MIN_SQFT        = 1_200;
 const MAX_SQFT        = 1_800;
 const MIN_BEDS        = 2;
 const MIN_YEAR        = 1950;
+const MIN_DEAL_SCORE  = 40;   // minimum score to qualify for DealBeast
+const MAX_TO_SEND     = 30;   // hard cap sent to DealBeast
 
 // ─── Deal score ───────────────────────────────────────────────────────────────
 // 60 pts: price discount  (1 - price/zestimate) * 60
@@ -213,7 +215,7 @@ export default function MarketScanPage() {
   const [dbProgress, setDbProgress] = useState<{ current: number; total: number; address: string } | null>(null);
   const [dbDone, setDbDone] = useState(saved?.dbDone ?? 0);
   const [totalScanned, setTotalScanned] = useState(saved?.totalScanned ?? 0);
-  const [maxToSend, setMaxToSend] = useState(20);
+  const [maxToSend, setMaxToSend] = useState(MAX_TO_SEND);
 
   const aiAbortRef = useRef(false);
   const dbAbortRef = useRef(false);
@@ -402,8 +404,10 @@ export default function MarketScanPage() {
   const sendToDealBeast = useCallback(async () => {
     const candidates = aiPassed.length > 0 ? aiPassed : nonDupeResults;
 
-    // DealBeast fetches all data from the address itself — only require a valid address + price
-    const toAnalyze = candidates.filter(r => r.price > 0 && r.address).slice(0, maxToSend);
+    // Only send deals that score above threshold and have a valid address
+    const toAnalyze = candidates
+      .filter(r => r.price > 0 && r.address && r.dealScore >= MIN_DEAL_SCORE)
+      .slice(0, maxToSend);
 
     if (!toAnalyze.length) {
       toast.error('No properties with a valid address to analyze');
@@ -581,7 +585,7 @@ export default function MarketScanPage() {
                 {dbRunning ? (
                   <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Analyzing…</>
                 ) : (
-                  <><Zap className="w-3.5 h-3.5" /> Analyze in DealBeast <span className="opacity-70">(top {Math.min(maxToSend, (aiPassed.length > 0 ? aiPassed : nonDupeResults).length)})</span></>
+                  <><Zap className="w-3.5 h-3.5" /> Analyze in DealBeast <span className="opacity-70">({Math.min(maxToSend, (aiPassed.length > 0 ? aiPassed : nonDupeResults).filter(r => r.dealScore >= MIN_DEAL_SCORE).length)} deals)</span></>
                 )}
               </Button>
             </div>
