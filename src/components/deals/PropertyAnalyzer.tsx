@@ -380,7 +380,8 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
       }
 
       try {
-        dealId = await saveDealToDb(analysis, property);
+        const agentFallback = await fetchListingAgentInfo(address.trim());
+        dealId = await saveDealToDb(analysis, property, agentFallback);
       } catch (saveError) {
         console.error('Error saving deal:', saveError);
         toast.error('Failed to save deal');
@@ -417,9 +418,30 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
 
   // Map API response to DealApiData format.
   // NOTE: When the API returns { data: { property } } with no separate `analysis` key,
+  // Fetch agent info from the listing API for a specific address (fire-and-forget fallback)
+  const fetchListingAgentInfo = async (fullAddress: string) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('zillow-search', {
+        body: { location: fullAddress },
+      });
+      if (error || !data?.properties?.length) return null;
+      const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const inputStreet = norm(fullAddress.split(',')[0]);
+      const match = data.properties.find((p: any) =>
+        norm(p.address || '').includes(inputStreet) || inputStreet.includes(norm(p.address || ''))
+      ) ?? data.properties[0];
+      return {
+        agentName:  match?.agentName  ?? null,
+        agentEmail: match?.agentEmail ?? null,
+        agentPhone: match?.agentPhone ?? null,
+        brokerName: match?.brokerName ?? null,
+      };
+    } catch { return null; }
+  };
+
   // `analysis` here is actually the PropertyData/property object from the API.
   // We therefore try multiple field paths so both response shapes work.
-  const mapToDealApiData = (analysis: PropertyAnalysis, property?: PropertyData): DealApiData => {
+  const mapToDealApiData = (analysis: PropertyAnalysis, property?: PropertyData, agentFallback?: { agentName: string|null; agentEmail: string|null; agentPhone: string|null; brokerName: string|null } | null): DealApiData => {
     const mapPropertyType = (type?: string): DealApiData['propertyType'] => {
       const typeMap: Record<string, DealApiData['propertyType']> = {
         'SINGLE_FAMILY': 'single_family',
@@ -497,12 +519,12 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
       wholesalePrice: m.wholesale_price ?? p.wholesale_price ?? null,
       arvMargin: m.arv_margin ?? p.arv_margin ?? null,
 
-      // Agent / Broker info
-      agentName: prop?.attributionInfo?.agentName ?? p.attributionInfo?.agentName ?? null,
-      agentEmail: prop?.attributionInfo?.agentEmail ?? p.attributionInfo?.agentEmail ?? null,
-      agentPhone: prop?.attributionInfo?.agentPhoneNumber ?? p.attributionInfo?.agentPhoneNumber ?? null,
+      // Agent / Broker info — prefer DealBeast API data, fall back to listing API data
+      agentName: prop?.attributionInfo?.agentName ?? p.attributionInfo?.agentName ?? agentFallback?.agentName ?? null,
+      agentEmail: prop?.attributionInfo?.agentEmail ?? p.attributionInfo?.agentEmail ?? agentFallback?.agentEmail ?? null,
+      agentPhone: prop?.attributionInfo?.agentPhoneNumber ?? p.attributionInfo?.agentPhoneNumber ?? agentFallback?.agentPhone ?? null,
       agentLicense: prop?.attributionInfo?.agentLicenseNumber ?? p.attributionInfo?.agentLicenseNumber ?? null,
-      brokerName: prop?.attributionInfo?.brokerName ?? p.attributionInfo?.brokerName ?? null,
+      brokerName: prop?.attributionInfo?.brokerName ?? p.attributionInfo?.brokerName ?? agentFallback?.brokerName ?? null,
       brokerPhone: prop?.attributionInfo?.brokerPhoneNumber ?? p.attributionInfo?.brokerPhoneNumber ?? null,
       mlsId: prop?.attributionInfo?.mlsId ?? p.attributionInfo?.mlsId ?? null,
       mlsName: prop?.attributionInfo?.mlsName ?? p.attributionInfo?.mlsName ?? null,
@@ -610,7 +632,7 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
   };
 
   // Save deal to database - returns the deal id
-  const saveDealToDb = async (analysisData: PropertyAnalysis, propertyData?: PropertyData): Promise<string | null> => {
+  const saveDealToDb = async (analysisData: PropertyAnalysis, propertyData?: PropertyData, agentFallback?: { agentName: string|null; agentEmail: string|null; agentPhone: string|null; brokerName: string|null } | null): Promise<string | null> => {
     try {
       const anyData = analysisData as any;
       // User-typed address is the ground truth — never let the API override it with
@@ -629,7 +651,7 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
       const stateZip = addressParts[2] || '';
       const [state, zip] = stateZip.split(' ').filter(Boolean);
       
-      const apiData = mapToDealApiData(analysisData, propertyData);
+      const apiData = mapToDealApiData(analysisData, propertyData, agentFallback);
       const financials = calculateFinancials(apiData, defaultOverrides);
       
       // Get current user for created_by
