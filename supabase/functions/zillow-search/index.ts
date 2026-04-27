@@ -113,10 +113,9 @@ serve(async (req) => {
 
     params.append('limit', '42'); // API hard-caps at ~42 per page regardless of higher values
 
-    // Broad city searches need multiple pages; zip-code searches are small enough with 1 page.
-    const isBroadSearch = !filters.location.trim().match(/^\d{5}/); // no leading zip code
-    const needsExtraForDom = filters.maxDaysOnMarket && filters.maxDaysOnMarket <= 30;
-    const pageCount = needsExtraForDom ? 20 : (isBroadSearch ? 20 : 3);
+    // 5 pages × 42 = ~210 listings per city — enough after server-side filters
+    const isBroadSearch = !filters.location.trim().match(/^\d{5}/);
+    const pageCount = isBroadSearch ? 5 : 2;
 
     let firstPageError: string | null = null;
     let firstPageRaw: any = null;
