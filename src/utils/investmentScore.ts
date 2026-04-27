@@ -26,6 +26,7 @@ export interface InvestmentScoreResult {
   inventoryScore: number | null;
   finalScore: number;
   decision: 'Buy' | 'Pass';
+  isFullBrrrr: boolean;      // cash left in deal ≤ 0 — infinite CoC return
   missingFields: string[];   // fields missing but not fatal (partial score)
   // source values
   monthlyCashflow: number;
@@ -154,7 +155,8 @@ export function calculateInvestmentScore(
         : 0;
 
   const monthlyCashFlowScore = calculateMonthlyCashFlowScore(monthlyCashflow);
-  const annualReturnScore = calculateAnnualReturnScore(Math.min(annualReturnPct, 12));
+  const isFullBrrrr = cashLeftInDeal != null && cashLeftInDeal <= 0;
+  const annualReturnScore = isFullBrrrr ? 10 : calculateAnnualReturnScore(Math.min(annualReturnPct, 12));
   const cashFlowScore = (monthlyCashFlowScore + annualReturnScore) / 2;
 
   const trueEquity = arv - purchasePrice - rehabCost;
@@ -183,6 +185,7 @@ export function calculateInvestmentScore(
     inventoryScore: location.inventoryScore,
     finalScore,
     decision: finalScore >= settings.buyThreshold ? 'Buy' : 'Pass',
+    isFullBrrrr,
     missingFields,
     monthlyCashflow,
     annualReturnPct: Math.min(annualReturnPct, 999),

@@ -1857,11 +1857,16 @@ export default function DealDetailPage() {
                           {headerInvestmentScore.decision === 'Buy' ? '✓ Buy' : '✗ Pass'}
                         </span>
                       </div>
+                      {headerInvestmentScore.isFullBrrrr && (
+                        <div className="px-2 py-1.5 rounded-md bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-medium text-center">
+                          🎉 Full BRRRR — ∞ Return on Cash!
+                        </div>
+                      )}
                       <div className="space-y-1 text-xs">
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Cash Flow</span>
                           <span className={cn("font-medium", headerInvestmentScore.cashFlowScore >= 7 ? "text-emerald-400" : headerInvestmentScore.cashFlowScore >= 5 ? "text-yellow-400" : "text-red-400")}>
-                            {headerInvestmentScore.cashFlowScore.toFixed(1)}/10
+                            {headerInvestmentScore.isFullBrrrr ? '∞ ' : ''}{headerInvestmentScore.cashFlowScore.toFixed(1)}/10
                           </span>
                         </div>
                         <div className="flex justify-between">
@@ -5991,9 +5996,14 @@ BRRRR STRATEGY:
                           {headerInvestmentScore.decision === 'Buy' ? '✓ Buy' : '✗ Pass'} · {headerInvestmentScore.finalScore.toFixed(1)}/10
                         </span>
                       </div>
+                      {headerInvestmentScore.isFullBrrrr && (
+                        <div className="px-2 py-1.5 rounded-md bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-medium text-center">
+                          🎉 Full BRRRR — כל הכסף חזר! תשואה = ∞
+                        </div>
+                      )}
                       <div className="space-y-2">
                         {[
-                          { label: 'Cash Flow', score: headerInvestmentScore.cashFlowScore, weight: 33, detail: `${formatCurrency(headerInvestmentScore.monthlyCashflow)}/mo · ${headerInvestmentScore.annualReturnPct >= 100 ? '∞' : headerInvestmentScore.annualReturnPct.toFixed(1) + '%'} CoC` },
+                          { label: 'Cash Flow', score: headerInvestmentScore.cashFlowScore, weight: 33, detail: `${formatCurrency(headerInvestmentScore.monthlyCashflow)}/mo · ${headerInvestmentScore.isFullBrrrr ? '∞ CoC' : headerInvestmentScore.annualReturnPct.toFixed(1) + '% CoC'}` },
                           { label: 'Equity',    score: headerInvestmentScore.equityScore,    weight: 33, detail: `${formatCurrency(headerInvestmentScore.trueEquity)} true equity` },
                           { label: 'Location',  score: headerInvestmentScore.locationScore,  weight: 34, detail: headerInvestmentScore.schoolTotal > 0 ? `Schools: ${headerInvestmentScore.schoolTotal.toFixed(1)}/15${headerInvestmentScore.inventoryMonths != null ? ` · Inv: ${headerInvestmentScore.inventoryMonths}mo` : ''}` : 'School data missing' },
                         ].map(({ label, score, weight, detail }) => (
@@ -6648,6 +6658,9 @@ BRRRR STRATEGY:
                         <p className={cn("text-2xl font-bold", headerInvestmentScore.decision === 'Buy' ? "text-emerald-400" : "text-red-400")}>
                           {headerInvestmentScore.decision === 'Buy' ? '✓ BUY' : '✗ PASS'}
                         </p>
+                        {headerInvestmentScore.isFullBrrrr && (
+                          <p className="text-xs text-emerald-300 font-semibold mt-0.5">🎉 Full BRRRR — ∞ תשואה על הכסף!</p>
+                        )}
                         <p className="text-xs text-muted-foreground mt-0.5">Threshold: ≥{(settings.investmentScoreSettings?.buyThreshold ?? 7).toFixed(1)} to Buy</p>
                       </div>
                       <div className="text-right">
