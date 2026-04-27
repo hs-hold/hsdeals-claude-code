@@ -216,6 +216,7 @@ export default function MarketScanPage() {
   const [dbDone, setDbDone] = useState(saved?.dbDone ?? 0);
   const [totalScanned, setTotalScanned] = useState(saved?.totalScanned ?? 0);
   const [maxToSend, setMaxToSend] = useState(MAX_TO_SEND);
+  const [sentZpids, setSentZpids] = useState<Set<string>>(new Set());
 
   const aiAbortRef = useRef(false);
   const dbAbortRef = useRef(false);
@@ -404,10 +405,16 @@ export default function MarketScanPage() {
   const sendToDealBeast = useCallback(async () => {
     const candidates = aiPassed.length > 0 ? aiPassed : nonDupeResults;
 
-    // Only send deals that score above threshold and have a valid address
+    // Only send deals that score above threshold, haven't been sent yet, and have a valid address
     const toAnalyze = candidates
-      .filter(r => r.price > 0 && r.address && r.dealScore >= MIN_DEAL_SCORE)
+      .filter(r => r.price > 0 && r.address && r.dealScore >= MIN_DEAL_SCORE && !sentZpids.has(r.zpid))
       .slice(0, maxToSend);
+
+    setSentZpids(prev => {
+      const next = new Set(prev);
+      toAnalyze.forEach(r => next.add(r.zpid));
+      return next;
+    });
 
     if (!toAnalyze.length) {
       toast.error('No properties with a valid address to analyze');
@@ -447,7 +454,7 @@ export default function MarketScanPage() {
     toast.success(msg, {
       action: { label: 'View Deals', onClick: () => navigate('/deals') },
     });
-  }, [aiPassed, nonDupeResults, navigate]);
+  }, [aiPassed, nonDupeResults, navigate, sentZpids, maxToSend]);
 
   // ── Toggle helpers ────────────────────────────────────────────────────────
 
@@ -591,27 +598,45 @@ export default function MarketScanPage() {
             </div>
           )}
 
-          {/* Stage 6: Done — View Deals + Re-scan */}
-          {stage === 6 && (
-            <>
-              <Button
-                size="sm"
-                className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-                onClick={() => navigate('/deals')}
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" /> View Deals
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 text-xs gap-1.5"
-                onClick={startScan}
-                disabled={scanInProgress}
-              >
-                <ScanLine className="w-3.5 h-3.5" /> Re-scan
-              </Button>
-            </>
-          )}
+          {/* Stage 6: Done — View Deals + Re-scan + more deals */}
+          {stage === 6 && (() => {
+            const candidates = aiPassed.length > 0 ? aiPassed : nonDupeResults;
+            const remaining = candidates.filter(r => r.price > 0 && r.address && r.dealScore >= MIN_DEAL_SCORE && !sentZpids.has(r.zpid));
+            return (
+              <>
+                {remaining.length > 0 && (
+                  <div className="flex items-center gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-2.5 py-1">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span className="text-[11px] text-amber-300">{remaining.length} more interesting deal{remaining.length !== 1 ? 's' : ''}</span>
+                    <Button
+                      size="sm"
+                      className="h-6 text-[11px] gap-1 bg-amber-500 hover:bg-amber-600 text-white px-2"
+                      onClick={sendToDealBeast}
+                      disabled={dbRunning}
+                    >
+                      <Zap className="w-3 h-3" /> Send them
+                    </Button>
+                  </div>
+                )}
+                <Button
+                  size="sm"
+                  className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                  onClick={() => navigate('/deals')}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" /> View Deals
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs gap-1.5"
+                  onClick={startScan}
+                  disabled={scanInProgress}
+                >
+                  <ScanLine className="w-3.5 h-3.5" /> Re-scan
+                </Button>
+              </>
+            );
+          })()}
         </div>
 
         {/* Scan progress */}
