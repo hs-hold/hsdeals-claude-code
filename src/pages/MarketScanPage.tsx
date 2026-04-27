@@ -44,6 +44,22 @@ const SCAN_AREAS = [
   'Union City, GA',
   'Forest Park, GA',
   'Austell, GA',
+  'Douglasville, GA',
+  'Stockbridge, GA',
+  'McDonough, GA',
+  'Lawrenceville, GA',
+  'Tucker, GA',
+  'Ellenwood, GA',
+  'Hampton, GA',
+  'Fairburn, GA',
+  'Hapeville, GA',
+  'Powder Springs, GA',
+  'Acworth, GA',
+  'Covington, GA',
+  'Newnan, GA',
+  'Stone Mountain, GA',
+  'Clarkston, GA',
+  'Smyrna, GA',
 ];
 
 const AREA_HISTORY_KEY = 'market_scan_area_history';
