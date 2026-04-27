@@ -126,7 +126,7 @@ function mapToDealApiData(analysis: PropertyAnalysis, property?: PropertyData): 
 
     // Agent / Broker info
     agentName: property?.attributionInfo?.agentName ?? null,
-    agentEmail: property?.attributionInfo?.agentEmail ?? null,
+    agentEmail: property?.attributionInfo?.agentEmail ?? property?.attributionInfo?.listingAgentEmail ?? null,
     agentPhone: property?.attributionInfo?.agentPhoneNumber ?? null,
     agentLicense: property?.attributionInfo?.agentLicenseNumber ?? null,
     brokerName: property?.attributionInfo?.brokerName ?? null,
@@ -260,6 +260,35 @@ export async function analyzeAndCreateDeal(address: string, scoutAiData?: Record
 
     if (!apiResponse?.success || !apiResponse.data?.analysis) {
       return { dealId: null, error: apiResponse?.error || 'Analysis failed' };
+    }
+
+    // DealBeast doesn't return agent email — supplement from zillow-search (fire-and-forget, best-effort)
+    if (!apiResponse.data.property?.attributionInfo?.agentEmail &&
+        !apiResponse.data.property?.attributionInfo?.listingAgentEmail) {
+      try {
+        const analysis = apiResponse.data.analysis;
+        const city = analysis.city || '';
+        const stateFromAddr = address.split(',').slice(-1)[0]?.trim()?.split(' ')[0] || '';
+        const location = city ? `${city}, ${stateFromAddr}` : stateFromAddr;
+        if (location.length > 2) {
+          const { data: searchData } = await supabase.functions.invoke('zillow-search', {
+            body: { location, minPrice: (analysis.asking_price ?? 50000) * 0.7, maxPrice: (analysis.asking_price ?? 500000) * 1.3 },
+          });
+          const match = (searchData?.properties ?? []).find((p: any) => {
+            const pAddr = (p.address || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const qAddr = address.toLowerCase().replace(/[^a-z0-9]/g, '').split(',')[0];
+            return pAddr.includes(qAddr.slice(0, 10));
+          });
+          if (match?.agentEmail) {
+            if (!apiResponse.data.property) apiResponse.data.property = {} as any;
+            if (!apiResponse.data.property.attributionInfo) apiResponse.data.property.attributionInfo = {};
+            apiResponse.data.property.attributionInfo.agentEmail = match.agentEmail;
+            if (match.agentPhone) apiResponse.data.property.attributionInfo.agentPhoneNumber ||= match.agentPhone;
+          }
+        }
+      } catch {
+        // best-effort — don't block deal save if lookup fails
+      }
     }
 
     let dealId: string | null;
