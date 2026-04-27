@@ -111,37 +111,45 @@ serve(async (req) => {
       if (t) params.append('property_type', t);
     }
 
-    // Fetch enough to absorb client-side filtering.
-    // If days-on-market filter is active, we need more raw results because most
-    // listings will be older than the threshold.
+    params.append('limit', '42'); // API hard-caps at ~42 per page regardless of higher values
+
+    // Broad city searches need multiple pages; zip-code searches are small enough with 1 page.
+    const isBroadSearch = !filters.location.trim().match(/^\d{5}/); // no leading zip code
     const needsExtraForDom = filters.maxDaysOnMarket && filters.maxDaysOnMarket <= 30;
-    params.append('limit', needsExtraForDom ? '200' : '100');
+    const pageCount = needsExtraForDom ? 5 : (isBroadSearch ? 3 : 1);
 
-    const url = `https://${RAPIDAPI_HOST}/for-sale?${params}`;
-    console.log('Calling:', url);
+    const fetchPage = async (page: number) => {
+      const p = new URLSearchParams(params);
+      if (page > 1) p.set('page', String(page));
+      const url = `https://${RAPIDAPI_HOST}/for-sale?${p}`;
+      console.log(`Calling page ${page}:`, url);
+      const r = await fetch(url, {
+        headers: { 'X-RapidAPI-Key': apiKey, 'X-RapidAPI-Host': RAPIDAPI_HOST },
+      });
+      if (!r.ok) {
+        console.error(`API error page ${page}:`, r.status);
+        return [];
+      }
+      try {
+        const d = await r.json();
+        return (d?.listings || []).filter((l: any) => l.status === 'for_sale');
+      } catch { return []; }
+    };
 
-    const resp = await fetch(url, {
-      headers: { 'X-RapidAPI-Key': apiKey, 'X-RapidAPI-Host': RAPIDAPI_HOST },
-    });
+    // Fetch all pages in parallel
+    const pages = await Promise.all(Array.from({ length: pageCount }, (_, i) => fetchPage(i + 1)));
 
-    const text = await resp.text();
-    if (!resp.ok) {
-      console.error('API error', resp.status, text.slice(0, 300));
-      return new Response(
-        JSON.stringify({ success: false, error: `API error: ${resp.status}`, details: text }),
-        { status: resp.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    // Deduplicate by property_id / listing_id
+    const seen = new Set<string>();
+    const rawList: any[] = [];
+    for (const page of pages) {
+      for (const l of page) {
+        const key = l.property_id || l.listing_id;
+        if (key && !seen.has(key)) { seen.add(key); rawList.push(l); }
+      }
     }
 
-    let data: any;
-    try { data = JSON.parse(text); } catch {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Invalid JSON from API' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const rawList: any[] = (data?.listings || []).filter((l: any) => l.status === 'for_sale');
+    console.log(`pages=${pageCount} raw=${rawList.length}`);
 
     // Map to the shape all callers expect
     const mapped = rawList.map((l: any) => {
