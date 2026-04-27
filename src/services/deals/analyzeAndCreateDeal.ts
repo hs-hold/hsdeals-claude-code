@@ -58,7 +58,14 @@ const defaultOverrides: DealOverrides = {
 };
 
 
-function mapToDealApiData(analysis: PropertyAnalysis, property?: PropertyData): DealApiData {
+interface AgentFallback {
+  agentName: string | null;
+  agentEmail: string | null;
+  agentPhone: string | null;
+  brokerName: string | null;
+}
+
+function mapToDealApiData(analysis: PropertyAnalysis, property?: PropertyData, agentFallback?: AgentFallback): DealApiData {
   const mapPropertyType = (type?: string): DealApiData['propertyType'] => {
     const typeMap: Record<string, DealApiData['propertyType']> = {
       SINGLE_FAMILY: 'single_family',
@@ -124,12 +131,12 @@ function mapToDealApiData(analysis: PropertyAnalysis, property?: PropertyData): 
     wholesalePrice: analysis.metrics?.wholesale_price ?? null,
     arvMargin: analysis.metrics?.arv_margin ?? null,
 
-    // Agent / Broker info
-    agentName: property?.attributionInfo?.agentName ?? null,
-    agentEmail: property?.attributionInfo?.agentEmail ?? null,
-    agentPhone: property?.attributionInfo?.agentPhoneNumber ?? null,
+    // Agent / Broker info — prefer DealBeast API data, fall back to listing API data
+    agentName: property?.attributionInfo?.agentName ?? agentFallback?.agentName ?? null,
+    agentEmail: property?.attributionInfo?.agentEmail ?? agentFallback?.agentEmail ?? null,
+    agentPhone: property?.attributionInfo?.agentPhoneNumber ?? agentFallback?.agentPhone ?? null,
     agentLicense: property?.attributionInfo?.agentLicenseNumber ?? null,
-    brokerName: property?.attributionInfo?.brokerName ?? null,
+    brokerName: property?.attributionInfo?.brokerName ?? agentFallback?.brokerName ?? null,
     brokerPhone: property?.attributionInfo?.brokerPhoneNumber ?? null,
     mlsId: property?.attributionInfo?.mlsId ?? null,
     mlsName: property?.attributionInfo?.mlsName ?? null,
@@ -184,7 +191,7 @@ function mapToDealApiData(analysis: PropertyAnalysis, property?: PropertyData): 
   };
 }
 
-async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: PropertyData, scoutAiData?: Record<string, any>): Promise<string | null> {
+async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: PropertyData, scoutAiData?: Record<string, any>, agentFallback?: AgentFallback): Promise<string | null> {
   try {
     const addressParts = analysisData.address?.split(',').map((s) => s.trim()) || [];
     const street = addressParts[0] || analysisData.address || '';
@@ -192,7 +199,7 @@ async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: Prope
     const stateZip = addressParts[2] || '';
     const [state, zip] = stateZip.split(' ').filter(Boolean);
 
-    const apiData = mapToDealApiData(analysisData, propertyData);
+    const apiData = mapToDealApiData(analysisData, propertyData, agentFallback);
     const financials = calculateFinancials(apiData, defaultOverrides);
 
     // Get current user for created_by
@@ -231,7 +238,7 @@ async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: Prope
   }
 }
 
-export async function analyzeAndCreateDeal(address: string, scoutAiData?: Record<string, any>): Promise<{ dealId: string | null; error?: string; alreadyExists?: boolean }> {
+export async function analyzeAndCreateDeal(address: string, scoutAiData?: Record<string, any>, agentFallback?: AgentFallback): Promise<{ dealId: string | null; error?: string; alreadyExists?: boolean }> {
   try {
     // Dedup check — skip if this address was already analyzed
     const { data: existing } = await supabase
@@ -262,7 +269,7 @@ export async function analyzeAndCreateDeal(address: string, scoutAiData?: Record
       return { dealId: null, error: apiResponse?.error || 'Analysis failed' };
     }
 
-    const dealId = await saveDealToDb(apiResponse.data.analysis, apiResponse.data.property, scoutAiData);
+    const dealId = await saveDealToDb(apiResponse.data.analysis, apiResponse.data.property, scoutAiData, agentFallback);
     if (!dealId) return { dealId: null, error: 'Property analyzed but failed to save' };
 
     return { dealId };

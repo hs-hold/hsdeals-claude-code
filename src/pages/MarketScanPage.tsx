@@ -68,6 +68,10 @@ interface RawListing {
   propertyType: string | null;
   imgSrc: string | null;
   detailUrl: string | null;
+  agentName: string | null;
+  agentEmail: string | null;
+  agentPhone: string | null;
+  brokerName: string | null;
 }
 
 type AiStatus = 'pending' | 'pass' | 'fail' | 'error';
@@ -281,6 +285,10 @@ export default function MarketScanPage() {
             propertyType:  p.propertyType ?? null,
             imgSrc:        p.imgSrc ?? null,
             detailUrl:     p.detailUrl ?? null,
+            agentName:     p.agentName ?? null,
+            agentEmail:    p.agentEmail ?? null,
+            agentPhone:    p.agentPhone ?? null,
+            brokerName:    p.brokerName ?? null,
           })));
         }
       } catch (e) { console.error(`ZIP ${zip}:`, e); }
@@ -429,12 +437,18 @@ export default function MarketScanPage() {
 
         try {
           const scoutAiData = r.aiResult?.raw || null;
+          const agentInfo = {
+            agentName:  r.agentName  ?? null,
+            agentEmail: r.agentEmail ?? null,
+            agentPhone: r.agentPhone ?? null,
+            brokerName: r.brokerName ?? null,
+          };
           // 90-second timeout per property so a hung AI call never blocks the loop
           const timeoutPromise = new Promise<{ dealId: null; error: string }>(res =>
             setTimeout(() => res({ dealId: null, error: 'timeout' }), 90_000)
           );
           const { dealId, alreadyExists } = await Promise.race([
-            analyzeAndCreateDeal(fullAddress, scoutAiData ?? undefined),
+            analyzeAndCreateDeal(fullAddress, scoutAiData ?? undefined, agentInfo),
             timeoutPromise,
           ]);
           if (dealId) {
