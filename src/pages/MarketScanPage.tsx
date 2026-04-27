@@ -213,6 +213,7 @@ export default function MarketScanPage() {
   const [dbProgress, setDbProgress] = useState<{ current: number; total: number; address: string } | null>(null);
   const [dbDone, setDbDone] = useState(saved?.dbDone ?? 0);
   const [totalScanned, setTotalScanned] = useState(saved?.totalScanned ?? 0);
+  const [maxToSend, setMaxToSend] = useState(20);
 
   const aiAbortRef = useRef(false);
   const dbAbortRef = useRef(false);
@@ -402,7 +403,7 @@ export default function MarketScanPage() {
     const candidates = aiPassed.length > 0 ? aiPassed : nonDupeResults;
 
     // DealBeast fetches all data from the address itself — only require a valid address + price
-    const toAnalyze = candidates.filter(r => r.price > 0 && r.address);
+    const toAnalyze = candidates.filter(r => r.price > 0 && r.address).slice(0, maxToSend);
 
     if (!toAnalyze.length) {
       toast.error('No properties with a valid address to analyze');
@@ -560,18 +561,30 @@ export default function MarketScanPage() {
 
           {/* Stage 4–5: DealBeast */}
           {(stage === 4 || stage === 5) && (
-            <Button
-              size="sm"
-              className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-              onClick={sendToDealBeast}
-              disabled={dbRunning || scanInProgress || aiRunning}
-            >
-              {dbRunning ? (
-                <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Analyzing…</>
-              ) : (
-                <><Zap className="w-3.5 h-3.5" /> Analyze in DealBeast <span className="opacity-70">({(aiPassed.length > 0 ? aiPassed : nonDupeResults).length} AI-passed)</span></>
-              )}
-            </Button>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-muted-foreground">Top</span>
+                <input
+                  type="number" min={1} max={100}
+                  value={maxToSend}
+                  onChange={e => setMaxToSend(Math.max(1, parseInt(e.target.value) || 1))}
+                  disabled={dbRunning}
+                  className="w-12 h-7 text-center text-xs font-mono rounded border border-border/60 bg-background focus:outline-none focus:ring-1 focus:ring-emerald-500/50 disabled:opacity-40"
+                />
+              </div>
+              <Button
+                size="sm"
+                className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                onClick={sendToDealBeast}
+                disabled={dbRunning || scanInProgress || aiRunning}
+              >
+                {dbRunning ? (
+                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Analyzing…</>
+                ) : (
+                  <><Zap className="w-3.5 h-3.5" /> Analyze in DealBeast <span className="opacity-70">(top {Math.min(maxToSend, (aiPassed.length > 0 ? aiPassed : nonDupeResults).length)})</span></>
+                )}
+              </Button>
+            </div>
           )}
 
           {/* Stage 6: Done — View Deals + Re-scan */}
