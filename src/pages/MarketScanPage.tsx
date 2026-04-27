@@ -44,7 +44,11 @@ const MIN_YEAR        = 1950;
 // 40 pts: rent yield      (rentZestimate*12/price) * 400 capped at 40
 
 function calcDealScore(price: number, zestimate: number | null, rentZestimate: number | null): number {
-  const discountPts = zestimate ? Math.max(0, (1 - price / zestimate) * 60) : 0;
+  // When ARV is available: use price-vs-ARV discount (0–60 pts)
+  // When ARV is null (new API): use price position in range as proxy (lower price = higher score)
+  const discountPts = zestimate
+    ? Math.max(0, (1 - price / zestimate) * 60)
+    : Math.max(0, (1 - (price - MIN_PRICE) / (MAX_PRICE - MIN_PRICE)) * 40);
   const yieldPts = rentZestimate ? Math.min(40, (rentZestimate * 12 / price) * 400) : 0;
   return Math.round(discountPts + yieldPts);
 }

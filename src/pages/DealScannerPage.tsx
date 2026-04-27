@@ -94,7 +94,7 @@ const MIN_YEAR        = 1950;
 function calcDealScore(l: RawListing): number {
   const discountPts = l.zestimate
     ? Math.max(0, (1 - l.price / l.zestimate) * 60)
-    : 0;
+    : Math.max(0, (1 - (l.price - MIN_PRICE) / (MAX_PRICE - MIN_PRICE)) * 40);
 
   const yieldPts = l.rentZestimate
     ? Math.min(40, (l.rentZestimate * 12 / l.price) * 400)
