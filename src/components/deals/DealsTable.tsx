@@ -347,8 +347,56 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
         <DealAgeFilter value={ageFilter} onChange={setAgeFilter} className="ml-auto" />
       </div>
 
-      {/* Table */}
-      <div className="rounded-xl border border-border overflow-hidden">
+      {/* Mobile card list — shown instead of table on small screens */}
+      <div className="md:hidden space-y-2">
+        {filteredAndSorted.length === 0 ? (
+          <p className="text-center text-muted-foreground py-10">No deals found</p>
+        ) : filteredAndSorted.map(deal => {
+          const cocReturn = deal.financials?.cashOnCashReturn ?? 0;
+          const equity = deal.financials?.equityAtPurchase ?? 0;
+          const arv = deal.overrides?.arv ?? deal.apiData?.arv ?? 0;
+          return (
+            <Link key={deal.id} to={`/deals/${deal.id}`} className="block">
+              <div className="rounded-xl border border-border bg-card px-4 py-3 space-y-2 active:opacity-70 transition-opacity">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-sm truncate">{deal.address.street}</span>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {deal.apiData.grade && (
+                      <span className={cn(
+                        "px-1.5 py-0.5 rounded text-xs font-bold",
+                        deal.apiData.grade === 'A' && "bg-emerald-500/20 text-emerald-400",
+                        deal.apiData.grade === 'B' && "bg-cyan-500/20 text-cyan-400",
+                        deal.apiData.grade === 'C' && "bg-yellow-500/20 text-yellow-400",
+                        deal.apiData.grade === 'D' && "bg-orange-500/20 text-orange-400",
+                        deal.apiData.grade === 'F' && "bg-red-500/20 text-red-400",
+                      )}>{deal.apiData.grade}</span>
+                    )}
+                    {cocReturn !== 0 && (
+                      <span className={cn("text-xs font-medium", cocReturn >= 0.08 ? "text-success" : cocReturn > 0 ? "text-warning" : "text-destructive")}>
+                        {(cocReturn * 100).toFixed(1)}%
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">{deal.address.city}, {deal.address.state}</span>
+                  <DealStatusBadge status={deal.status} />
+                </div>
+                <div className="flex items-center gap-4 text-xs">
+                  {arv > 0 && <span className="text-muted-foreground">ARV <span className="text-foreground font-medium">{formatCurrency(arv)}</span></span>}
+                  {equity !== 0 && <span className={cn("text-muted-foreground", equity > 0 ? "" : "")}>Equity <span className={cn("font-medium", equity > 0 ? "text-success" : "text-destructive")}>{formatCurrency(equity)}</span></span>}
+                </div>
+              </div>
+            </Link>
+          );
+        })}
+        <p className="text-xs text-muted-foreground pt-1">
+          Showing {filteredAndSorted.length} of {deals.filter(d => !excludeStatuses.includes(d.status)).length} deals
+        </p>
+      </div>
+
+      {/* Table — desktop only */}
+      <div className="hidden md:block rounded-xl border border-border overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/30 hover:bg-muted/30">
@@ -774,7 +822,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
         </Table>
       </div>
 
-      <p className="text-sm text-muted-foreground">
+      <p className="hidden md:block text-sm text-muted-foreground">
         Showing {filteredAndSorted.length} of {deals.filter(d => !excludeStatuses.includes(d.status)).length} deals
       </p>
     </div>
