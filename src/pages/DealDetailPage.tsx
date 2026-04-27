@@ -232,6 +232,7 @@ export default function DealDetailPage() {
   const [expansionAnalysisOpen, setExpansionAnalysisOpen] = useState(false);
   const [rentalAnalysisOpen, setRentalAnalysisOpen] = useState(false);
   const [brrrrAnalysisOpen, setBrrrrAnalysisOpen] = useState(false);
+  const [acquisitionEngineOpen, setAcquisitionEngineOpen] = useState(false);
   const [saleCompsOpen, setSaleCompsOpen] = useState(false);
   const [rentCompsOpen, setRentCompsOpen] = useState(false);
   const [moreInfoOpen, setMoreInfoOpen] = useState(false);
@@ -5976,6 +5977,46 @@ BRRRR STRATEGY:
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <CardContent className="p-3 pt-2">
+                  {/* Investment Score Breakdown */}
+                  {headerInvestmentScore && (
+                    <div className="mb-4 p-3 rounded-lg border border-purple-500/20 bg-purple-500/5">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm font-semibold text-purple-300">Investment Score</span>
+                        <span className={cn(
+                          "text-sm font-bold px-2 py-0.5 rounded",
+                          headerInvestmentScore.decision === 'Buy'
+                            ? "bg-emerald-500/20 text-emerald-400"
+                            : "bg-red-500/20 text-red-400"
+                        )}>
+                          {headerInvestmentScore.decision === 'Buy' ? '✓ Buy' : '✗ Pass'} · {headerInvestmentScore.finalScore.toFixed(1)}/10
+                        </span>
+                      </div>
+                      <div className="space-y-2">
+                        {[
+                          { label: 'Cash Flow', score: headerInvestmentScore.cashFlowScore, weight: 33, detail: `${formatCurrency(headerInvestmentScore.monthlyCashflow)}/mo · ${headerInvestmentScore.annualReturnPct >= 100 ? '∞' : headerInvestmentScore.annualReturnPct.toFixed(1) + '%'} CoC` },
+                          { label: 'Equity',    score: headerInvestmentScore.equityScore,    weight: 33, detail: `${formatCurrency(headerInvestmentScore.trueEquity)} true equity` },
+                          { label: 'Location',  score: headerInvestmentScore.locationScore,  weight: 34, detail: headerInvestmentScore.schoolTotal > 0 ? `Schools: ${headerInvestmentScore.schoolTotal.toFixed(1)}/15${headerInvestmentScore.inventoryMonths != null ? ` · Inv: ${headerInvestmentScore.inventoryMonths}mo` : ''}` : 'School data missing' },
+                        ].map(({ label, score, weight, detail }) => (
+                          <div key={label} className="flex items-center gap-2 text-xs">
+                            <span className="w-20 text-muted-foreground shrink-0">{label} <span className="text-muted-foreground/50">{weight}%</span></span>
+                            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                              <div
+                                className={cn("h-full rounded-full transition-all", score >= 7 ? "bg-emerald-500" : score >= 5 ? "bg-yellow-500" : "bg-red-500")}
+                                style={{ width: `${score * 10}%` }}
+                              />
+                            </div>
+                            <span className={cn("w-8 text-right font-medium shrink-0", score >= 7 ? "text-emerald-400" : score >= 5 ? "text-yellow-400" : "text-red-400")}>
+                              {score.toFixed(1)}
+                            </span>
+                            <span className="text-muted-foreground truncate max-w-[140px]">{detail}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {headerInvestmentScore.missingFields.length > 0 && (
+                        <p className="text-xs text-orange-400 mt-2">⚠ Partial: {headerInvestmentScore.missingFields.join(', ')} missing</p>
+                      )}
+                    </div>
+                  )}
                 {(() => {
                   // BRRRR combines HML for acquisition + Refi loan for long-term hold
                   // Phase 1: HML acquisition (reuses Flip HML calculations)
@@ -6570,6 +6611,129 @@ BRRRR STRATEGY:
                 </CollapsibleContent>
               </Card>
             </Collapsible>
+
+            {/* ACQUISITION ENGINE */}
+            {headerInvestmentScore && (
+            <Collapsible open={acquisitionEngineOpen} onOpenChange={setAcquisitionEngineOpen}>
+              <Card className="border border-emerald-500/30 bg-card/50">
+                <CollapsibleTrigger asChild>
+                  <CardHeader className="pb-2 cursor-pointer hover:bg-muted/30 transition-colors">
+                    <CardTitle className="text-base flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Zap className="w-4 h-4 text-emerald-400" />
+                        <span className="text-emerald-400">Acquisition Engine</span>
+                        {!acquisitionEngineOpen && (
+                          <span className={cn(
+                            "text-xs font-bold ml-1",
+                            headerInvestmentScore.decision === 'Buy' ? "text-emerald-400" : "text-red-400"
+                          )}>
+                            {headerInvestmentScore.decision === 'Buy' ? '✓ Buy' : '✗ Pass'} · {headerInvestmentScore.finalScore.toFixed(1)}/10
+                          </span>
+                        )}
+                      </div>
+                      <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform", acquisitionEngineOpen && "rotate-180")} />
+                    </CardTitle>
+                  </CardHeader>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent className="p-4 pt-0 space-y-4">
+                    {/* Verdict */}
+                    <div className={cn(
+                      "flex items-center justify-between p-3 rounded-lg border",
+                      headerInvestmentScore.decision === 'Buy'
+                        ? "border-emerald-500/40 bg-emerald-500/10"
+                        : "border-red-500/40 bg-red-500/10"
+                    )}>
+                      <div>
+                        <p className={cn("text-2xl font-bold", headerInvestmentScore.decision === 'Buy' ? "text-emerald-400" : "text-red-400")}>
+                          {headerInvestmentScore.decision === 'Buy' ? '✓ BUY' : '✗ PASS'}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">Threshold: ≥{(settings.investmentScoreSettings?.buyThreshold ?? 7).toFixed(1)} to Buy</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-3xl font-bold text-foreground">{headerInvestmentScore.finalScore.toFixed(1)}</p>
+                        <p className="text-xs text-muted-foreground">out of 10</p>
+                      </div>
+                    </div>
+
+                    {/* Score bar */}
+                    <div className="space-y-1">
+                      <div className="relative h-3 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={cn("h-full rounded-full transition-all", headerInvestmentScore.decision === 'Buy' ? "bg-emerald-500" : headerInvestmentScore.finalScore >= 5 ? "bg-yellow-500" : "bg-red-500")}
+                          style={{ width: `${headerInvestmentScore.finalScore * 10}%` }}
+                        />
+                        {/* Threshold marker */}
+                        <div
+                          className="absolute top-0 bottom-0 w-0.5 bg-white/50"
+                          style={{ left: `${(settings.investmentScoreSettings?.buyThreshold ?? 7) * 10}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>0</span>
+                        <span className="text-white/50">← Buy threshold at {(settings.investmentScoreSettings?.buyThreshold ?? 7).toFixed(1)}</span>
+                        <span>10</span>
+                      </div>
+                    </div>
+
+                    {/* Component breakdown */}
+                    <div className="space-y-3">
+                      {[
+                        {
+                          label: 'Cash Flow', score: headerInvestmentScore.cashFlowScore, weight: settings.investmentScoreSettings?.cashFlowWeight ?? 33,
+                          lines: [
+                            `Monthly CF: ${formatCurrency(headerInvestmentScore.monthlyCashflow)}/mo → ${headerInvestmentScore.monthlyCashFlowScore.toFixed(1)}/10`,
+                            `Annual CoC: ${headerInvestmentScore.annualReturnPct >= 100 ? '∞ (full BRRRR)' : headerInvestmentScore.annualReturnPct.toFixed(1) + '%'} → ${headerInvestmentScore.annualReturnScore.toFixed(1)}/10`,
+                          ],
+                        },
+                        {
+                          label: 'Equity', score: headerInvestmentScore.equityScore, weight: settings.investmentScoreSettings?.equityWeight ?? 33,
+                          lines: [
+                            `ARV ${formatCurrency(arv)} − Purchase ${formatCurrency(purchasePrice)} − Rehab ${formatCurrency(rehabCost)}`,
+                            `True Equity: ${formatCurrency(headerInvestmentScore.trueEquity)}`,
+                          ],
+                        },
+                        {
+                          label: 'Location', score: headerInvestmentScore.locationScore, weight: settings.investmentScoreSettings?.locationWeight ?? 34,
+                          lines: [
+                            `Schools: ${headerInvestmentScore.schoolTotal.toFixed(1)}/15 → ${headerInvestmentScore.schoolScore.toFixed(1)}/10 (60%)`,
+                            headerInvestmentScore.inventoryMonths != null
+                              ? `Inventory: ${headerInvestmentScore.inventoryMonths}mo → ${headerInvestmentScore.inventoryScore?.toFixed(1)}/10 (40%)`
+                              : `Inventory: not set (enter in overrides)`,
+                          ],
+                        },
+                      ].map(({ label, score, weight, lines }) => (
+                        <div key={label} className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium w-24 shrink-0">{label} <span className="text-muted-foreground">{weight}%</span></span>
+                            <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                              <div
+                                className={cn("h-full rounded-full", score >= 7 ? "bg-emerald-500" : score >= 5 ? "bg-yellow-500" : "bg-red-500")}
+                                style={{ width: `${score * 10}%` }}
+                              />
+                            </div>
+                            <span className={cn("text-xs font-bold w-10 text-right shrink-0", score >= 7 ? "text-emerald-400" : score >= 5 ? "text-yellow-400" : "text-red-400")}>
+                              {score.toFixed(1)}/10
+                            </span>
+                          </div>
+                          {lines.map((l, i) => (
+                            <p key={i} className="text-xs text-muted-foreground ml-26 pl-1">{l}</p>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+
+                    {headerInvestmentScore.missingFields.length > 0 && (
+                      <p className="text-xs text-orange-400 border border-orange-500/30 rounded p-2 bg-orange-500/5">
+                        ⚠ Partial score — {headerInvestmentScore.missingFields.join(', ')} missing. Add in Modified Assumptions.
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground border-t border-border pt-2">Adjust weights & threshold in Settings → Investment Score</p>
+                  </CardContent>
+                </CollapsibleContent>
+              </Card>
+            </Collapsible>
+            )}
 
             {/* ZIP Market Intelligence */}
             {deal.address.zip && (
