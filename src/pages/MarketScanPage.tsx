@@ -85,6 +85,12 @@ function getAreasToScan(cooldownDays: number): string[] {
     .slice(0, MAX_AREAS_PER_SCAN);
 }
 
+// ─── ZIP median lookup (used as ARV proxy when API returns no zestimate) ─────
+
+const ZIP_MEDIAN: Record<string, number> = Object.fromEntries(
+  ATLANTA_ZIPS.map(z => [z.zip, z.medianHomeValue])
+);
+
 // ─── Filter constants ────────────────────────────────────────────────────────
 
 const MIN_PRICE       = 80_000;
@@ -98,14 +104,12 @@ const MIN_DEAL_SCORE  = 40;   // minimum score to qualify for DealBeast
 const MAX_TO_SEND     = 30;   // hard cap sent to DealBeast
 
 // ─── Deal score ───────────────────────────────────────────────────────────────
-// 60 pts: price discount  (1 - price/zestimate) * 60
-// 40 pts: rent yield      (rentZestimate*12/price) * 400 capped at 40
+// 60 pts: price discount vs ARV  (1 - price/arv) * 60
+// 40 pts: rent yield             (rent*12/price) * 400, capped at 40
 
-function calcDealScore(price: number, zestimate: number | null, rentZestimate: number | null): number {
-  // When ARV is available: use price-vs-ARV discount (0–60 pts)
-  // When ARV is null (new API): use price position in range as proxy (lower price = higher score)
-  const discountPts = zestimate
-    ? Math.max(0, (1 - price / zestimate) * 60)
+function calcDealScore(price: number, arv: number | null, rentZestimate: number | null): number {
+  const discountPts = arv
+    ? Math.max(0, (1 - price / arv) * 60)
     : Math.max(0, (1 - (price - MIN_PRICE) / (MAX_PRICE - MIN_PRICE)) * 40);
   const yieldPts = rentZestimate ? Math.min(40, (rentZestimate * 12 / price) * 400) : 0;
   return Math.round(discountPts + yieldPts);
@@ -160,20 +164,24 @@ function filterListings(raw: RawListing[]): ScoredListing[] {
   const passed: ScoredListing[] = [];
   for (const l of raw) {
     if (l.price < MIN_PRICE || l.price > MAX_PRICE) continue;
-    // Normalize type: old API returns 'SINGLE_FAMILY', new API returns 'single_family'
     const pType = (l.propertyType || '').toUpperCase().replace(/[^A-Z]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
     if (pType && pType !== 'SINGLE_FAMILY') continue;
-    // ARV-based margin filter only when we actually have ARV data
-    if (l.zestimate && l.price / l.zestimate > MAX_PRICE_RATIO) continue;
     if (l.yearBuilt && l.yearBuilt < MIN_YEAR) continue;
     if (l.sqft && (l.sqft < MIN_SQFT || l.sqft > MAX_SQFT)) continue;
     if (l.bedrooms !== null && l.bedrooms < MIN_BEDS) continue;
 
+    // ARV: real zestimate > ZIP median > null
+    const arv = l.zestimate ?? ZIP_MEDIAN[l.zipcode] ?? null;
+
+    // Filter out properties with no upside (price > 90% of ARV)
+    if (arv && l.price / arv > 0.90) continue;
+
     passed.push({
       ...l,
-      margin: l.zestimate ? 1 - l.price / l.zestimate : 0,
+      zestimate: arv,   // store resolved ARV back so DealBeast & display use it
+      margin: arv ? 1 - l.price / arv : 0,
       grossYield: l.rentZestimate ? (l.rentZestimate * 12) / l.price : 0,
-      dealScore: calcDealScore(l.price, l.zestimate, l.rentZestimate),
+      dealScore: calcDealScore(l.price, arv, l.rentZestimate),
       aiResult: null,
       excluded: false,
       alreadyAnalyzed: false,
