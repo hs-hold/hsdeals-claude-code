@@ -29,6 +29,46 @@ interface AtlantaZip {
 const ATLANTA_ZIPS: AtlantaZip[] = atlantaZipsRaw as AtlantaZip[];
 const DEFAULT_ZIPS = [...ATLANTA_ZIPS].sort((a, b) => a.distanceMiles - b.distanceMiles);
 
+// ─── Scan areas ───────────────────────────────────────────────────────────────
+
+const SCAN_AREAS = [
+  'Atlanta, GA',
+  'Decatur, GA',
+  'College Park, GA',
+  'East Point, GA',
+  'Mableton, GA',
+  'Lithonia, GA',
+  'Jonesboro, GA',
+  'Riverdale, GA',
+  'Conyers, GA',
+  'Union City, GA',
+  'Forest Park, GA',
+  'Austell, GA',
+];
+
+const AREA_HISTORY_KEY = 'market_scan_area_history';
+const MAX_AREAS_PER_SCAN = 5;
+
+function loadAreaHistory(): Record<string, number> {
+  try { return JSON.parse(localStorage.getItem(AREA_HISTORY_KEY) || '{}'); }
+  catch { return {}; }
+}
+
+function saveAreaHistory(h: Record<string, number>) {
+  try { localStorage.setItem(AREA_HISTORY_KEY, JSON.stringify(h)); } catch {}
+}
+
+function getAreasToScan(cooldownDays: number): string[] {
+  const history = loadAreaHistory();
+  const now = Date.now();
+  const cooldownMs = cooldownDays * 86_400_000;
+  // Sort by most overdue first, take up to MAX_AREAS_PER_SCAN
+  return SCAN_AREAS
+    .filter(a => now - (history[a] || 0) >= cooldownMs)
+    .sort((a, b) => (history[a] || 0) - (history[b] || 0))
+    .slice(0, MAX_AREAS_PER_SCAN);
+}
+
 // ─── Filter constants ────────────────────────────────────────────────────────
 
 const MIN_PRICE       = 80_000;
@@ -225,6 +265,7 @@ export default function MarketScanPage() {
   const [totalScanned, setTotalScanned] = useState(saved?.totalScanned ?? 0);
   const [maxToSend, setMaxToSend] = useState(MAX_TO_SEND);
   const [sentZpids, setSentZpids] = useState<Set<string>>(new Set(saved?.sentZpids ?? []));
+  const [scanCooldownDays, setScanCooldownDays] = useState(3);
 
   const dbAbortRef = useRef(false);
 
@@ -248,59 +289,73 @@ export default function MarketScanPage() {
   const startScan = useCallback(async () => {
     setStage(1);
     setResults([]);
-    setScanProgress({ current: 1, total: 1, zip: 'Atlanta, GA' });
     setDbDone(0);
     setTotalScanned(0);
+    setSentZpids(new Set());
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
     dbAbortRef.current = false;
 
-    const allRaw: RawListing[] = [];
+    const areas = getAreasToScan(scanCooldownDays);
+    const toScan = areas.length > 0 ? areas : ['Atlanta, GA']; // fallback if all on cooldown
+    const areaHistory = loadAreaHistory();
 
-    try {
-      const { data, error } = await supabase.functions.invoke('zillow-search', {
-        body: {
-          location: 'Atlanta, GA',
-          homeType: 'SingleFamily',
-          minPrice: MIN_PRICE,
-          maxPrice: MAX_PRICE,
-          minBeds: MIN_BEDS,
-          minSqft: MIN_SQFT,
-          maxSqft: MAX_SQFT,
-          minYearBuilt: MIN_YEAR,
-        },
-      });
-      if (error) {
-        toast.error('Search failed: ' + (error.message || 'unknown error'));
-      } else if (data?.properties) {
-        allRaw.push(...data.properties.map((p: any) => ({
-          zpid:          p.zpid ?? '',
-          address:       p.address ?? '',
-          city:          p.city ?? '',
-          state:         p.state ?? '',
-          zipcode:       p.zipcode ?? '',
-          price:         p.price ?? 0,
-          zestimate:     p.zestimate ?? null,
-          rentZestimate: p.rentZestimate ?? null,
-          daysOnZillow:  p.daysOnZillow ?? null,
-          bedrooms:      p.bedrooms ?? null,
-          bathrooms:     p.bathrooms ?? null,
-          sqft:          p.sqft ?? null,
-          yearBuilt:     p.yearBuilt ?? null,
-          propertyType:  p.propertyType ?? null,
-          imgSrc:        p.imgSrc ?? null,
-          detailUrl:     p.detailUrl ?? null,
-        })));
-      } else if (data?._debug) {
-        console.error('Scan debug:', data._debug);
-        toast.error('API returned 0 results. Check console for debug info.');
-      }
-    } catch (e) { console.error('Scan error:', e); }
+    const allRaw: RawListing[] = [];
+    const seen = new Set<string>();
+
+    for (let i = 0; i < toScan.length; i++) {
+      const area = toScan[i];
+      setScanProgress({ current: i + 1, total: toScan.length, zip: area });
+
+      try {
+        const { data, error } = await supabase.functions.invoke('zillow-search', {
+          body: {
+            location: area,
+            homeType: 'SingleFamily',
+            minPrice: MIN_PRICE,
+            maxPrice: MAX_PRICE,
+            minBeds: MIN_BEDS,
+            minSqft: MIN_SQFT,
+            maxSqft: MAX_SQFT,
+            minYearBuilt: MIN_YEAR,
+          },
+        });
+        if (!error && data?.properties?.length > 0) {
+          areaHistory[area] = Date.now();
+          saveAreaHistory(areaHistory);
+          for (const p of data.properties) {
+            const key = p.zpid || (p.address + p.zipcode);
+            if (key && seen.has(key)) continue;
+            if (key) seen.add(key);
+            allRaw.push({
+              zpid:          p.zpid ?? '',
+              address:       p.address ?? '',
+              city:          p.city ?? '',
+              state:         p.state ?? '',
+              zipcode:       p.zipcode ?? '',
+              price:         p.price ?? 0,
+              zestimate:     p.zestimate ?? null,
+              rentZestimate: p.rentZestimate ?? null,
+              daysOnZillow:  p.daysOnZillow ?? null,
+              bedrooms:      p.bedrooms ?? null,
+              bathrooms:     p.bathrooms ?? null,
+              sqft:          p.sqft ?? null,
+              yearBuilt:     p.yearBuilt ?? null,
+              propertyType:  p.propertyType ?? null,
+              imgSrc:        p.imgSrc ?? null,
+              detailUrl:     p.detailUrl ?? null,
+            });
+          }
+        } else if (error) {
+          console.warn(`Scan error for ${area}:`, error.message);
+        }
+      } catch (e) { console.error(`Scan error for ${area}:`, e); }
+    }
 
     const filtered = filterListings(allRaw);
     setTotalScanned(allRaw.length);
     setScanProgress(null);
 
-    // Batch dedup check
+    // Batch dedup check against existing deals
     const addresses = filtered.map(r => [r.address, r.city, r.state, r.zipcode].filter(Boolean).join(', '));
     const { data: existing } = await supabase
       .from('deals')
@@ -317,8 +372,9 @@ export default function MarketScanPage() {
 
     setResults(withDedup);
     setStage(4);
-    toast.success(`Scan complete — ${filtered.length} properties passed filters`);
-  }, []);
+    const areaLabel = toScan.length === 1 ? toScan[0] : `${toScan.length} areas`;
+    toast.success(`Scan complete — ${filtered.length} properties from ${areaLabel}`);
+  }, [scanCooldownDays]);
 
   // ── Send to DealBeast ─────────────────────────────────────────────────────
 
@@ -413,15 +469,26 @@ export default function MarketScanPage() {
               Atlanta Metro
             </Badge>
           </div>
-          <div className="text-xs text-muted-foreground">
-            Atlanta, GA · ${MIN_PRICE.toLocaleString()}–${MAX_PRICE.toLocaleString()} · {MIN_SQFT}–{MAX_SQFT} sqft
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span>${MIN_PRICE.toLocaleString()}–${MAX_PRICE.toLocaleString()} · {MIN_SQFT}–{MAX_SQFT} sqft</span>
+            <span className="flex items-center gap-1">
+              Cooldown:
+              <input
+                type="number" min={1} max={30}
+                value={scanCooldownDays}
+                onChange={e => setScanCooldownDays(Math.max(1, parseInt(e.target.value) || 1))}
+                className="w-8 h-5 text-center text-xs rounded border border-border/50 bg-background"
+              />
+              days ·{' '}
+              <span className="text-blue-400">{getAreasToScan(scanCooldownDays).length} areas due</span>
+            </span>
           </div>
         </div>
 
         {/* Pipeline indicator */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <PipelineStep
-            num={1} icon={ScanLine} label="Scan ZIPs"
+            num={1} icon={ScanLine} label="Scan Areas"
             colorClass="bg-blue-500/15 text-blue-400 border-blue-400/50"
             active={stage === 1}
             done={stage >= 2}
