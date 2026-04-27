@@ -116,7 +116,7 @@ serve(async (req) => {
     // Broad city searches need multiple pages; zip-code searches are small enough with 1 page.
     const isBroadSearch = !filters.location.trim().match(/^\d{5}/); // no leading zip code
     const needsExtraForDom = filters.maxDaysOnMarket && filters.maxDaysOnMarket <= 30;
-    const pageCount = needsExtraForDom ? 10 : (isBroadSearch ? 7 : 2);
+    const pageCount = needsExtraForDom ? 20 : (isBroadSearch ? 20 : 3);
 
     const fetchPage = async (page: number) => {
       const p = new URLSearchParams(params);
