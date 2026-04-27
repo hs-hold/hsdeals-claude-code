@@ -6399,18 +6399,22 @@ BRRRR STRATEGY:
                 ? parseFloat(localOverrides.agentCommissionPercent) / 100 
                 : loanDefaults.agentCommissionPercent / 100;
               
-              // MAO calculation (conservative approach)
-              const targetProfitMargin = 0.70; // 70% of ARV rule
+              // MAO = ARV × 75% - rehab - holding costs, with minimum $50k profit guarantee
               const rehabWithContingency = rehabCost * (1 + contingencyPercent);
-              const estimatedClosingCosts = purchasePrice * closingPercent;
               const estimatedSellingCosts = arv * agentPercent + 1000; // Agent + closing
-              
-              // MAO = (ARV × 70%) - Rehab (with contingency) - Holding Costs
-              const mao = Math.round((arv * targetProfitMargin) - rehabWithContingency - totalHoldingCosts);
-              
-              // Calculate expected profit at MAO
+              const MIN_PROFIT = 50000;
+
+              // 75% rule MAO
+              let mao = Math.round((arv * 0.75) - rehabWithContingency - totalHoldingCosts);
+
+              // Verify profit at this MAO; if < $50k, solve backwards for MAO that yields $50k
+              // profit = ARV - MAO - MAO*closingPercent - rehab - holdingCosts - sellingCosts
+              // MAO*(1+closingPercent) = ARV - rehab - holdingCosts - sellingCosts - MIN_PROFIT
               const maoTotalInvestment = mao + (mao * closingPercent) + rehabWithContingency + totalHoldingCosts;
               const maoExpectedProfit = arv - maoTotalInvestment - estimatedSellingCosts;
+              if (maoExpectedProfit < MIN_PROFIT) {
+                mao = Math.round((arv - rehabWithContingency - totalHoldingCosts - estimatedSellingCosts - MIN_PROFIT) / (1 + closingPercent));
+              }
               
               const loiText = `Subject: Letter of Intent - ${deal?.address.full}
 
