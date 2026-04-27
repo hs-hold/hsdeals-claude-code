@@ -5,7 +5,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const RAPIDAPI_HOST = 'real-estate101.p.rapidapi.com';
+const RAPIDAPI_HOST = 'us-real-estate-listings.p.rapidapi.com';
 
 function getRehabCost(sqft: number, yearBuilt: number | null): number {
   const year = yearBuilt ?? 1990;
@@ -18,43 +18,36 @@ function getRehabCost(sqft: number, yearBuilt: number | null): number {
   return Math.round(sqft * costPerSqft);
 }
 
-function calcARVFromComps(subjectSqft: number, subjectBeds: number, soldProps: any[]): number | null {
-  if (!subjectSqft || subjectSqft <= 0) return null;
-
-  // Filter comps: similar size (±30%), same bed count ±1, must have price and area
-  const comps = soldProps.filter(p => {
-    const area = p.area || p.livingArea || 0;
-    const beds = p.beds || 0;
-    const price = p.unformattedPrice || 0;
-    if (!area || !price) return false;
-    const sqftMatch = area >= subjectSqft * 0.7 && area <= subjectSqft * 1.3;
-    const bedMatch = Math.abs(beds - subjectBeds) <= 1;
-    return sqftMatch && bedMatch;
-  });
-
-  if (comps.length < 2) {
-    // Fallback: use all sold with valid price/area
-    const fallback = soldProps.filter(p => (p.area || p.livingArea) && p.unformattedPrice);
-    if (fallback.length < 2) return null;
-    const pricePerSqft = fallback.map(p => p.unformattedPrice / (p.area || p.livingArea));
-    const avg = pricePerSqft.reduce((a, b) => a + b, 0) / pricePerSqft.length;
-    return Math.round(avg * subjectSqft);
-  }
-
-  // Calculate price per sqft for each comp, take median
-  const pricePerSqfts = comps
-    .map(p => p.unformattedPrice / (p.area || p.livingArea))
-    .sort((a, b) => a - b);
-
-  // Remove top and bottom 10% outliers if enough comps
-  let filtered = pricePerSqfts;
-  if (pricePerSqfts.length >= 5) {
-    const trim = Math.floor(pricePerSqfts.length * 0.1);
-    filtered = pricePerSqfts.slice(trim, pricePerSqfts.length - trim);
-  }
-
-  const median = filtered[Math.floor(filtered.length / 2)];
-  return Math.round(median * subjectSqft);
+/** Map a raw listing from the new API to internal format */
+function mapListing(l: any): any {
+  const addr = l.location?.address || {};
+  const desc = l.description || {};
+  const advertisers: any[] = l.advertisers || [];
+  const agent = advertisers[0] || {};
+  return {
+    id: l.property_id || l.listing_id,
+    price: l.list_price || 0,
+    sqft: desc.sqft || 0,
+    beds: desc.beds || 0,
+    baths: desc.baths || 0,
+    yearBuilt: desc.year_built || null,
+    homeType: desc.type || '',
+    address: `${addr.line || ''}, ${addr.city || ''}, ${addr.state_code || ''} ${addr.postal_code || ''}`.trim(),
+    addressParts: {
+      street: addr.line || '',
+      city: addr.city || '',
+      state: addr.state_code || '',
+      zipcode: addr.postal_code || '',
+    },
+    imgSrc: l.primary_photo?.href || null,
+    detailUrl: l.href || null,
+    daysOnMarket: l.list_date ? Math.max(0, Math.floor((Date.now() - new Date(l.list_date).getTime()) / 86_400_000)) : 0,
+    description: desc.text || '',
+    agentName: agent.name || null,
+    agentEmail: agent.email || null,
+    agentPhone: agent.phones?.[0]?.number || null,
+    brokerName: agent.office?.name || null,
+  };
 }
 
 serve(async (req) => {
@@ -85,62 +78,53 @@ serve(async (req) => {
       'X-RapidAPI-Host': RAPIDAPI_HOST,
     };
 
-    // Fetch for-sale and recently-sold in parallel
-    const [forSaleRes, soldRes] = await Promise.all([
-      fetch(`https://${RAPIDAPI_HOST}/api/search?location=${zip}&maxPrice=${maxPrice}&isSingleFamily=true&page=1`, { headers }),
-      fetch(`https://${RAPIDAPI_HOST}/api/search?location=${zip}&isRecentlySold=true&isSingleFamily=true&page=1`, { headers }),
-    ]);
+    // Fetch for-sale listings
+    const params = new URLSearchParams({
+      location: zip,
+      price_max: String(maxPrice),
+      beds_min: String(minBeds),
+      limit: '42',
+    });
 
-    const [forSaleData, soldData] = await Promise.all([
-      forSaleRes.json(),
-      soldRes.json(),
-    ]);
+    const forSaleRes = await fetch(`https://${RAPIDAPI_HOST}/for-sale?${params}`, { headers });
+    if (!forSaleRes.ok) {
+      const errText = await forSaleRes.text();
+      return new Response(
+        JSON.stringify({ success: false, error: `Market search failed (HTTP ${forSaleRes.status})`, details: errText }),
+        { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
-    const forSale: any[] = forSaleData.results || [];
-    const sold: any[] = soldData.results || [];
+    const forSaleData = await forSaleRes.json();
 
-    // Analyze each for-sale property
+    // Filter for-sale only (API may return other statuses)
+    const forSale: any[] = (forSaleData.listings || [])
+      .filter((l: any) => l.status === 'for_sale')
+      .map(mapListing);
+
+    // Analyze each for-sale property (no sold comps available from this API)
     const analyzed = forSale
-      .filter(p => {
-        const price = p.unformattedPrice || 0;
-        const beds = p.beds || 0;
-        const sqft = p.area || p.livingArea || 0;
-        return price > 0 && beds >= minBeds && sqft > 0;
-      })
+      .filter(p => p.price > 0 && p.beds >= minBeds && p.sqft > 0)
       .map(p => {
-        const price = p.unformattedPrice;
-        const sqft = p.area || p.livingArea || 0;
-        const beds = p.beds || 0;
-        const rent = p.rentZestimate || 0;
+        const rehab = getRehabCost(p.sqft, p.yearBuilt);
 
-        const arv = calcARVFromComps(sqft, beds, sold);
-        const rehab = getRehabCost(sqft, p.yearBuilt || null);
-        const spread = arv ? arv - price - rehab : null;
-
-        // Cap rate: (annual rent - expenses) / (price + rehab)
-        const annualRent = rent * 12;
-        const expenses = annualRent * 0.4; // 40% expense ratio
+        // Cap rate estimate based on 1% rule: monthly rent ≈ 0.7% of purchase price
+        const estimatedRent = Math.round(p.price * 0.007);
+        const annualRent = estimatedRent * 12;
+        const expenses = annualRent * 0.4;
         const noi = annualRent - expenses;
-        const totalInvestment = price + rehab;
-        const capRate = totalInvestment > 0 && rent > 0
-          ? (noi / totalInvestment) * 100
-          : null;
+        const totalInvestment = p.price + rehab;
+        const capRate = totalInvestment > 0 ? (noi / totalInvestment) * 100 : null;
 
-        // Score: 0-100
+        // Score: 0-100 (based on cap rate only since no comps for spread)
         let score = 0;
-        if (spread !== null && spread > 0) {
-          const spreadPct = (spread / price) * 100;
-          if (spreadPct >= 40) score += 50;
-          else if (spreadPct >= 30) score += 40;
-          else if (spreadPct >= 20) score += 30;
-          else if (spreadPct >= 10) score += 15;
-        }
         if (capRate !== null) {
-          if (capRate >= 10) score += 50;
-          else if (capRate >= 8) score += 35;
-          else if (capRate >= 6) score += 20;
-          else if (capRate >= 4) score += 10;
+          if (capRate >= 10) score += 100;
+          else if (capRate >= 8) score += 70;
+          else if (capRate >= 6) score += 40;
+          else if (capRate >= 4) score += 20;
         }
+        score = Math.min(score, 100);
 
         const grade =
           score >= 80 ? 'A' :
@@ -150,22 +134,27 @@ serve(async (req) => {
         return {
           zpid: p.id,
           address: p.address,
-          price,
-          sqft,
-          beds,
+          price: p.price,
+          sqft: p.sqft,
+          beds: p.beds,
           baths: p.baths,
           homeType: p.homeType,
-          daysOnMarket: p.daysOnZillow || 0,
+          daysOnMarket: p.daysOnMarket,
           imgSrc: p.imgSrc,
           detailUrl: p.detailUrl,
-          rent,
-          arv,
+          rent: estimatedRent,
+          arv: null, // No sold comps available from this API
           rehab,
-          spread,
+          spread: null,
           capRate: capRate ? Math.round(capRate * 10) / 10 : null,
           score,
           grade,
-          compsUsed: sold.length,
+          compsUsed: 0,
+          description: p.description,
+          agentName: p.agentName,
+          agentEmail: p.agentEmail,
+          agentPhone: p.agentPhone,
+          brokerName: p.brokerName,
         };
       })
       .sort((a, b) => b.score - a.score);
@@ -175,7 +164,7 @@ serve(async (req) => {
         success: true,
         zip,
         totalForSale: forSale.length,
-        totalSoldComps: sold.length,
+        totalSoldComps: 0,
         analyzed: analyzed.length,
         results: analyzed,
       }),

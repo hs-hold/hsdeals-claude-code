@@ -8,7 +8,7 @@ import { analyzeAndCreateDeal } from '@/services/deals/analyzeAndCreateDeal';
 import { useNavigate } from 'react-router-dom';
 import {
   ScanLine, ExternalLink, CheckCircle2, XCircle,
-  Loader2, Home, Zap, Brain, Filter,
+  Loader2, Home, Zap, Filter,
   ArrowRight, AlertTriangle, Check, X, MapPin,
 } from 'lucide-react';
 import atlantaZipsRaw from '@/data/atlantaZips.json';
@@ -29,6 +29,76 @@ interface AtlantaZip {
 const ATLANTA_ZIPS: AtlantaZip[] = atlantaZipsRaw as AtlantaZip[];
 const DEFAULT_ZIPS = [...ATLANTA_ZIPS].sort((a, b) => a.distanceMiles - b.distanceMiles);
 
+// ─── Scan areas ───────────────────────────────────────────────────────────────
+
+const SCAN_AREAS = [
+  'Atlanta, GA',
+  'Decatur, GA',
+  'College Park, GA',
+  'East Point, GA',
+  'Mableton, GA',
+  'Lithonia, GA',
+  'Jonesboro, GA',
+  'Riverdale, GA',
+  'Conyers, GA',
+  'Union City, GA',
+  'Forest Park, GA',
+  'Austell, GA',
+  'Douglasville, GA',
+  'Stockbridge, GA',
+  'McDonough, GA',
+  'Lawrenceville, GA',
+  'Tucker, GA',
+  'Ellenwood, GA',
+  'Hampton, GA',
+  'Fairburn, GA',
+  'Hapeville, GA',
+  'Powder Springs, GA',
+  'Acworth, GA',
+  'Covington, GA',
+  'Newnan, GA',
+  'Stone Mountain, GA',
+  'Clarkston, GA',
+  'Smyrna, GA',
+];
+
+const AREA_HISTORY_KEY = 'market_scan_area_history';
+const MAX_AREAS_PER_SCAN = 5;
+
+function loadAreaHistory(): Record<string, number> {
+  try { return JSON.parse(localStorage.getItem(AREA_HISTORY_KEY) || '{}'); }
+  catch { return {}; }
+}
+
+function saveAreaHistory(h: Record<string, number>) {
+  try { localStorage.setItem(AREA_HISTORY_KEY, JSON.stringify(h)); } catch {}
+}
+
+function getAreasToScan(cooldownDays: number): string[] {
+  const history = loadAreaHistory();
+  const now = Date.now();
+  const cooldownMs = cooldownDays * 86_400_000;
+  return SCAN_AREAS
+    .filter(a => now - (history[a] || 0) >= cooldownMs)
+    .sort((a, b) => (history[a] || 0) - (history[b] || 0))
+    .slice(0, MAX_AREAS_PER_SCAN);
+}
+
+function getNextScanMs(cooldownDays: number): number | null {
+  const history = loadAreaHistory();
+  const cooldownMs = cooldownDays * 86_400_000;
+  const nextTimes = SCAN_AREAS
+    .map(a => (history[a] || 0) + cooldownMs)
+    .filter(t => t > Date.now());
+  return nextTimes.length ? Math.min(...nextTimes) : null;
+}
+
+// ─── ZIP median lookup (used as ARV proxy when API returns no zestimate) ─────
+
+const ZIP_MEDIAN: Record<string, number> = Object.fromEntries(
+  ATLANTA_ZIPS.map(z => [z.zip, z.medianHomeValue])
+);
+
 // ─── Filter constants ────────────────────────────────────────────────────────
 
 const MIN_PRICE       = 80_000;
@@ -38,13 +108,17 @@ const MIN_SQFT        = 1_200;
 const MAX_SQFT        = 1_800;
 const MIN_BEDS        = 2;
 const MIN_YEAR        = 1950;
+const MIN_DEAL_SCORE  = 40;   // minimum score to qualify for DealBeast
+const MAX_TO_SEND     = 30;   // hard cap sent to DealBeast
 
 // ─── Deal score ───────────────────────────────────────────────────────────────
-// 60 pts: price discount  (1 - price/zestimate) * 60
-// 40 pts: rent yield      (rentZestimate*12/price) * 400 capped at 40
+// 60 pts: price discount vs ARV  (1 - price/arv) * 60
+// 40 pts: rent yield             (rent*12/price) * 400, capped at 40
 
-function calcDealScore(price: number, zestimate: number | null, rentZestimate: number | null): number {
-  const discountPts = zestimate ? Math.max(0, (1 - price / zestimate) * 60) : 0;
+function calcDealScore(price: number, arv: number | null, rentZestimate: number | null): number {
+  const discountPts = arv
+    ? Math.max(0, (1 - price / arv) * 60)
+    : Math.max(0, (1 - (price - MIN_PRICE) / (MAX_PRICE - MIN_PRICE)) * 40);
   const yieldPts = rentZestimate ? Math.min(40, (rentZestimate * 12 / price) * 400) : 0;
   return Math.round(discountPts + yieldPts);
 }
@@ -93,8 +167,8 @@ interface ScoredListing extends RawListing {
   includeAnyway: boolean;
 }
 
-// Stage: 0=idle 1=scanning 2=results 3=ai-running 4=ai-done 5=dealbeast-running 6=done
-type Stage = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+// Stage: 0=idle 1=scanning 2=results 4=dealbeast-ready 5=dealbeast-running 6=done
+type Stage = 0 | 1 | 2 | 4 | 5 | 6;
 
 // ─── Filter listings ─────────────────────────────────────────────────────────
 
@@ -102,19 +176,24 @@ function filterListings(raw: RawListing[]): ScoredListing[] {
   const passed: ScoredListing[] = [];
   for (const l of raw) {
     if (l.price < MIN_PRICE || l.price > MAX_PRICE) continue;
-    if (l.propertyType && l.propertyType !== 'SINGLE_FAMILY') continue;
-    if (!l.rentZestimate) continue;
-    if (!l.zestimate) continue;                               // must have ARV to evaluate margin
-    if (l.price / l.zestimate > MAX_PRICE_RATIO) continue;   // margin must be ≥ 20%
+    const pType = (l.propertyType || '').toUpperCase().replace(/[^A-Z]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+    if (pType && pType !== 'SINGLE_FAMILY') continue;
     if (l.yearBuilt && l.yearBuilt < MIN_YEAR) continue;
     if (l.sqft && (l.sqft < MIN_SQFT || l.sqft > MAX_SQFT)) continue;
     if (l.bedrooms !== null && l.bedrooms < MIN_BEDS) continue;
 
+    // ARV: real zestimate > ZIP median > null
+    const arv = l.zestimate ?? ZIP_MEDIAN[l.zipcode] ?? null;
+
+    // Filter out properties with no upside (price > 90% of ARV)
+    if (arv && l.price / arv > 0.90) continue;
+
     passed.push({
       ...l,
-      margin: l.zestimate ? 1 - l.price / l.zestimate : 0,
-      grossYield: (l.rentZestimate! * 12) / l.price,
-      dealScore: calcDealScore(l.price, l.zestimate, l.rentZestimate),
+      zestimate: arv,   // store resolved ARV back so DealBeast & display use it
+      margin: arv ? 1 - l.price / arv : 0,
+      grossYield: l.rentZestimate ? (l.rentZestimate * 12) / l.price : 0,
+      dealScore: calcDealScore(l.price, arv, l.rentZestimate),
       aiResult: null,
       excluded: false,
       alreadyAnalyzed: false,
@@ -186,20 +265,28 @@ function PipelineStep({
 
 const STORAGE_KEY = 'market_scan_session';
 
-function loadSavedSession(): { results: ScoredListing[]; stage: Stage; totalScanned: number; dbDone: number } | null {
+function loadSavedSession(): { results: ScoredListing[]; stage: Stage; totalScanned: number; dbDone: number; sentZpids: string[] } | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
+    // Expire at midnight — discard if saved on a different calendar day
+    if (!parsed.savedDate || parsed.savedDate !== new Date().toDateString()) {
+      localStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
     // Stage 5 = DealBeast running — can't survive a page reload, reset to 4
     if (parsed.stage === 5) parsed.stage = 4;
     return parsed;
   } catch { return null; }
 }
 
-function saveSession(results: ScoredListing[], stage: Stage, totalScanned: number, dbDone: number) {
+function saveSession(results: ScoredListing[], stage: Stage, totalScanned: number, dbDone: number, sentZpids: string[]) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ results, stage, totalScanned, dbDone }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      results, stage, totalScanned, dbDone, sentZpids,
+      savedDate: new Date().toDateString(),
+    }));
   } catch { /* storage full — ignore */ }
 }
 
@@ -211,20 +298,21 @@ export default function MarketScanPage() {
   const [stage, setStage] = useState<Stage>(saved?.stage ?? 0);
   const [results, setResults] = useState<ScoredListing[]>(saved?.results ?? []);
   const [scanProgress, setScanProgress] = useState<{ current: number; total: number; zip: string } | null>(null);
-  const [aiProgress, setAiProgress] = useState<{ current: number; total: number } | null>(null);
   const [dbProgress, setDbProgress] = useState<{ current: number; total: number; address: string } | null>(null);
   const [dbDone, setDbDone] = useState(saved?.dbDone ?? 0);
   const [totalScanned, setTotalScanned] = useState(saved?.totalScanned ?? 0);
+  const [maxToSend, setMaxToSend] = useState(MAX_TO_SEND);
+  const [sentZpids, setSentZpids] = useState<Set<string>>(new Set(saved?.sentZpids ?? []));
+  const [scanCooldownDays, setScanCooldownDays] = useState(3);
 
-  const aiAbortRef = useRef(false);
   const dbAbortRef = useRef(false);
 
-  // Persist to localStorage whenever results/stage change
+  // Persist to localStorage whenever results/stage/sentZpids change
   useEffect(() => {
     if (results.length > 0 || stage > 0) {
-      saveSession(results, stage, totalScanned, dbDone);
+      saveSession(results, stage, totalScanned, dbDone, [...sentZpids]);
     }
-  }, [results, stage, totalScanned, dbDone]);
+  }, [results, stage, totalScanned, dbDone, sentZpids]);
 
   // ── Derived state ─────────────────────────────────────────────────────────
 
@@ -239,24 +327,27 @@ export default function MarketScanPage() {
   const startScan = useCallback(async () => {
     setStage(1);
     setResults([]);
-    setScanProgress(null);
     setDbDone(0);
     setTotalScanned(0);
+    setSentZpids(new Set());
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
-    aiAbortRef.current = false;
     dbAbortRef.current = false;
 
-    const zips = DEFAULT_ZIPS.map(z => z.zip);
-    const allRaw: RawListing[] = [];
+    const areas = getAreasToScan(scanCooldownDays);
+    const toScan = areas.length > 0 ? areas : ['Atlanta, GA']; // fallback if all on cooldown
+    const areaHistory = loadAreaHistory();
 
-    for (let i = 0; i < zips.length; i++) {
-      const zip = zips[i];
-      setScanProgress({ current: i + 1, total: zips.length, zip });
+    const allRaw: RawListing[] = [];
+    const seen = new Set<string>();
+
+    for (let i = 0; i < toScan.length; i++) {
+      const area = toScan[i];
+      setScanProgress({ current: i + 1, total: toScan.length, zip: area });
 
       try {
         const { data, error } = await supabase.functions.invoke('zillow-search', {
           body: {
-            location: zip,
+            location: area,
             homeType: 'SingleFamily',
             minPrice: MIN_PRICE,
             maxPrice: MAX_PRICE,
@@ -264,43 +355,49 @@ export default function MarketScanPage() {
             minSqft: MIN_SQFT,
             maxSqft: MAX_SQFT,
             minYearBuilt: MIN_YEAR,
-            page: 1,
           },
         });
-        if (!error && data?.properties) {
-          allRaw.push(...data.properties.map((p: any) => ({
-            zpid:          p.zpid ?? '',
-            address:       p.address ?? '',
-            city:          p.city ?? '',
-            state:         p.state ?? '',
-            zipcode:       p.zipcode ?? zip,
-            price:         p.price ?? 0,
-            zestimate:     p.zestimate ?? null,
-            rentZestimate: p.rentZestimate ?? null,
-            daysOnZillow:  p.daysOnZillow ?? null,
-            bedrooms:      p.bedrooms ?? null,
-            bathrooms:     p.bathrooms ?? null,
-            sqft:          p.sqft ?? null,
-            yearBuilt:     p.yearBuilt ?? null,
-            propertyType:  p.propertyType ?? null,
-            imgSrc:        p.imgSrc ?? null,
-            detailUrl:     p.detailUrl ?? null,
-            agentName:     p.agentName ?? null,
-            agentEmail:    p.agentEmail ?? null,
-            agentPhone:    p.agentPhone ?? null,
-            brokerName:    p.brokerName ?? null,
-          })));
+        if (!error && data?.properties?.length > 0) {
+          areaHistory[area] = Date.now();
+          saveAreaHistory(areaHistory);
+          for (const p of data.properties) {
+            const key = p.zpid || (p.address + p.zipcode);
+            if (key && seen.has(key)) continue;
+            if (key) seen.add(key);
+            allRaw.push({
+              zpid:          p.zpid ?? '',
+              address:       p.address ?? '',
+              city:          p.city ?? '',
+              state:         p.state ?? '',
+              zipcode:       p.zipcode ?? '',
+              price:         p.price ?? 0,
+              zestimate:     p.zestimate ?? null,
+              rentZestimate: p.rentZestimate ?? null,
+              daysOnZillow:  p.daysOnZillow ?? null,
+              bedrooms:      p.bedrooms ?? null,
+              bathrooms:     p.bathrooms ?? null,
+              sqft:          p.sqft ?? null,
+              yearBuilt:     p.yearBuilt ?? null,
+              propertyType:  p.propertyType ?? null,
+              imgSrc:        p.imgSrc ?? null,
+              detailUrl:     p.detailUrl ?? null,
+              agentName:     p.agentName ?? null,
+              agentEmail:    p.agentEmail ?? null,
+              agentPhone:    p.agentPhone ?? null,
+              brokerName:    p.brokerName ?? null,
+            });
+          }
+        } else if (error) {
+          console.warn(`Scan error for ${area}:`, error.message);
         }
-      } catch (e) { console.error(`ZIP ${zip}:`, e); }
-
-      if (i < zips.length - 1) await new Promise(r => setTimeout(r, 300));
+      } catch (e) { console.error(`Scan error for ${area}:`, e); }
     }
 
     const filtered = filterListings(allRaw);
     setTotalScanned(allRaw.length);
     setScanProgress(null);
 
-    // Batch dedup check
+    // Batch dedup check against existing deals
     const addresses = filtered.map(r => [r.address, r.city, r.state, r.zipcode].filter(Boolean).join(', '));
     const { data: existing } = await supabase
       .from('deals')
@@ -316,103 +413,34 @@ export default function MarketScanPage() {
     }));
 
     setResults(withDedup);
-    setStage(2);
-    toast.success(`Scan complete — ${filtered.length} properties passed filters`);
-  }, []);
-
-  // ── AI Screen ─────────────────────────────────────────────────────────────
-
-  const runAiScreen = useCallback(async () => {
-    // Only send to AI if we have the minimum required data
-    const toCheck = results.filter(r =>
-      !r.excluded &&
-      (!r.alreadyAnalyzed || r.includeAnyway) &&
-      r.price > 0 &&
-      r.zestimate && r.zestimate > 0 &&
-      r.rentZestimate && r.rentZestimate > 0 &&
-      r.margin >= 0.20
-    );
-    if (!toCheck.length) {
-      toast.error('No properties with complete data (ARV + rent + margin ≥ 20%) to screen');
-      return;
-    }
-
-    aiAbortRef.current = false;
-    setStage(3);
-    setAiProgress({ current: 0, total: toCheck.length });
-
-    // Mark all as pending
-    setResults(prev => prev.map(r => {
-      if (!r.excluded && (!r.alreadyAnalyzed || r.includeAnyway)) {
-        return { ...r, aiResult: { status: 'pending', type: '', summary: '' } };
-      }
-      return r;
-    }));
-
-    const updatedMap = new Map<string, AiResult>();
-
-    for (let i = 0; i < toCheck.length; i++) {
-      if (aiAbortRef.current) break;
-      const r = toCheck[i];
-      setAiProgress({ current: i + 1, total: toCheck.length });
-
-      try {
-        const { data, error } = await supabase.functions.invoke('scout-ai-analyze', {
-          body: {
-            deal: {
-              address: [r.address, r.city, r.state, r.zipcode].filter(Boolean).join(', '),
-              price: r.price,
-              zpid: r.zpid,
-              beds: r.bedrooms,
-              baths: r.bathrooms,
-              sqft: r.sqft,
-              arv: r.zestimate,
-              rent: r.rentZestimate,
-              score: r.dealScore,
-              zip: r.zipcode,
-              days_on_market: r.daysOnZillow,
-            },
-          },
-        });
-
-        if (error || !data) {
-          updatedMap.set(r.zpid, { status: 'error', type: 'unknown', summary: 'API error', raw: undefined });
-        } else {
-          const isGood = data.isHabitableStructure !== false &&
-            !['land', 'fire_damaged', 'teardown'].includes(data.propertyTypeDetected);
-          updatedMap.set(r.zpid, {
-            status: isGood ? 'pass' : 'fail',
-            type: data.propertyTypeDetected || 'house',
-            summary: data.rehabAnalysis?.scopeDetails || data.arvAnalysis?.reasoning || '',
-            raw: data,
-          });
-        }
-      } catch {
-        updatedMap.set(r.zpid, { status: 'error', type: 'unknown', summary: 'Error', raw: undefined });
-      }
-
-      setResults(prev => prev.map(item => {
-        const upd = updatedMap.get(item.zpid);
-        return upd ? { ...item, aiResult: upd } : item;
-      }));
-
-      if (i < toCheck.length - 1) await new Promise(r => setTimeout(r, 500));
-    }
-
-    setAiProgress(null);
     setStage(4);
-    const passed = [...updatedMap.values()].filter(v => v.status === 'pass').length;
-    const failed = [...updatedMap.values()].filter(v => v.status === 'fail').length;
-    toast.success(`AI screen done — ${passed} passed, ${failed} rejected`);
-  }, [results]);
+    const areaLabel = toScan.length === 1 ? toScan[0] : `${toScan.length} areas`;
+    toast.success(`Scan complete — ${filtered.length} properties from ${areaLabel}`);
+  }, [scanCooldownDays]);
 
   // ── Send to DealBeast ─────────────────────────────────────────────────────
 
   const sendToDealBeast = useCallback(async () => {
-    const candidates = aiPassed.length > 0 ? aiPassed : nonDupeResults;
+    const candidates = nonDupeResults;
+    const eligible = candidates.filter(r => r.price > 0 && r.address && !sentZpids.has(r.zpid));
 
-    // DealBeast fetches all data from the address itself — only require a valid address + price
-    const toAnalyze = candidates.filter(r => r.price > 0 && r.address);
+    // Primary pool: score >= MIN_DEAL_SCORE
+    const primary = eligible.filter(r => r.dealScore >= MIN_DEAL_SCORE).slice(0, maxToSend);
+    // If primary pool is thin, fill remaining slots from next-best unanalyzed
+    const toAnalyze = primary.length >= maxToSend
+      ? primary
+      : [
+          ...primary,
+          ...eligible
+            .filter(r => r.dealScore < MIN_DEAL_SCORE && !primary.includes(r))
+            .slice(0, maxToSend - primary.length),
+        ];
+
+    setSentZpids(prev => {
+      const next = new Set(prev);
+      toAnalyze.forEach(r => next.add(r.zpid));
+      return next;
+    });
 
     if (!toAnalyze.length) {
       toast.error('No properties with a valid address to analyze');
@@ -474,7 +502,7 @@ export default function MarketScanPage() {
         action: { label: 'View Deals', onClick: () => navigate('/deals') },
       });
     }
-  }, [aiPassed, nonDupeResults, navigate]);
+  }, [nonDupeResults, navigate, sentZpids, maxToSend]);
 
   // ── Toggle helpers ────────────────────────────────────────────────────────
 
@@ -498,7 +526,6 @@ export default function MarketScanPage() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   const scanInProgress = scanProgress !== null;
-  const aiRunning = stage === 3;
   const dbRunning = stage === 5;
 
   return (
@@ -514,15 +541,26 @@ export default function MarketScanPage() {
               Atlanta Metro
             </Badge>
           </div>
-          <div className="text-xs text-muted-foreground">
-            {DEFAULT_ZIPS.length} ZIPs · ${MIN_PRICE.toLocaleString()}–${MAX_PRICE.toLocaleString()} · {MIN_SQFT}–{MAX_SQFT} sqft
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span>${MIN_PRICE.toLocaleString()}–${MAX_PRICE.toLocaleString()} · {MIN_SQFT}–{MAX_SQFT} sqft</span>
+            <span className="flex items-center gap-1">
+              Cooldown:
+              <input
+                type="number" min={1} max={30}
+                value={scanCooldownDays}
+                onChange={e => setScanCooldownDays(Math.max(1, parseInt(e.target.value) || 1))}
+                className="w-8 h-5 text-center text-xs rounded border border-border/50 bg-background"
+              />
+              days ·{' '}
+              <span className="text-blue-400">{getAreasToScan(scanCooldownDays).length} areas due</span>
+            </span>
           </div>
         </div>
 
         {/* Pipeline indicator */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <PipelineStep
-            num={1} icon={ScanLine} label="Scan ZIPs"
+            num={1} icon={ScanLine} label="Scan Areas"
             colorClass="bg-blue-500/15 text-blue-400 border-blue-400/50"
             active={stage === 1}
             done={stage >= 2}
@@ -533,20 +571,12 @@ export default function MarketScanPage() {
             num={2} icon={Filter} label="Filter + Dedup"
             colorClass="bg-violet-500/15 text-violet-400 border-violet-400/50"
             active={stage === 2}
-            done={stage >= 3}
-            count={stage >= 2 ? `${visibleResults.length} results` : null}
-          />
-          <ArrowRight className="w-3 h-3 text-muted-foreground/30 flex-shrink-0" />
-          <PipelineStep
-            num={3} icon={Brain} label="AI Screen"
-            colorClass="bg-amber-500/15 text-amber-400 border-amber-400/50"
-            active={stage === 3}
             done={stage >= 4}
-            count={stage >= 4 ? `${aiPassed.length} passed` : null}
+            count={stage >= 4 ? `${visibleResults.length} results` : null}
           />
           <ArrowRight className="w-3 h-3 text-muted-foreground/30 flex-shrink-0" />
           <PipelineStep
-            num={4} icon={Zap} label="DealBeast"
+            num={3} icon={Zap} label="DealBeast"
             colorClass="bg-emerald-500/15 text-emerald-400 border-emerald-400/50"
             active={stage === 5}
             done={stage === 6}
@@ -556,98 +586,113 @@ export default function MarketScanPage() {
 
         {/* Action bar — one button per stage */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Stage 0–1: Scan */}
-          {(stage === 0 || stage === 1) && (
-            <Button
-              size="sm"
-              variant="default"
-              className="h-8 text-xs gap-1.5"
-              onClick={startScan}
-              disabled={scanInProgress || aiRunning || dbRunning}
-            >
-              {scanInProgress ? (
-                <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Scanning…</>
-              ) : (
-                <><ScanLine className="w-3.5 h-3.5" /> Scan</>
-              )}
-            </Button>
-          )}
-
-          {/* Stage 2–3: AI Screen */}
-          {(stage === 2 || stage === 3) && (
-            <Button
-              size="sm"
-              variant="default"
-              className="h-8 text-xs gap-1.5"
-              onClick={runAiScreen}
-              disabled={aiRunning || dbRunning || scanInProgress}
-            >
-              {aiRunning ? (
-                <><Loader2 className="w-3.5 h-3.5 animate-spin" /> AI Running…</>
-              ) : (
-                <><Brain className="w-3.5 h-3.5" /> Run AI Screen <span className="opacity-60">({nonDupeResults.length} to check)</span></>
-              )}
-            </Button>
-          )}
+          {/* Scan button — shown at all stages except DealBeast running */}
+          {stage !== 5 && (() => {
+            const dueCnt = getAreasToScan(scanCooldownDays).length;
+            const allOnCooldown = dueCnt === 0;
+            const nextMs = allOnCooldown ? getNextScanMs(scanCooldownDays) : null;
+            const nextDays = nextMs ? Math.ceil((nextMs - Date.now()) / 86_400_000) : null;
+            return (
+              <div className="flex items-center gap-1.5">
+                <Button
+                  size="sm"
+                  variant={stage === 0 ? 'default' : 'outline'}
+                  className={cn('h-8 text-xs gap-1.5', allOnCooldown && 'border-amber-500/60 text-amber-400 hover:bg-amber-500/10')}
+                  onClick={startScan}
+                  disabled={scanInProgress || dbRunning}
+                >
+                  {scanInProgress ? (
+                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Scanning…</>
+                  ) : (
+                    <><ScanLine className="w-3.5 h-3.5" /> Scan</>
+                  )}
+                </Button>
+                {allOnCooldown && !scanInProgress && (
+                  <span className="text-[10px] text-amber-400/80">
+                    All areas scanned · next in {nextDays ?? '?'}d
+                  </span>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Stage 4–5: DealBeast */}
           {(stage === 4 || stage === 5) && (
-            <Button
-              size="sm"
-              className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-              onClick={sendToDealBeast}
-              disabled={dbRunning || scanInProgress || aiRunning}
-            >
-              {dbRunning ? (
-                <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Analyzing…</>
-              ) : (
-                <><Zap className="w-3.5 h-3.5" /> Analyze in DealBeast <span className="opacity-70">({(aiPassed.length > 0 ? aiPassed : nonDupeResults).length} AI-passed)</span></>
-              )}
-            </Button>
-          )}
-
-          {/* Stage 6: Done — View Deals + Re-scan */}
-          {stage === 6 && (
-            <>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-muted-foreground">Top</span>
+                <input
+                  type="number" min={1} max={100}
+                  value={maxToSend}
+                  onChange={e => setMaxToSend(Math.max(1, parseInt(e.target.value) || 1))}
+                  disabled={dbRunning}
+                  className="w-12 h-7 text-center text-xs font-mono rounded border border-border/60 bg-background focus:outline-none focus:ring-1 focus:ring-emerald-500/50 disabled:opacity-40"
+                />
+              </div>
               <Button
                 size="sm"
                 className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
-                onClick={() => navigate('/deals')}
+                onClick={sendToDealBeast}
+                disabled={dbRunning || scanInProgress}
               >
-                <CheckCircle2 className="w-3.5 h-3.5" /> View Deals
+                {dbRunning ? (
+                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Analyzing…</>
+                ) : (
+                  <><Zap className="w-3.5 h-3.5" /> Analyze in DealBeast <span className="opacity-70">({Math.min(maxToSend, nonDupeResults.filter(r => r.dealScore >= MIN_DEAL_SCORE).length)} deals)</span></>
+                )}
               </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 text-xs gap-1.5"
-                onClick={startScan}
-                disabled={scanInProgress}
-              >
-                <ScanLine className="w-3.5 h-3.5" /> Re-scan
-              </Button>
-            </>
+            </div>
           )}
+
+          {/* Stage 6: Done — View Deals + Re-scan + more deals */}
+          {stage === 6 && (() => {
+            const candidates = nonDupeResults;
+            const remaining = candidates.filter(r => r.price > 0 && r.address && r.dealScore >= MIN_DEAL_SCORE && !sentZpids.has(r.zpid));
+            return (
+              <>
+                {remaining.length > 0 && (
+                  <div className="flex items-center gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-2.5 py-1">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span className="text-[11px] text-amber-300">{remaining.length} more interesting deal{remaining.length !== 1 ? 's' : ''}</span>
+                    <Button
+                      size="sm"
+                      className="h-6 text-[11px] gap-1 bg-amber-500 hover:bg-amber-600 text-white px-2"
+                      onClick={sendToDealBeast}
+                      disabled={dbRunning}
+                    >
+                      <Zap className="w-3 h-3" /> Send them
+                    </Button>
+                  </div>
+                )}
+                <Button
+                  size="sm"
+                  className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+                  onClick={() => navigate('/deals')}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" /> View Deals
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs gap-1.5"
+                  onClick={startScan}
+                  disabled={scanInProgress}
+                >
+                  <ScanLine className="w-3.5 h-3.5" /> Scan
+                </Button>
+              </>
+            );
+          })()}
         </div>
 
         {/* Scan progress */}
         {scanInProgress && scanProgress && (
           <div className="space-y-1">
             <div className="flex justify-between text-[11px] text-muted-foreground">
-              <span>Scanning ZIP {scanProgress.zip}…</span>
+              <span>Scanning {scanProgress.zip}…</span>
               <span>{scanProgress.current} / {scanProgress.total}</span>
             </div>
             <Progress value={(scanProgress.current / scanProgress.total) * 100} className="h-1" />
-          </div>
-        )}
-
-        {/* AI progress */}
-        {aiRunning && aiProgress && (
-          <div className="space-y-1">
-            <div className="flex justify-between text-[11px] text-muted-foreground">
-              <span>AI screening properties…</span>
-              <span>{aiProgress.current} / {aiProgress.total}</span>
-            </div>
-            <Progress value={(aiProgress.current / aiProgress.total) * 100} className="h-1 bg-amber-500/20 [&>[data-slot=progress-indicator]]:bg-amber-400" />
           </div>
         )}
 
@@ -668,7 +713,7 @@ export default function MarketScanPage() {
         {stage === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center p-8 text-muted-foreground gap-3">
             <MapPin className="w-10 h-10 text-blue-400/40" />
-            <p className="text-sm">Click <strong>Configure &amp; Scan</strong> to scan {DEFAULT_ZIPS.length} Atlanta ZIPs for deals.</p>
+            <p className="text-sm">Click <strong>Scan</strong> to search Atlanta, GA metro for deals.</p>
             <p className="text-xs opacity-60">Filters: ${MIN_PRICE.toLocaleString()}–${MAX_PRICE.toLocaleString()} · {MIN_SQFT}–{MAX_SQFT} sqft · {MIN_BEDS}+ beds · Built {MIN_YEAR}+ · ARV margin ≥ {((1 - MAX_PRICE_RATIO) * 100).toFixed(0)}%</p>
           </div>
         )}
@@ -676,7 +721,7 @@ export default function MarketScanPage() {
         {stage === 1 && (
           <div className="flex flex-col items-center justify-center h-full text-center p-8 text-muted-foreground gap-3">
             <Loader2 className="w-10 h-10 text-blue-400 animate-spin" />
-            <p className="text-sm">Scanning ZIPs…</p>
+            <p className="text-sm">Scanning Atlanta metro (~800 listings)…</p>
           </div>
         )}
 

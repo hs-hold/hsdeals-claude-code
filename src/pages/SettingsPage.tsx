@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useSettings, ThemeMode, DesignTheme, DefaultAnalysisView, LoanDefaults, getDefaultLoanDefaults } from '@/context/SettingsContext';
+import { useSettings, ThemeMode, DesignTheme, DefaultAnalysisView, LoanDefaults, getDefaultLoanDefaults, InvestmentScoreSettings } from '@/context/SettingsContext';
+import { DEFAULT_INVESTMENT_SCORE_SETTINGS } from '@/utils/investmentScore';
 import { useDeals } from '@/context/DealsContext';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -9,10 +10,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { 
-  Sun, Moon, Smartphone, Palette, Waves, Sunset, Trees, 
+import {
+  Sun, Moon, Smartphone, Palette, Waves, Sunset, Trees,
   Calculator, TrendingUp, Home, RefreshCw, RotateCcw, Save,
-  AlertTriangle, GripVertical, Star, ChevronDown, Loader2, Trash2
+  AlertTriangle, GripVertical, Star, ChevronDown, Loader2, Trash2, BarChart3
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
@@ -96,12 +97,13 @@ const analysisViewsConfig: Record<DefaultAnalysisView, { label: string; icon: Re
 };
 
 export default function SettingsPage() {
-  const { settings, updateSettings, updateLoanDefaults } = useSettings();
+  const { settings, updateSettings, updateLoanDefaults, updateInvestmentScoreSettings } = useSettings();
   const { deals, recalculateAllDealsFinancials, refetch } = useDeals();
   const systemDefaults = getDefaultLoanDefaults();
-  
+
   // Local state for editing
   const [localDefaults, setLocalDefaults] = useState<LoanDefaults>(settings.loanDefaults);
+  const [localScoreSettings, setLocalScoreSettings] = useState<InvestmentScoreSettings>(settings.investmentScoreSettings);
   const [isRecalculating, setIsRecalculating] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -138,6 +140,40 @@ export default function SettingsPage() {
   useEffect(() => {
     setLocalDefaults(settings.loanDefaults);
   }, [settings.loanDefaults]);
+
+  useEffect(() => {
+    setLocalScoreSettings(settings.investmentScoreSettings);
+  }, [settings.investmentScoreSettings]);
+
+  const handleScoreSettingChange = (key: keyof InvestmentScoreSettings, value: string) => {
+    const num = parseFloat(value);
+    if (!isNaN(num)) setLocalScoreSettings(prev => ({ ...prev, [key]: num }));
+  };
+
+  const handleSaveScoreSettings = () => {
+    updateInvestmentScoreSettings(localScoreSettings);
+    toast.success('Investment Score settings saved');
+  };
+
+  const handleResetScoreSettings = () => {
+    setLocalScoreSettings(DEFAULT_INVESTMENT_SCORE_SETTINGS);
+    updateInvestmentScoreSettings(DEFAULT_INVESTMENT_SCORE_SETTINGS);
+    toast.success('Investment Score settings reset to defaults');
+  };
+
+  const scoreSettingsDirty = useMemo(() =>
+    JSON.stringify(localScoreSettings) !== JSON.stringify(settings.investmentScoreSettings),
+    [localScoreSettings, settings.investmentScoreSettings]
+  );
+
+  const effectiveWeights = useMemo(() => {
+    const total = localScoreSettings.cashFlowWeight + localScoreSettings.equityWeight + localScoreSettings.locationWeight || 1;
+    return {
+      cashFlow: Math.round(localScoreSettings.cashFlowWeight / total * 100),
+      equity: Math.round(localScoreSettings.equityWeight / total * 100),
+      location: Math.round(localScoreSettings.locationWeight / total * 100),
+    };
+  }, [localScoreSettings]);
 
   const handleFieldChange = (key: LoanDefaultKey, value: string) => {
     const numValue = parseFloat(value) || 0;
@@ -615,6 +651,98 @@ export default function SettingsPage() {
               </div>
             </CollapsibleContent>
           </Collapsible>
+        </CardContent>
+      </Card>
+
+      {/* Investment Score Settings */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+              <BarChart3 className="w-5 h-5 text-emerald-500" />
+            </div>
+            <div>
+              <CardTitle className="text-lg">Investment Decision Score</CardTitle>
+              <CardDescription>Configure how the 1–10 BRRRR deal score is calculated</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Buy Threshold */}
+          <div className="space-y-2">
+            <h5 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Decision Threshold</h5>
+            <div className="border rounded-lg bg-background divide-y divide-border">
+              <div className="flex items-center justify-between px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium">Buy Threshold</p>
+                  <p className="text-xs text-muted-foreground">Minimum score to show "✓ Buy" (was 8, now {localScoreSettings.buyThreshold})</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={4}
+                    max={9.5}
+                    step={0.5}
+                    value={localScoreSettings.buyThreshold}
+                    onChange={e => handleScoreSettingChange('buyThreshold', e.target.value)}
+                    className="w-20 text-right"
+                  />
+                  <span className="text-xs text-muted-foreground">/10</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Weights */}
+          <div className="space-y-2">
+            <h5 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Parameter Weights
+              <span className="ml-2 font-normal normal-case text-foreground/50">
+                (effective: {effectiveWeights.cashFlow}% / {effectiveWeights.equity}% / {effectiveWeights.location}%)
+              </span>
+            </h5>
+            <div className="border rounded-lg bg-background divide-y divide-border">
+              {([
+                { key: 'cashFlowWeight' as const, label: 'Cash Flow', desc: 'Monthly cashflow + CoC return', pct: effectiveWeights.cashFlow },
+                { key: 'equityWeight' as const, label: 'Equity', desc: 'ARV − Purchase − Rehab', pct: effectiveWeights.equity },
+                { key: 'locationWeight' as const, label: 'Location', desc: 'School score + Inventory months', pct: effectiveWeights.location },
+              ]).map(({ key, label, desc, pct }) => (
+                <div key={key} className="flex items-center justify-between px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium">{label}</p>
+                    <p className="text-xs text-muted-foreground">{desc}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground w-8 text-right">{pct}%</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={100}
+                      step={1}
+                      value={localScoreSettings[key]}
+                      onChange={e => handleScoreSettingChange(key, e.target.value)}
+                      className="w-20 text-right"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground pl-1">
+              Enter any relative numbers — the system normalizes them automatically. Equal weights = same number for all three.
+            </p>
+          </div>
+
+          {/* Save / Reset */}
+          <div className="flex justify-between items-center pt-1">
+            <Button variant="ghost" size="sm" onClick={handleResetScoreSettings} className="text-muted-foreground">
+              <RotateCcw className="w-4 h-4 mr-2" />
+              Reset to defaults
+            </Button>
+            <Button onClick={handleSaveScoreSettings} disabled={!scoreSettingsDirty} size="sm">
+              <Save className="w-4 h-4 mr-2" />
+              Save Score Settings
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

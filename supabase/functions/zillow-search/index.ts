@@ -5,8 +5,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
-const RAPIDAPI_HOST = 'real-estate101.p.rapidapi.com';
-const RAPIDAPI_BASE = `https://${RAPIDAPI_HOST}`;
+const RAPIDAPI_HOST = 'us-real-estate-listings.p.rapidapi.com';
+
+// Filters the API supports server-side (verified by testing):
+//   price_min, price_max, beds_min, beds_max, baths_min, property_type
+// Everything else is applied client-side after fetching.
 
 interface SearchFilters {
   location: string;
@@ -29,7 +32,6 @@ interface SearchFilters {
   homeType?: string;
   listType?: string;
   page?: number;
-  // Boolean filters
   isComingSoon?: boolean;
   isForSaleForeclosure?: boolean;
   isAuction?: boolean;
@@ -40,195 +42,191 @@ interface SearchFilters {
   is3dHome?: boolean;
   isBasementFinished?: boolean;
   isBasementUnfinished?: boolean;
-  // View filters
   isWaterView?: boolean;
   isParkView?: boolean;
   isCityView?: boolean;
   isMountainView?: boolean;
 }
 
-serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+/** Days since an ISO date string */
+function daysSince(isoDate: string | null | undefined): number | null {
+  if (!isoDate) return null;
+  try {
+    const diffMs = Date.now() - new Date(isoDate).getTime();
+    return Math.max(0, Math.floor(diffMs / 86_400_000));
+  } catch {
+    return null;
   }
+}
+
+/** Extract first advertiser's contact info */
+function extractAgentInfo(listing: any) {
+  const agent = (listing.advertisers || [])[0] || {};
+  return {
+    agentName:  agent.name || null,
+    agentEmail: agent.email || null,
+    agentPhone: agent.phones?.[0]?.number || null,
+    brokerName: agent.office?.name || null,
+  };
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
   try {
     const filters: SearchFilters = await req.json();
-    
-    console.log('Searching properties with filters:', filters);
+
+    if (!filters.location) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'location is required' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     const apiKey = Deno.env.get('RAPIDAPI_KEY');
     if (!apiKey) {
-      console.error('RAPIDAPI_KEY not configured');
       return new Response(
         JSON.stringify({ success: false, error: 'API key not configured' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Build query parameters for real-estate101 API
-    const params = new URLSearchParams();
-    
-    // Required: location
-    params.append('location', filters.location.trim());
-    
-    // Pagination
-    params.append('page', (filters.page || 1).toString());
-    
-    // List type (for-sale, for-rent)
-    if (filters.listType) {
-      params.append('listType', filters.listType);
-    }
-    
-    // Price range
-    if (filters.minPrice) params.append('minPrice', filters.minPrice.toString());
-    if (filters.maxPrice) params.append('maxPrice', filters.maxPrice.toString());
-    
-    // Beds & Baths
-    if (filters.minBeds) params.append('beds', filters.minBeds.toString());
-    if (filters.minBaths) params.append('baths', filters.minBaths.toString());
-    
-    // Square feet
-    if (filters.minSqft) params.append('minSqft', filters.minSqft.toString());
-    if (filters.maxSqft) params.append('maxSqft', filters.maxSqft.toString());
-    
-    // Lot size
-    if (filters.minLotSize) params.append('minLot', filters.minLotSize.toString());
-    if (filters.maxLotSize) params.append('maxLot', filters.maxLotSize.toString());
-    
-    // Year built
-    if (filters.minYearBuilt) params.append('minBuilt', filters.minYearBuilt.toString());
-    if (filters.maxYearBuilt) params.append('maxBuilt', filters.maxYearBuilt.toString());
-    
-    // Days on market
-    if (filters.maxDaysOnMarket) params.append('daysOnZillow', filters.maxDaysOnMarket.toString());
-    
-    // HOA
-    if (filters.maxHOA) params.append('maxHOA', filters.maxHOA.toString());
-    
-    // Parking
-    if (filters.parkingSpots) params.append('parkingSpots', filters.parkingSpots.toString());
-    
-    // Property type filters
+    const params = new URLSearchParams({ location: filters.location.trim() });
+
+    // Server-side filters (verified working)
+    if (filters.minPrice) params.append('price_min', String(filters.minPrice));
+    if (filters.maxPrice) params.append('price_max', String(filters.maxPrice));
+    if (filters.minBeds)  params.append('beds_min',  String(filters.minBeds));
+    if (filters.maxBeds)  params.append('beds_max',  String(filters.maxBeds));
+    if (filters.minBaths) params.append('baths_min', String(filters.minBaths));
+
     if (filters.homeType) {
       const typeMap: Record<string, string> = {
-        'SingleFamily': 'isSingleFamily',
-        'Condo': 'isCondo',
-        'Townhouse': 'isTownhouse',
-        'Apartment': 'isApartment',
-        'LotLand': 'isLotLand',
-        'Manufactured': 'isManufactured',
+        'SingleFamily': 'single_family',
+        'Condo':        'condos',
+        'Townhouse':    'townhomes',
+        'MultiFamily':  'multi_family',
       };
-      const paramName = typeMap[filters.homeType];
-      if (paramName) {
-        params.append(paramName, 'true');
+      const t = typeMap[filters.homeType];
+      if (t) params.append('property_type', t);
+    }
+
+    params.append('limit', '42'); // API hard-caps at ~42 per page regardless of higher values
+
+    // 1 page per city (~42 listings, already filtered server-side)
+    const pageCount = 1;
+
+    let firstPageError: string | null = null;
+    let firstPageRaw: any = null;
+
+    const fetchPage = async (page: number) => {
+      const p = new URLSearchParams(params);
+      if (page > 1) p.set('page', String(page));
+      const url = `https://${RAPIDAPI_HOST}/for-sale?${p}`;
+      console.log(`Calling page ${page}:`, url);
+      const r = await fetch(url, {
+        headers: { 'X-RapidAPI-Key': apiKey, 'X-RapidAPI-Host': RAPIDAPI_HOST },
+      });
+      if (!r.ok) {
+        const body = await r.text();
+        console.error(`API error page ${page}:`, r.status, body);
+        if (page === 1) firstPageError = `HTTP ${r.status}: ${body.slice(0, 200)}`;
+        return [];
+      }
+      try {
+        const d = await r.json();
+        if (page === 1) firstPageRaw = { keys: Object.keys(d), listingsCount: (d?.listings || []).length, statusSample: (d?.listings || []).slice(0,2).map((l: any) => l.status) };
+        return (d?.listings || []).filter((l: any) => l.status === 'for_sale');
+      } catch (e) {
+        if (page === 1) firstPageError = String(e);
+        return [];
+      }
+    };
+
+    // Fetch all pages in parallel
+    const pages = await Promise.all(Array.from({ length: pageCount }, (_, i) => fetchPage(i + 1)));
+
+    // Deduplicate by property_id / listing_id
+    const seen = new Set<string>();
+    const rawList: any[] = [];
+    for (const page of pages) {
+      for (const l of page) {
+        const key = l.property_id || l.listing_id;
+        if (key && !seen.has(key)) { seen.add(key); rawList.push(l); }
       }
     }
-    
-    // Boolean filters
-    if (filters.isComingSoon) params.append('isComingSoon', 'true');
-    if (filters.isForSaleForeclosure) params.append('isForSaleForeclosure', 'true');
-    if (filters.isAuction) params.append('isAuction', 'true');
-    if (filters.isOpenHousesOnly) params.append('isOpenHousesOnly', 'true');
-    if (filters.singleStory) params.append('singleStory', 'true');
-    if (filters.hasPool) params.append('hasPool', 'true');
-    if (filters.hasGarage) params.append('hasGarage', 'true');
-    if (filters.is3dHome) params.append('is3dHome', 'true');
-    if (filters.isBasementFinished) params.append('isBasementFinished', 'true');
-    if (filters.isBasementUnfinished) params.append('isBasementUnfinished', 'true');
-    
-    // View filters
-    if (filters.isWaterView) params.append('isWaterView', 'true');
-    if (filters.isParkView) params.append('isParkView', 'true');
-    if (filters.isCityView) params.append('isCityView', 'true');
-    if (filters.isMountainView) params.append('isMountainView', 'true');
 
-    const url = `${RAPIDAPI_BASE}/api/search?${params.toString()}`;
-    console.log('Calling RapidAPI:', url);
+    console.log(`pages=${pageCount} raw=${rawList.length}`);
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'X-RapidAPI-Key': apiKey,
-        'X-RapidAPI-Host': RAPIDAPI_HOST,
-      },
+    // Map to the shape all callers expect
+    const mapped = rawList.map((l: any) => {
+      const addr  = l.location?.address || {};
+      const desc  = l.description || {};
+      const agent = extractAgentInfo(l);
+      const price = l.list_price || 0;
+      const dom   = daysSince(l.list_date);
+
+      return {
+        zpid:             l.property_id || l.listing_id,
+        address:          addr.line || '',
+        city:             addr.city || '',
+        state:            addr.state_code || '',
+        zipcode:          addr.postal_code || '',
+        price,
+        bedrooms:         desc.beds   || null,
+        bathrooms:        desc.baths  || null,
+        sqft:             desc.sqft   || null,
+        lotSize:          desc.lot_sqft || null,
+        lotSizeUnit:      'sqft',
+        yearBuilt:        desc.year_built || null,
+        propertyType:     desc.type   || null,
+        daysOnZillow:     dom,                       // computed from list_date
+        imgSrc:           l.primary_photo?.href || null,
+        detailUrl:        l.href || null,
+        latitude:         addr.coordinate?.lat || null,
+        longitude:        addr.coordinate?.lon || null,
+        listingStatus:    l.status || 'for_sale',
+        zestimate:        null,
+        rentZestimate:    price > 0 ? Math.round(price * 0.007) : null,
+        taxAssessedValue: null,
+        // Agent info
+        agentName:        agent.agentName,
+        agentEmail:       agent.agentEmail,
+        agentPhone:       agent.agentPhone,
+        brokerName:       agent.brokerName,
+        description:      desc.text || null,
+      };
     });
 
-    console.log('RapidAPI response status:', response.status);
+    // Client-side filters for fields the API doesn't support server-side
+    const properties = mapped.filter(p => {
+      if (filters.minSqft        && p.sqft      != null && p.sqft      < filters.minSqft)        return false;
+      if (filters.maxSqft        && p.sqft      != null && p.sqft      > filters.maxSqft)        return false;
+      if (filters.minLotSize     && p.lotSize   != null && p.lotSize   < filters.minLotSize)     return false;
+      if (filters.maxLotSize     && p.lotSize   != null && p.lotSize   > filters.maxLotSize)     return false;
+      if (filters.minYearBuilt   && p.yearBuilt != null && p.yearBuilt < filters.minYearBuilt)   return false;
+      if (filters.maxYearBuilt   && p.yearBuilt != null && p.yearBuilt > filters.maxYearBuilt)   return false;
+      // Days on market: only filter when we know the value; unknown DOM always passes
+      if (filters.maxDaysOnMarket && p.daysOnZillow != null && p.daysOnZillow > filters.maxDaysOnMarket) return false;
+      if (filters.minDaysOnMarket && p.daysOnZillow != null && p.daysOnZillow < filters.minDaysOnMarket) return false;
+      return true;
+    });
 
-    const responseText = await response.text();
-    console.log('RapidAPI raw response:', responseText.substring(0, 500));
-
-    if (!response.ok) {
-      console.error('RapidAPI error:', response.status, responseText);
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: `API error: ${response.status}`,
-          details: responseText,
-          rawResponse: responseText
-        }),
-        { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    let data;
-    try {
-      data = JSON.parse(responseText);
-    } catch (e) {
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'Invalid JSON response',
-          rawResponse: responseText
-        }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    console.log('RapidAPI response received, properties:', data?.results?.length || 0);
-
-    // Transform the response to our format - API returns data in "results" array
-    const properties = (data?.results || []).map((prop: any) => ({
-      zpid: prop.id || prop.zpid,
-      address: prop.address?.street || prop.address || prop.streetAddress || '',
-      city: prop.address?.city || prop.city || '',
-      state: prop.address?.state || prop.state || '',
-      zipcode: prop.address?.zipcode || prop.zipcode || '',
-      price: prop.unformattedPrice || prop.price,
-      bedrooms: prop.beds || prop.bedrooms,
-      bathrooms: prop.baths || prop.bathrooms,
-      sqft: prop.livingArea || prop.area,
-      lotSize: prop.lotAreaValue,
-      lotSizeUnit: prop.lotAreaUnit,
-      yearBuilt: prop.yearBuilt,
-      propertyType: prop.homeType || prop.propertyType,
-      daysOnZillow: prop.daysOnZillow,
-      imgSrc: prop.imgSrc,
-      detailUrl: prop.detailUrl,
-      latitude: prop.latLong?.latitude || prop.latitude,
-      longitude: prop.latLong?.longitude || prop.longitude,
-      listingStatus: prop.homeStatus || prop.statusText || prop.listingStatus,
-      zestimate: prop.zestimate,
-      rentZestimate: prop.rentZestimate,
-      taxAssessedValue: prop.taxAssessedValue,
-    }));
+    console.log(`raw=${rawList.length} mapped=${mapped.length} after_filter=${properties.length} (dom_filter=${filters.maxDaysOnMarket ?? 'none'})`);
 
     return new Response(
       JSON.stringify({
         success: true,
-        totalResultCount: data?.totalCount || properties.length,
+        totalResultCount: properties.length,
         properties,
-        rawResponse: data,
+        _debug: { firstPageError, firstPageRaw },
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
-  } catch (error) {
-    console.error('Error in zillow-search function:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+  } catch (err) {
     return new Response(
-      JSON.stringify({ success: false, error: errorMessage }),
+      JSON.stringify({ success: false, error: err instanceof Error ? err.message : 'Unknown error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

@@ -22,7 +22,7 @@ async function getServiceKey(serviceName: string, envFallback: string): Promise<
   return Deno.env.get(envFallback) || null;
 }
 
-const RAPIDAPI_HOST = 'real-estate101.p.rapidapi.com';
+const RAPIDAPI_HOST = 'us-real-estate-listings.p.rapidapi.com';
 const MODEL      = 'claude-sonnet-4-5';
 const INPUT_CPM  = 0.003;
 const OUTPUT_CPM = 0.015;
@@ -73,60 +73,53 @@ serve(async (req) => {
     let photoCount            = 0;
 
     const fetches: Promise<any>[] = [
-      zip ? fetch(`https://${RAPIDAPI_HOST}/api/search?location=${zip}&isRecentlySold=true&isSingleFamily=true&page=1`, { headers: h }).then(r => r.json()).catch(() => ({})) : Promise.resolve({}),
-      zip ? fetch(`https://${RAPIDAPI_HOST}/api/search?location=${zip}&isSingleFamily=true&page=1`, { headers: h }).then(r => r.json()).catch(() => ({})) : Promise.resolve({}),
-      // Try property details by ZPID for description/photos
-      zpid ? fetch(`https://${RAPIDAPI_HOST}/api/property?zpid=${zpid}`, { headers: h }).then(r => r.json()).catch(() => null) : Promise.resolve(null),
+      // Active for-sale listings in ZIP (used as market context / comps)
+      zip ? fetch(`https://${RAPIDAPI_HOST}/for-sale?location=${zip}&limit=20`, { headers: h }).then(r => r.json()).catch(() => ({})) : Promise.resolve({}),
     ];
 
-    const [soldData, activeData, propData] = await Promise.all(fetches);
+    const [activeData] = await Promise.all(fetches);
 
-    soldComps      = (soldData?.results  || []).slice(0, 10);
-    activeListings = (activeData?.results || []).slice(0, 10);
+    // New API has for-sale only (no sold comps endpoint)
+    soldComps      = [];
+    activeListings = (activeData?.listings || [])
+      .filter((l: any) => l.status === 'for_sale')
+      .slice(0, 10)
+      .map((l: any) => {
+        const addr = l.location?.address || {};
+        const desc = l.description || {};
+        return {
+          zpid: l.property_id || l.listing_id,
+          id: l.property_id || l.listing_id,
+          unformattedPrice: l.list_price || 0,
+          price: l.list_price || 0,
+          area: desc.sqft || 0,
+          livingArea: desc.sqft || 0,
+          beds: desc.beds || 0,
+          baths: desc.baths || 0,
+          homeType: desc.type || '',
+          yearBuilt: desc.year_built || null,
+          address: { street: addr.line || '', city: addr.city || '' },
+          streetAddress: addr.line || '',
+          description: desc.text || '',
+        };
+      });
 
-    // ── Extract property details from propData ────────────────────────────────
-    if (propData && !propData.message) {
-      // Different API response shapes — try common patterns
-      const d = propData?.data || propData?.homeDetails || propData?.property || propData;
-      propertyDescription = d?.description || d?.remarks || d?.homeDescription || d?.listingDescription || '';
-      propertyType   = d?.homeType || d?.propertyType || d?.hdpData?.homeInfo?.homeType || '';
-      yearBuilt      = String(d?.yearBuilt || d?.hdpData?.homeInfo?.yearBuilt || '');
-      lotSize        = d?.lotAreaValue ? `${d.lotAreaValue} ${d.lotAreaUnit || 'sqft'}` : '';
-      photoCount     = (d?.photos || d?.images || []).length;
-    }
+    const propData = null; // Property detail lookup not available in new API
 
-    // If propData missing description, try to find the listing in active results
-    if (!propertyDescription && zpid) {
-      const fromActive = activeListings.find(
-        (p: any) => String(p.zpid||p.id) === String(zpid)
-      );
-      if (fromActive) {
-        propertyDescription = fromActive.description || fromActive.statusText || '';
-        propertyType = propertyType || fromActive.homeType || fromActive.homeTypeDimension || '';
-        yearBuilt    = yearBuilt    || String(fromActive.yearBuilt || '');
-      }
-    }
+    // ── Extract property details from active listings (no property detail endpoint in new API) ──
+    // Try to find the subject property by address match in active listings
+    const dealAddressNorm = (deal.address || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+    const matchedListing = activeListings.find((p: any) => {
+      const pAddr = ((p.address?.street || p.streetAddress || '') + ' ' + (p.address?.city || '')).toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+      return pAddr && dealAddressNorm && dealAddressNorm.includes(pAddr.split(' ')[0]);
+    });
 
-    // ── Check listing status ──────────────────────────────────────────────────
-    if (zpid) {
-      const subjectActive = activeListings.find((p: any) => String(p.zpid||p.id) === String(zpid));
-      const subjectSold   = soldComps.find((p: any) => String(p.zpid||p.id) === String(zpid));
-
-      if (subjectSold) {
-        propertyStatus = 'sold';
-        propertyStatusDetail = subjectSold.soldDate
-          ? `Sold ${subjectSold.soldDate} for ${subjectSold.unformattedPrice ? '$' + Number(subjectSold.unformattedPrice).toLocaleString() : 'unknown'}`
-          : 'Recently sold';
-      } else if (subjectActive) {
-        const hs = (subjectActive.homeStatus || '').toLowerCase();
-        if (hs.includes('pending') || hs.includes('contract')) {
-          propertyStatus = 'pending';
-          propertyStatusDetail = 'Under contract / Pending';
-        } else {
-          propertyStatus = 'for_sale';
-          propertyStatusDetail = 'Active for sale';
-        }
-      }
+    if (matchedListing) {
+      propertyDescription = matchedListing.description || '';
+      propertyType   = matchedListing.homeType || '';
+      yearBuilt      = matchedListing.yearBuilt ? String(matchedListing.yearBuilt) : '';
+      propertyStatus = 'for_sale';
+      propertyStatusDetail = 'Active for sale';
     }
 
     // ── Step 2: Format comps ──────────────────────────────────────────────────
@@ -151,7 +144,7 @@ serve(async (req) => {
 
     const compsText = soldFmt.length
       ? soldFmt.map(c => `  ${c.address} | $${(c.price/1000).toFixed(0)}k | ${c.beds}bd/${c.baths}ba | ${c.sqft}sf | $${c.pricePerSqft}/sf${c.soldDate ? ` | sold:${c.soldDate}` : ''}`).join('\n')
-      : `No data — use market knowledge for ZIP ${zip}`;
+      : `No recently-sold data available — estimate ARV using active listing comparables below and your market knowledge for ZIP ${zip}`;
 
     const activeText = activeFmt.length
       ? activeFmt.map(c => `  ${c.address} | $${(c.price/1000).toFixed(0)}k | ${c.beds}bd/${c.baths}ba | ${c.sqft}sf | $${c.pricePerSqft}/sf`).join('\n')

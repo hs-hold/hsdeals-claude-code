@@ -133,7 +133,7 @@ function mapToDealApiData(analysis: PropertyAnalysis, property?: PropertyData, a
 
     // Agent / Broker info — prefer DealBeast API data, fall back to listing API data
     agentName: property?.attributionInfo?.agentName ?? agentFallback?.agentName ?? null,
-    agentEmail: property?.attributionInfo?.agentEmail ?? agentFallback?.agentEmail ?? null,
+    agentEmail: property?.attributionInfo?.agentEmail ?? property?.attributionInfo?.listingAgentEmail ?? agentFallback?.agentEmail ?? null,
     agentPhone: property?.attributionInfo?.agentPhoneNumber ?? agentFallback?.agentPhone ?? null,
     agentLicense: property?.attributionInfo?.agentLicenseNumber ?? null,
     brokerName: property?.attributionInfo?.brokerName ?? agentFallback?.brokerName ?? null,
@@ -226,8 +226,8 @@ async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: Prope
       api_data: apiData,
       financials: financials,
       created_by: currentUser?.id || null,
-      scout_ai_data: scoutAiData || null,
       analyzed_at: new Date().toISOString(),
+      ...(scoutAiData ? { scout_ai_data: scoutAiData } : {}),
     };
 
     const { data: insertedDeal, error } = await supabase
@@ -238,13 +238,13 @@ async function saveDealToDb(analysisData: PropertyAnalysis, propertyData?: Prope
 
     if (error) {
       console.error('Error saving deal:', error);
-      return null;
+      throw new Error(error.message || 'Database insert failed');
     }
 
     return insertedDeal.id;
   } catch (err) {
-    console.error('Error:', err);
-    return null;
+    console.error('Error saving deal to DB:', err);
+    throw err;
   }
 }
 
@@ -283,7 +283,13 @@ export async function analyzeAndCreateDeal(address: string, scoutAiData?: Record
       return { dealId: null, error: apiResponse?.error || 'Analysis failed' };
     }
 
-    const dealId = await saveDealToDb(apiResponse.data.analysis, apiResponse.data.property, scoutAiData, agentFallback);
+    let dealId: string | null;
+    try {
+      dealId = await saveDealToDb(apiResponse.data.analysis, apiResponse.data.property, scoutAiData, agentFallback);
+    } catch (saveErr) {
+      const msg = saveErr instanceof Error ? saveErr.message : 'Database error';
+      return { dealId: null, error: `Property analyzed but failed to save: ${msg}` };
+    }
     if (!dealId) return { dealId: null, error: 'Property analyzed but failed to save' };
 
     return { dealId };

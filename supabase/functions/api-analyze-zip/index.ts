@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-api-key',
 };
 
-const RAPIDAPI_HOST = 'real-estate101.p.rapidapi.com';
+const RAPIDAPI_HOST = 'us-real-estate-listings.p.rapidapi.com';
 const RAPIDAPI_BASE = `https://${RAPIDAPI_HOST}`;
 const PARTNERS_API_BASE = 'https://partnersapi-6cqhbrsewa-uc.a.run.app';
 
@@ -630,18 +630,17 @@ async function handleZipMode(zipcode: string, body: any, supabase: any): Promise
   // Build search params with preset filters
   const searchParams = new URLSearchParams();
   searchParams.append('location', zipcode);
-  searchParams.append('page', '1');
-  searchParams.append('isSingleFamily', 'true');
-  searchParams.append('minPrice', (PRESET_FILTERS.minPrice).toString());
-  searchParams.append('maxPrice', (PRESET_FILTERS.maxPrice).toString());
-  searchParams.append('beds', (PRESET_FILTERS.minBeds).toString());
-  searchParams.append('baths', (PRESET_FILTERS.minBaths).toString());
-  searchParams.append('minSqft', (PRESET_FILTERS.minSqft).toString());
-  searchParams.append('maxSqft', (PRESET_FILTERS.maxSqft).toString());
+  searchParams.append('price_min', (PRESET_FILTERS.minPrice).toString());
+  searchParams.append('price_max', (PRESET_FILTERS.maxPrice).toString());
+  searchParams.append('beds_min', (PRESET_FILTERS.minBeds).toString());
+  searchParams.append('baths_min', (PRESET_FILTERS.minBaths).toString());
+  searchParams.append('sqft_min', (PRESET_FILTERS.minSqft).toString());
+  searchParams.append('sqft_max', (PRESET_FILTERS.maxSqft).toString());
+  searchParams.append('limit', '42');
 
   let searchResponse;
   try {
-    searchResponse = await fetch(`${RAPIDAPI_BASE}/api/search?${searchParams.toString()}`, {
+    searchResponse = await fetch(`${RAPIDAPI_BASE}/for-sale?${searchParams.toString()}`, {
       method: 'GET',
       headers: { 'X-RapidAPI-Key': rapidApiKey, 'X-RapidAPI-Host': RAPIDAPI_HOST },
     });
@@ -682,7 +681,32 @@ async function handleZipMode(zipcode: string, body: any, supabase: any): Promise
   }
 
   const searchData = await searchResponse.json();
-  const allProperties = searchData?.results || [];
+  // Filter for_sale only and normalize to internal format
+  const rawListings: any[] = (searchData?.listings || []).filter((l: any) => l.status === 'for_sale');
+  const allProperties = rawListings.map((l: any) => {
+    const addr = l.location?.address || {};
+    const desc = l.description || {};
+    return {
+      list_price: l.list_price || 0,
+      // Legacy field aliases used by downstream code
+      unformattedPrice: l.list_price || 0,
+      price: l.list_price || 0,
+      livingArea: desc.sqft || 0,
+      sqft: desc.sqft || 0,
+      beds: desc.beds || 0,
+      baths: desc.baths || 0,
+      homeType: desc.type || '',
+      yearBuilt: desc.year_built || null,
+      imgSrc: l.primary_photo?.href || null,
+      detailUrl: l.href || null,
+      address: {
+        street: addr.line || '',
+        city: addr.city || '',
+        state: addr.state_code || '',
+        zipcode: addr.postal_code || zipcode,
+      },
+    };
+  });
 
   if (allProperties.length === 0) {
     const noPropsPayload = { 
@@ -773,7 +797,7 @@ async function handleZipMode(zipcode: string, body: any, supabase: any): Promise
         const zip = p.address?.zipcode || p.zipcode || zipcode;
         return normalizeAddress(`${street}, ${city}, ${state} ${zip}`) === normalized;
       });
-      const currentPrice = matchingProp?.unformattedPrice || matchingProp?.price || 0;
+      const currentPrice = matchingProp?.list_price || matchingProp?.price || 0;
       
       if (currentPrice > 0 && currentPrice < existing.price) {
         priceDropAddresses.push(addr);

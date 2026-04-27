@@ -1,0 +1,1010 @@
+import { useState, useMemo, useCallback, Fragment } from 'react';
+import { calculateInvestmentScore } from '@/utils/investmentScore';
+import { useSettings } from '@/context/SettingsContext';
+import { Link } from 'react-router-dom';
+import { useDeals } from '@/context/DealsContext';
+import { Deal } from '@/types/deal';
+import {
+  analyzeAcquisition,
+  generateOfferEmail,
+  AcquisitionAnalysis,
+  ArvConfidence,
+  RehabConfidence,
+  RehabTier,
+  AtAskAnalysis,
+  TargetMaoAnalysis,
+  RiskAdjustedOffer,
+  FlipVerdict,
+  BrrrrVerdict,
+} from '@/utils/maoCalculations';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import {
+  ExternalLink,
+  Copy,
+  Check,
+  Mail,
+  AlertTriangle,
+  TrendingDown,
+  Target,
+  Clock,
+  ChevronDown,
+  ChevronUp,
+  Filter,
+  RefreshCw,
+} from 'lucide-react';
+import { toast } from 'sonner';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type OfferStatus = 'not_sent' | 'sent' | 'responded' | 'counter' | 'dead' | 'accepted';
+
+interface OfferRecord {
+  offerPrice: number | null;
+  offerDate: string | null;
+  status: OfferStatus;
+  agentResponse: string;
+  counterPrice: number | null;
+  nextFollowUp: string | null;
+  notes: string;
+  numbersReviewed: boolean;
+}
+
+const EMPTY_OFFER: OfferRecord = {
+  offerPrice: null,
+  offerDate: null,
+  status: 'not_sent',
+  agentResponse: '',
+  counterPrice: null,
+  nextFollowUp: null,
+  notes: '',
+  numbersReviewed: false,
+};
+
+// ─── localStorage helpers ──────────────────────────────────────────────────────
+
+function loadOffer(dealId: string): OfferRecord {
+  try {
+    const raw = localStorage.getItem(`acq_offer_${dealId}`);
+    return raw ? { ...EMPTY_OFFER, ...JSON.parse(raw) } : { ...EMPTY_OFFER };
+  } catch {
+    return { ...EMPTY_OFFER };
+  }
+}
+
+function saveOffer(dealId: string, record: OfferRecord) {
+  localStorage.setItem(`acq_offer_${dealId}`, JSON.stringify(record));
+}
+
+// ─── Formatting helpers ────────────────────────────────────────────────────────
+
+function fmt(n: number | null | undefined): string {
+  if (n == null) return '—';
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
+}
+
+function fmtShort(n: number | null | undefined): string {
+  if (n == null) return '—';
+  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `$${Math.round(n / 1_000)}K`;
+  return `$${n}`;
+}
+
+// ─── Badge components ──────────────────────────────────────────────────────────
+
+function ArvBadge({ confidence, reason }: { confidence: ArvConfidence; reason: string }) {
+  const styles: Record<ArvConfidence, string> = {
+    green: 'bg-green-500/15 text-green-400 border-green-500/30',
+    yellow: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+    red: 'bg-red-500/15 text-red-400 border-red-500/30',
+  };
+  const labels: Record<ArvConfidence, string> = {
+    green: 'ARV Strong',
+    yellow: 'ARV Moderate',
+    red: 'ARV Weak',
+  };
+  return (
+    <Tooltip>
+      <TooltipTrigger>
+        <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${styles[confidence]}`}>
+          {labels[confidence]}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{reason}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function RehabBadge({ confidence, signals }: { confidence: RehabConfidence; signals: string[] }) {
+  const styles: Record<RehabConfidence, string> = {
+    high: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+    medium: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+    low: 'bg-red-500/15 text-red-400 border-red-500/30',
+  };
+  const labels: Record<RehabConfidence, string> = {
+    high: 'Rehab Confident',
+    medium: 'Rehab Uncertain',
+    low: 'Rehab Unknown',
+  };
+  const tip = signals.length > 0 ? signals.join(', ') : 'No major risk signals';
+  return (
+    <Tooltip>
+      <TooltipTrigger>
+        <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${styles[confidence]}`}>
+          {labels[confidence]}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-[240px]">{tip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function TierLabel({ tier }: { tier: RehabTier }) {
+  const labels: Record<RehabTier, string> = {
+    cosmetic: 'Cosmetic',
+    light: 'Light Rehab',
+    medium: 'Medium Rehab',
+    heavy: 'Heavy Rehab',
+    full_gut: 'Full Gut',
+    unknown: 'Unknown',
+  };
+  return <span className="text-muted-foreground">{labels[tier]}</span>;
+}
+
+function OfferStatusBadge({ status }: { status: OfferStatus }) {
+  const cfg: Record<OfferStatus, { label: string; cls: string }> = {
+    not_sent: { label: 'No Offer', cls: 'bg-muted text-muted-foreground' },
+    sent: { label: 'Offer Sent', cls: 'bg-blue-500/15 text-blue-400' },
+    responded: { label: 'Responded', cls: 'bg-yellow-500/15 text-yellow-400' },
+    counter: { label: 'Counter', cls: 'bg-orange-500/15 text-orange-400' },
+    dead: { label: 'Dead', cls: 'bg-red-500/15 text-red-400' },
+    accepted: { label: 'Accepted!', cls: 'bg-green-500/15 text-green-400' },
+  };
+  const { label, cls } = cfg[status];
+  return <Badge className={`text-xs ${cls}`}>{label}</Badge>;
+}
+
+// ─── MAO Box ──────────────────────────────────────────────────────────────────
+
+function MaoBox({
+  label,
+  value,
+  listPrice,
+  highlight,
+}: {
+  label: string;
+  value: number | null;
+  listPrice: number;
+  highlight?: boolean;
+}) {
+  const gap = value != null ? listPrice - value : null;
+  const isNegative = value == null || value <= 0;
+  return (
+    <div className={`rounded-lg border p-3 text-center ${highlight ? 'border-primary/50 bg-primary/5' : 'border-border bg-card'}`}>
+      <div className="text-xs text-muted-foreground mb-1">{label}</div>
+      <div className={`text-lg font-bold ${isNegative ? 'text-destructive' : highlight ? 'text-primary' : 'text-foreground'}`}>
+        {isNegative ? 'No deal' : fmtShort(value)}
+      </div>
+      {gap != null && value != null && (
+        <div className={`text-xs mt-0.5 ${gap > 0 ? 'text-red-400' : 'text-green-400'}`}>
+          {gap > 0 ? `${fmtShort(gap)} gap` : 'Works!'}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Offer Form ───────────────────────────────────────────────────────────────
+
+function OfferForm({
+  dealId,
+  record,
+  onChange,
+}: {
+  dealId: string;
+  record: OfferRecord;
+  onChange: (r: OfferRecord) => void;
+}) {
+  const update = (patch: Partial<OfferRecord>) => {
+    const next = { ...record, ...patch };
+    onChange(next);
+    saveOffer(dealId, next);
+  };
+
+  return (
+    <div className="grid grid-cols-2 gap-3 pt-3 border-t border-border">
+      <div>
+        <Label className="text-xs text-muted-foreground mb-1 block">Offer Price</Label>
+        <Input
+          type="number"
+          placeholder="$85,000"
+          value={record.offerPrice ?? ''}
+          onChange={e => update({ offerPrice: e.target.value ? Number(e.target.value) : null })}
+          className="h-8 text-sm"
+        />
+      </div>
+      <div>
+        <Label className="text-xs text-muted-foreground mb-1 block">Date Sent</Label>
+        <Input
+          type="date"
+          value={record.offerDate ?? ''}
+          onChange={e => update({ offerDate: e.target.value || null })}
+          className="h-8 text-sm"
+        />
+      </div>
+      <div>
+        <Label className="text-xs text-muted-foreground mb-1 block">Status</Label>
+        <Select value={record.status} onValueChange={v => update({ status: v as OfferStatus })}>
+          <SelectTrigger className="h-8 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="not_sent">No Offer</SelectItem>
+            <SelectItem value="sent">Offer Sent</SelectItem>
+            <SelectItem value="responded">Agent Responded</SelectItem>
+            <SelectItem value="counter">Counter Received</SelectItem>
+            <SelectItem value="dead">Dead</SelectItem>
+            <SelectItem value="accepted">Accepted!</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <Label className="text-xs text-muted-foreground mb-1 block">Follow-up Date</Label>
+        <Input
+          type="date"
+          value={record.nextFollowUp ?? ''}
+          onChange={e => update({ nextFollowUp: e.target.value || null })}
+          className="h-8 text-sm"
+        />
+      </div>
+      {(record.status === 'responded' || record.status === 'counter') && (
+        <div>
+          <Label className="text-xs text-muted-foreground mb-1 block">Counter Price</Label>
+          <Input
+            type="number"
+            placeholder="$120,000"
+            value={record.counterPrice ?? ''}
+            onChange={e => update({ counterPrice: e.target.value ? Number(e.target.value) : null })}
+            className="h-8 text-sm"
+          />
+        </div>
+      )}
+      <div className="col-span-2">
+        <Label className="text-xs text-muted-foreground mb-1 block">Agent Response / Notes</Label>
+        <Textarea
+          placeholder="What did the agent say?"
+          value={record.agentResponse}
+          onChange={e => update({ agentResponse: e.target.value })}
+          className="text-sm min-h-[60px] resize-none"
+        />
+      </div>
+    </div>
+  );
+}
+
+// ─── Email Modal ──────────────────────────────────────────────────────────────
+
+function EmailModal({
+  open,
+  onClose,
+  emailText,
+}: {
+  open: boolean;
+  onClose: () => void;
+  emailText: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(emailText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    toast.success('Copied to clipboard');
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Offer Email Draft</DialogTitle>
+        </DialogHeader>
+        <Textarea
+          value={emailText}
+          readOnly
+          className="min-h-[280px] font-mono text-sm resize-none"
+        />
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>Close</Button>
+          <Button onClick={copy}>
+            {copied ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
+            {copied ? 'Copied!' : 'Copy Email'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Deal Card ────────────────────────────────────────────────────────────────
+
+function AcquisitionCard({ deal }: { deal: Deal }) {
+  const analysis = useMemo(() => analyzeAcquisition(deal), [deal]);
+  const [offer, setOffer] = useState<OfferRecord>(() => loadOffer(deal.id));
+  const [expanded, setExpanded] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailText, setEmailText] = useState('');
+
+  const toggleReviewed = () => {
+    const next = { ...offer, numbersReviewed: !offer.numbersReviewed };
+    setOffer(next);
+    saveOffer(deal.id, next);
+  };
+
+  const openEmail = () => {
+    if (!analysis) return;
+    const price = offer.offerPrice ?? analysis.safeOfferHigh ?? analysis.riskAdjustedOffer.conservative ?? 0;
+    setEmailText(generateOfferEmail(deal, analysis, price));
+    setEmailOpen(true);
+  };
+
+  const [brrrrExpanded, setBrrrrExpanded] = useState(false);
+
+  if (!analysis) {
+    return (
+      <Card className="opacity-50">
+        <CardContent className="py-4 text-sm text-muted-foreground">
+          {deal.address.full} — missing ARV or list price
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const { arvAnalysis, rehabAnalysis, atAsk, targetMao, riskAdjustedOffer, flipVerdict, brrrrVerdict, safeOfferLow, safeOfferHigh } = analysis;
+  const isHighRisk = arvAnalysis.confidence === 'red' || rehabAnalysis.confidence === 'low';
+  const dealWorksAtAsk = atAsk.verdict === 'strong_flip' || atAsk.verdict === 'target_met' || atAsk.verdict === 'near_target';
+  const discountPct = targetMao.discountPctNeeded > 0 ? Math.round(targetMao.discountPctNeeded) : null;
+  const isQualified = deal.status === 'qualified';
+
+  // Verdict badge colors
+  const atAskVerdictColor: Record<AtAskAnalysis['verdict'], string> = {
+    strong_flip: 'bg-green-500/15 text-green-400 border-green-500/30',
+    target_met: 'bg-green-500/15 text-green-400 border-green-500/30',
+    near_target: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+    marginal: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+    thin: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
+    not_a_flip: 'bg-red-500/15 text-red-400 border-red-500/30',
+  };
+  const flipActionColor: Record<FlipVerdict['action'], string> = {
+    send_offer: 'bg-green-500/15 text-green-400 border-green-500/30',
+    review_arv: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    review_rehab: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    contractor_review: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    lowball_only: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
+    pass: 'bg-red-500/15 text-red-400 border-red-500/30',
+  };
+
+  return (
+    <>
+      <Card className={`border ${isQualified ? 'border-primary/50 ring-1 ring-primary/20' : isHighRisk ? 'border-yellow-500/30' : ''} ${dealWorksAtAsk ? 'border-green-500/30' : ''}`}>
+        <CardHeader className="pb-2 pt-4 px-4">
+          {/* Top row */}
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Link
+                  to={`/deals/${deal.id}`}
+                  className="font-semibold text-sm hover:text-primary transition-colors truncate"
+                >
+                  {deal.address.full}
+                </Link>
+                <ExternalLink className="w-3 h-3 text-muted-foreground shrink-0" />
+              </div>
+              <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
+                {deal.apiData.daysOnMarket != null && (
+                  <span className={deal.apiData.daysOnMarket > 45 ? 'text-yellow-400' : ''}>
+                    <Clock className="inline w-3 h-3 mr-0.5" />
+                    {deal.apiData.daysOnMarket}d on market
+                  </span>
+                )}
+                {deal.apiData.yearBuilt && <span>Built {deal.apiData.yearBuilt}</span>}
+                {deal.apiData.bedrooms && (
+                  <span>{deal.apiData.bedrooms}bd / {deal.apiData.bathrooms ?? '?'}ba</span>
+                )}
+                {deal.apiData.sqft && <span>{deal.apiData.sqft.toLocaleString()} sqft</span>}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {isQualified && (
+                <Badge className="text-xs bg-primary/15 text-primary border-primary/30">Qualified</Badge>
+              )}
+              <OfferStatusBadge status={offer.status} />
+              {isHighRisk && (
+                <Tooltip>
+                  <TooltipTrigger>
+                    <AlertTriangle className="w-4 h-4 text-yellow-400" />
+                  </TooltipTrigger>
+                  <TooltipContent>High risk: weak ARV or unknown rehab</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent className="px-4 pb-4 space-y-4">
+          {/* Price row */}
+          <div className="flex items-center gap-4 text-sm flex-wrap">
+            <div>
+              <span className="text-muted-foreground text-xs">List Price</span>
+              <div className="font-bold">{fmt(analysis.listPrice)}</div>
+            </div>
+            <div>
+              <span className="text-muted-foreground text-xs">ARV</span>
+              <div className="font-bold">{fmt(analysis.arv)}</div>
+            </div>
+            <div>
+              <span className="text-muted-foreground text-xs">Rehab Est.</span>
+              <div className="font-bold">
+                {rehabAnalysis.base > 0
+                  ? rehabAnalysis.isManualOverride
+                    ? fmt(rehabAnalysis.base)
+                    : `${fmtShort(rehabAnalysis.low)} – ${fmtShort(rehabAnalysis.high)}`
+                  : '—'}
+              </div>
+            </div>
+            <div className="flex gap-2 ml-auto">
+              <ArvBadge confidence={arvAnalysis.confidence} reason={arvAnalysis.reason} />
+              <RehabBadge confidence={rehabAnalysis.confidence} signals={rehabAnalysis.signals} />
+            </div>
+          </div>
+
+          {/* Section A: At Asking Price */}
+          <div className="rounded-lg bg-muted/30 border border-border p-3 space-y-2">
+            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">At Asking Price</div>
+            <div className="flex items-center gap-4 text-sm flex-wrap">
+              <div>
+                <span className="text-xs text-muted-foreground">Total Investment</span>
+                <div className="font-medium">{fmt(atAsk.totalInvestment)}</div>
+              </div>
+              <div>
+                <span className="text-xs text-muted-foreground">Profit</span>
+                <div className={`font-bold ${atAsk.profit >= 50000 ? 'text-green-400' : atAsk.profit >= 20000 ? 'text-yellow-400' : atAsk.profit >= 0 ? 'text-orange-400' : 'text-red-400'}`}>
+                  {fmt(atAsk.profit)}
+                </div>
+              </div>
+              <div>
+                <span className="text-xs text-muted-foreground">ROI</span>
+                <div className="font-medium">{atAsk.roi.toFixed(1)}%</div>
+              </div>
+              <span className={`ml-auto inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${atAskVerdictColor[atAsk.verdict]}`}>
+                {atAsk.verdictLabel}
+              </span>
+            </div>
+          </div>
+
+          {/* Section B: Target MAO */}
+          <div className="rounded-lg border border-border p-3 space-y-1.5 text-sm">
+            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Target Offer (for $50K profit)</div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground flex items-center gap-1">
+                <Target className="w-3.5 h-3.5" /> Max price for $50K profit
+              </span>
+              <span className="font-medium">{fmt(targetMao.mao)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground flex items-center gap-1">
+                <TrendingDown className="w-3.5 h-3.5" /> Gap from ask
+              </span>
+              {targetMao.gapFromAsk > 0
+                ? <span className="font-bold text-orange-400">{fmt(targetMao.gapFromAsk)} ({discountPct}% off ask)</span>
+                : <span className="font-bold text-green-400">Works at ask!</span>
+              }
+            </div>
+            <div className="flex justify-between font-semibold">
+              <span>Suggested range</span>
+              <span className="text-primary">{fmtShort(targetMao.offerLow)} – {fmtShort(targetMao.offerHigh)}</span>
+            </div>
+            <div className="flex justify-between text-xs text-muted-foreground/60 border-t border-border pt-1">
+              <span>70% rule reference</span>
+              <span>{fmt(targetMao.ruleof70Ref)}</span>
+            </div>
+          </div>
+
+          {/* Section C: Risk-Adjusted Offer */}
+          <div className="rounded-lg border border-orange-500/20 bg-orange-500/5 p-3 space-y-2">
+            <div className="text-xs font-semibold text-orange-400/80 uppercase tracking-wide">Risk-Adjusted Offer</div>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { label: 'Conservative', value: riskAdjustedOffer.conservative },
+                { label: 'Base', value: riskAdjustedOffer.base },
+                { label: 'Ceiling', value: riskAdjustedOffer.ceiling },
+              ].map(({ label, value }) => (
+                <div key={label} className="rounded border border-border bg-card p-2 text-center">
+                  <div className="text-xs text-muted-foreground mb-1">{label}</div>
+                  <div className={`text-base font-bold ${value == null ? 'text-destructive' : 'text-foreground'}`}>
+                    {value == null ? 'No deal' : fmtShort(value)}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {riskAdjustedOffer.reasons.length > 0 && (
+              <div className="text-xs text-muted-foreground">
+                Adjusted for: {riskAdjustedOffer.reasons.join('; ')}
+              </div>
+            )}
+          </div>
+
+          {/* Section D: Flip Action Verdict */}
+          <div className="flex items-start gap-3 rounded-lg border border-border p-3">
+            <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-semibold shrink-0 ${flipActionColor[flipVerdict.action]}`}>
+              {flipVerdict.actionLabel}
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-muted-foreground">{flipVerdict.reasoning}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Score: {flipVerdict.finalScore}/10</p>
+            </div>
+          </div>
+
+          {/* Section E: BRRRR — collapsible */}
+          <div className="rounded-lg border border-border overflow-hidden">
+            <button
+              className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium hover:bg-muted/30 transition-colors"
+              onClick={() => setBrrrrExpanded(e => !e)}
+            >
+              <span className="flex items-center gap-2">
+                <RefreshCw className="w-3.5 h-3.5 text-muted-foreground" />
+                BRRRR — <span className="text-muted-foreground font-normal">{brrrrVerdict.classificationLabel}</span>
+              </span>
+              {brrrrExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+            {brrrrExpanded && (
+              <div className="px-3 pb-3 pt-1 border-t border-border grid grid-cols-2 gap-2 text-sm">
+                {/* Investment score */}
+                {(() => {
+                  const invScore = calculateInvestmentScore({
+                    monthlyCashflow: brrrrVerdict.monthlyCashflow,
+                    cashLeftInDeal: brrrrVerdict.cashLeftInDeal,
+                    arv: analysis.arv,
+                    purchasePrice: deal.overrides.purchasePrice ?? deal.apiData.purchasePrice ?? 0,
+                    rehabCost: deal.overrides.rehabCost ?? deal.apiData.rehabCost ?? 0,
+                    schoolTotal: deal.apiData.schoolScore,
+                    inventoryMonths: deal.overrides.inventoryMonths ?? null,
+                  }, settings.investmentScoreSettings);
+                  if (!invScore) return null;
+                  return (
+                    <div className="col-span-2 flex items-center justify-between rounded-md px-2 py-1.5 bg-muted/30 border border-border">
+                      <span className="text-xs text-muted-foreground">Investment Score</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm">{invScore.finalScore.toFixed(1)}/10</span>
+                        <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${invScore.decision === 'Buy' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                          {invScore.decision}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
+                <div className="flex justify-between col-span-2">
+                  <span className="text-muted-foreground">Refi proceeds (75% LTV)</span>
+                  <span className="font-medium">{fmt(brrrrVerdict.refiProceeds)}</span>
+                </div>
+                <div className="flex justify-between col-span-2">
+                  <span className="text-muted-foreground">Cash left in deal</span>
+                  <span className={`font-bold ${brrrrVerdict.cashLeftInDeal <= 0 ? 'text-green-400' : brrrrVerdict.cashLeftPct <= 0.25 ? 'text-blue-400' : 'text-foreground'}`}>
+                    {brrrrVerdict.cashLeftInDeal <= 0 ? 'None (full BRRRR!)' : fmt(brrrrVerdict.cashLeftInDeal)}
+                  </span>
+                </div>
+                <div className="flex justify-between col-span-2">
+                  <span className="text-muted-foreground">Monthly mortgage</span>
+                  <span className="font-medium">{fmt(brrrrVerdict.monthlyMortgage)}/mo</span>
+                </div>
+                {brrrrVerdict.hasRentData ? (
+                  <>
+                    <div className="flex justify-between col-span-2">
+                      <span className="text-muted-foreground">Monthly cashflow (est.)</span>
+                      <span className={`font-bold ${(brrrrVerdict.monthlyCashflow ?? 0) > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {fmt(brrrrVerdict.monthlyCashflow)}/mo
+                      </span>
+                    </div>
+                    {brrrrVerdict.cocReturn != null && (
+                      <div className="flex justify-between col-span-2">
+                        <span className="text-muted-foreground">Cash-on-cash return</span>
+                        <span className="font-medium">{brrrrVerdict.cocReturn > 100 ? '∞' : `${brrrrVerdict.cocReturn.toFixed(1)}%`}</span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="col-span-2 text-xs text-muted-foreground italic">No rent data — add rent to see cashflow</div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Numbers reviewed gate */}
+          <div
+            className={`flex items-center gap-2 rounded-md px-3 py-2 cursor-pointer select-none border transition-colors ${
+              offer.numbersReviewed
+                ? 'border-green-500/40 bg-green-500/10 text-green-400'
+                : 'border-border bg-muted/30 text-muted-foreground hover:border-primary/40'
+            }`}
+            onClick={toggleReviewed}
+          >
+            <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${offer.numbersReviewed ? 'bg-green-500 border-green-500' : 'border-muted-foreground'}`}>
+              {offer.numbersReviewed && <Check className="w-3 h-3 text-white" />}
+            </div>
+            <span className="text-xs font-medium">
+              {offer.numbersReviewed ? 'Numbers reviewed — ready to offer' : 'Check this after reviewing ARV, rehab, and MAO'}
+            </span>
+          </div>
+
+          {/* Offer tracking row */}
+          <div className="flex items-center justify-between gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={openEmail}
+              disabled={!offer.numbersReviewed}
+              className="gap-1.5"
+              title={!offer.numbersReviewed ? 'Review the numbers above before generating an offer' : undefined}
+            >
+              <Mail className="w-3.5 h-3.5" />
+              Generate Offer Email
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setExpanded(e => !e)}
+              className="gap-1 text-xs text-muted-foreground"
+            >
+              {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              {expanded ? 'Hide' : 'Track Offer'}
+            </Button>
+          </div>
+
+          {/* Expanded offer form */}
+          {expanded && (
+            <OfferForm dealId={deal.id} record={offer} onChange={setOffer} />
+          )}
+        </CardContent>
+      </Card>
+
+      <EmailModal
+        open={emailOpen}
+        onClose={() => setEmailOpen(false)}
+        emailText={emailText}
+      />
+    </>
+  );
+}
+
+// ─── Filters ──────────────────────────────────────────────────────────────────
+
+// Only show deals that can still receive an offer — exclude pending/closed/dead
+const ACTIVE_STATUSES = new Set(['new', 'under_analysis', 'qualified', 'offer_sent']);
+
+type TimeRange = 'week' | 'month' | 'all';
+
+function cutoffDate(range: TimeRange): Date | null {
+  if (range === 'all') return null;
+  const d = new Date();
+  if (range === 'week') d.setDate(d.getDate() - 7);
+  if (range === 'month') d.setMonth(d.getMonth() - 1);
+  return d;
+}
+
+type DiscountFilter = 'all' | '5' | '10' | '15' | '20' | '30';
+
+const DISCOUNT_OPTIONS: { value: DiscountFilter; label: string; desc: string }[] = [
+  { value: 'all',  label: 'All deals',     desc: 'Show everything' },
+  { value: '5',    label: '≤5% off ask',   desc: 'Seller drops max 5% — very realistic' },
+  { value: '10',   label: '≤10% off ask',  desc: 'Seller drops max 10% — normal negotiation' },
+  { value: '15',   label: '≤15% off ask',  desc: 'Seller drops max 15%' },
+  { value: '20',   label: '≤20% off ask',  desc: 'Seller drops max 20% — motivated seller' },
+  { value: '30',   label: '≤30% off ask',  desc: 'Seller drops max 30% — very distressed' },
+];
+
+function passesFilters(
+  deal: Deal,
+  filters: { domMin: number; offerFilter: string; statusFilter: string; timeRange: TimeRange; discountFilter: DiscountFilter },
+  analysis: AcquisitionAnalysis | null,
+): boolean {
+  if (!ACTIVE_STATUSES.has(deal.status)) return false;
+  if (filters.statusFilter !== 'all' && deal.status !== filters.statusFilter) return false;
+
+  // Time filter — use analyzedAt if available, else createdAt
+  const cutoff = cutoffDate(filters.timeRange);
+  if (cutoff) {
+    const dateStr = deal.analyzedAt ?? deal.createdAt;
+    if (!dateStr || new Date(dateStr) < cutoff) return false;
+  }
+
+  const dom = deal.apiData.daysOnMarket;
+  if (filters.domMin > 0 && (dom == null || dom < filters.domMin)) return false;
+
+  if (filters.offerFilter !== 'all') {
+    const rec = loadOffer(deal.id);
+    if (filters.offerFilter === 'no_offer' && rec.status !== 'not_sent') return false;
+    if (filters.offerFilter === 'has_offer' && rec.status === 'not_sent') return false;
+    if (filters.offerFilter === 'needs_followup') {
+      if (!rec.nextFollowUp) return false;
+      const today = new Date().toISOString().split('T')[0];
+      if (rec.nextFollowUp > today) return false;
+    }
+  }
+
+  // Discount filter — key filter: how much does seller need to drop for deal to hit $50K profit?
+  if (filters.discountFilter !== 'all' && analysis) {
+    const maxDiscountPct = parseInt(filters.discountFilter);
+    const discountPct = analysis.targetMao.discountPctNeeded;
+    if (discountPct > maxDiscountPct) return false;
+  }
+
+  return true;
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function AcquisitionPage() {
+  const { deals } = useDeals();
+  const { settings } = useSettings();
+  const [timeRange, setTimeRange] = useState<TimeRange>('month');
+  const [domMin, setDomMin] = useState(0);
+  const [offerFilter, setOfferFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [discountFilter, setDiscountFilter] = useState<DiscountFilter>('all');
+  const [showFilters, setShowFilters] = useState(false);
+  const [strategyFilter, setStrategyFilter] = useState<'all' | 'flip' | 'brrrr'>('all');
+
+  const filters = useMemo(
+    () => ({ domMin, offerFilter, statusFilter, timeRange, discountFilter }),
+    [domMin, offerFilter, statusFilter, timeRange, discountFilter],
+  );
+
+  // Pre-compute analysis for all deals once, then filter/sort
+  const analyzed = useMemo(() =>
+    deals
+      .filter(d => ACTIVE_STATUSES.has(d.status))
+      .map(d => ({ deal: d, analysis: analyzeAcquisition(d) }))
+      .filter(({ analysis }) => analysis !== null),
+    [deals],
+  );
+
+  const filtered = useMemo(() => {
+    return analyzed
+      .filter(({ deal, analysis }) => {
+        if (!passesFilters(deal, filters, analysis)) return false;
+        if (strategyFilter === 'flip') return analysis!.flipVerdict.action !== 'pass';
+        if (strategyFilter === 'brrrr') {
+          const cls = analysis!.brrrrVerdict.classification;
+          return cls === 'full_brrrr' || cls === 'partial_brrrr';
+        }
+        return true;
+      })
+      .sort(({ deal: a, analysis: aa }, { deal: b, analysis: ab }) => {
+        const aQ = a.status === 'qualified' ? 0 : 1;
+        const bQ = b.status === 'qualified' ? 0 : 1;
+        if (aQ !== bQ) return aQ - bQ;
+        const profitA = aa?.atAsk.profit ?? -Infinity;
+        const profitB = ab?.atAsk.profit ?? -Infinity;
+        return profitB - profitA;
+      })
+      .map(({ deal }) => deal);
+  }, [analyzed, filters, strategyFilter]);
+
+  // Stats over all analyzable deals (no time/discount filter — just totals)
+  const stats = useMemo(() => {
+    const withOffer = analyzed.filter(d => loadOffer(d.deal.id).status !== 'not_sent');
+    const withResponse = analyzed.filter(({ deal }) => {
+      const s = loadOffer(deal.id).status;
+      return s === 'responded' || s === 'counter' || s === 'accepted';
+    });
+    const dueFollowup = analyzed.filter(({ deal }) => {
+      const rec = loadOffer(deal.id);
+      if (!rec.nextFollowUp) return false;
+      return rec.nextFollowUp <= new Date().toISOString().split('T')[0];
+    });
+    return { total: analyzed.length, withOffer: withOffer.length, withResponse: withResponse.length, dueFollowup: dueFollowup.length };
+  }, [analyzed]);
+
+  const resetFilters = useCallback(() => {
+    setTimeRange('month');
+    setDomMin(0);
+    setOfferFilter('all');
+    setStatusFilter('all');
+    setStrategyFilter('all');
+    setDiscountFilter('all');
+  }, []);
+
+  return (
+    <div className="container mx-auto p-4 max-w-4xl space-y-4">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold">Acquisition Engine</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            At what price does each deal work? Find the ones worth offering on.
+          </p>
+        </div>
+        {/* Strategy filter */}
+        <div className="flex items-center rounded-lg border border-border bg-card p-1 gap-1 shrink-0">
+          {([['all', 'All Deals'], ['flip', 'Flip'], ['brrrr', 'BRRRR']] as const).map(([val, label]) => (
+            <button
+              key={val}
+              onClick={() => setStrategyFilter(val)}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                strategyFilter === val
+                  ? val === 'brrrr' ? 'bg-primary text-primary-foreground' : val === 'flip' ? 'bg-orange-500 text-white' : 'bg-muted text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Primary filter: discount needed — the most important question */}
+      <div className="space-y-1.5">
+        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          How much does the seller need to drop their price for the deal to work?
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {DISCOUNT_OPTIONS.map(opt => (
+            <Tooltip key={opt.value}>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setDiscountFilter(opt.value)}
+                  className={`px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${
+                    discountFilter === opt.value
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'border-border bg-card text-muted-foreground hover:text-foreground hover:border-primary/50'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{opt.desc}</TooltipContent>
+            </Tooltip>
+          ))}
+        </div>
+      </div>
+
+      {/* KPI bar */}
+      <div className="grid grid-cols-4 gap-3">
+        {[
+          { label: 'Total analyzable', value: stats.total },
+          { label: 'Offers sent', value: stats.withOffer },
+          { label: 'Responses', value: stats.withResponse },
+          { label: 'Follow-ups due', value: stats.dueFollowup, highlight: stats.dueFollowup > 0 },
+        ].map(s => (
+          <div key={s.label} className={`rounded-lg border p-3 text-center ${s.highlight ? 'border-orange-500/40 bg-orange-500/5' : 'border-border bg-card'}`}>
+            <div className={`text-2xl font-bold ${s.highlight ? 'text-orange-400' : ''}`}>{s.value}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Secondary filters — time range + advanced */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center rounded-lg border border-border bg-card p-1 gap-1">
+          {(['week', 'month', 'all'] as TimeRange[]).map(r => (
+            <button
+              key={r}
+              onClick={() => setTimeRange(r)}
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                timeRange === r ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {r === 'week' ? 'Last 7d' : r === 'month' ? 'Last 30d' : 'All time'}
+            </button>
+          ))}
+        </div>
+
+        <button
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground transition-colors"
+          onClick={() => setShowFilters(f => !f)}
+        >
+          <Filter className="w-3.5 h-3.5" />
+          More filters
+          {(domMin > 0 || offerFilter !== 'all' || statusFilter !== 'all') && (
+            <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+          )}
+        </button>
+
+        {(discountFilter !== 'all' || domMin > 0 || offerFilter !== 'all' || statusFilter !== 'all' || timeRange !== 'month') && (
+          <button onClick={resetFilters} className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2">
+            Reset all
+          </button>
+        )}
+      </div>
+
+      {showFilters && (
+        <div className="border border-border rounded-lg px-4 py-3 grid grid-cols-3 gap-4 bg-card/50">
+          <div>
+            <Label className="text-xs text-muted-foreground mb-1 block">Min Days on Market</Label>
+            <Select value={String(domMin)} onValueChange={v => setDomMin(Number(v))}>
+              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">Any DOM</SelectItem>
+                <SelectItem value="14">14+ days</SelectItem>
+                <SelectItem value="30">30+ days</SelectItem>
+                <SelectItem value="45">45+ days (stale)</SelectItem>
+                <SelectItem value="60">60+ days</SelectItem>
+                <SelectItem value="90">90+ days</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground mb-1 block">Offer Status</Label>
+            <Select value={offerFilter} onValueChange={setOfferFilter}>
+              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="no_offer">No offer sent</SelectItem>
+                <SelectItem value="has_offer">Offer sent</SelectItem>
+                <SelectItem value="needs_followup">Follow-up due</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground mb-1 block">Deal Status</Label>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Active</SelectItem>
+                <SelectItem value="new">New</SelectItem>
+                <SelectItem value="under_analysis">Under Analysis</SelectItem>
+                <SelectItem value="qualified">Qualified</SelectItem>
+                <SelectItem value="offer_sent">Offer Sent</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      )}
+
+      {/* Results count */}
+      <div className="text-sm text-muted-foreground">
+        Showing {filtered.length} of {stats.total} deal{stats.total !== 1 ? 's' : ''}
+        {discountFilter !== 'all' && (
+          <span className="ml-1 text-primary font-medium">
+            · needs ≤{discountFilter}% off for $50K profit
+          </span>
+        )}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="text-center py-16 text-muted-foreground">
+          <Target className="w-10 h-10 mx-auto mb-3 opacity-30" />
+          <p className="font-medium">No deals match your filters</p>
+          <p className="text-sm mt-1">Try adjusting the filters above, or make sure deals have ARV and list price set.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {filtered.map(deal => (
+            <AcquisitionCard key={deal.id} deal={deal} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

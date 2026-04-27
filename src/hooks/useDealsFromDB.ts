@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { Deal, DealStatus, DealOverrides } from '@/types/deal';
+import { Deal, DealStatus, DealSource, DealOverrides } from '@/types/deal';
 import { calculateFinancials } from '@/utils/financialCalculations';
 import { extractArvFromSummary } from '@/utils/arv';
 import { useSettings } from '@/context/SettingsContext';
@@ -131,7 +131,7 @@ function mapDBDealToDeal(dbDeal: DBDeal, loanDefaults?: ReturnType<typeof import
       full: dbDeal.address_full,
     },
     status: dbDeal.status as DealStatus,
-    source: dbDeal.source as 'email' | 'manual',
+    source: (dbDeal.source as DealSource) ?? 'manual',
     apiData,
     overrides,
     financials,
@@ -575,7 +575,7 @@ export function useDealsFromDB() {
       
       // Agent / Broker info
       agentName: attribution.agentName || listedBy.display_name || null,
-      agentEmail: attribution.agentEmail || null,
+      agentEmail: attribution.agentEmail || attribution.listingAgentEmail || null,
       agentPhone: attribution.agentPhoneNumber || listedBy.phone || null,
       agentLicense: attribution.agentLicenseNumber || null,
       brokerName: attribution.brokerName || listedBy.business_name || null,
@@ -627,6 +627,42 @@ export function useDealsFromDB() {
       // Store the full API response for reference
       rawResponse: data,
     };
+
+    // Preserve agent info from prior analysis if DealBeast returns different/worse data on re-analyze.
+    // Agent identity (name, phone, broker, MLS) that was already saved is treated as authoritative.
+    const existingAgent = (deal.apiData as any) || {};
+    if (existingAgent.agentName && !apiData.agentName)   apiData.agentName   = existingAgent.agentName;
+    if (existingAgent.agentPhone && !apiData.agentPhone) apiData.agentPhone  = existingAgent.agentPhone;
+    if (existingAgent.brokerName && !apiData.brokerName) apiData.brokerName  = existingAgent.brokerName;
+    if (existingAgent.mlsId      && !apiData.mlsId)      apiData.mlsId       = existingAgent.mlsId;
+    if (existingAgent.agentEmail && !apiData.agentEmail) apiData.agentEmail  = existingAgent.agentEmail;
+
+    // DealBeast doesn't return agent email — supplement from zillow-search (best-effort)
+    if (!apiData.agentEmail) {
+      try {
+        const city = analysis.city || property.city || deal.address.city || '';
+        const state = analysis.state || property.state || deal.address.state || '';
+        const location = city ? `${city}, ${state}` : state;
+        const askingPrice = apiData.purchasePrice ?? 0;
+        if (location.length > 2 && askingPrice > 0) {
+          const { data: searchData } = await supabase.functions.invoke('zillow-search', {
+            body: { location, minPrice: askingPrice * 0.7, maxPrice: askingPrice * 1.3 },
+          });
+          const streetRaw = (deal.address.street || deal.address.full || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const streetKey = streetRaw.slice(0, 12);
+          const match = (searchData?.properties ?? []).find((p: any) => {
+            const pAddr = (p.address || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            return pAddr.includes(streetKey);
+          });
+          if (match?.agentEmail) {
+            apiData.agentEmail = match.agentEmail;
+            if (!apiData.agentPhone && match.agentPhone) apiData.agentPhone = match.agentPhone;
+          }
+        }
+      } catch {
+        // best-effort — don't block analysis if lookup fails
+      }
+    }
 
     // Merge trusted email-extracted fields into API data gaps.
     // Factual property attributes from the seller's own listing are often more accurate

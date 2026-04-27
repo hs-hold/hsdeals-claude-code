@@ -70,8 +70,8 @@ export function prefilter(
     signals.push('arv_keyword');
   }
 
-  // Asking/offer/purchase price keyword
-  if (/\b(?:asking\s*price|purchase\s*price|offer\s*price|list(?:ing)?\s*price|price[:=\s]\s*\$?\d)/i.test(combined)) {
+  // Asking/offer/purchase price keyword — also match bare "Asking $X" (no "price" word)
+  if (/\b(?:asking\s*(?:price|\$?\d)|purchase\s*price|offer\s*price|list(?:ing)?\s*price|price[:=\s]\s*\$?\d)/i.test(combined)) {
     score += 2;
     signals.push('price_keyword');
   }

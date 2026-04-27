@@ -5,6 +5,8 @@ import { useSettings } from '@/context/SettingsContext';
 import { isDealAnalyzed } from '@/utils/dealHelpers';
 import { coerceLotSizeSqft } from '@/utils/lotSize';
 import { detectSuspiciousData } from '@/utils/suspiciousData';
+import { analyzeArv, analyzeRehab } from '@/utils/maoCalculations';
+import { calculateInvestmentScore } from '@/utils/investmentScore';
 import { DealStatusBadge } from '@/components/deals/DealStatusBadge';
 import { PropertyMap } from '@/components/deals/PropertyMap';
 import { formatCurrency, formatPercent, getEffectiveValue, calculateFinancials, validateArvAgainstComps, calculateArvFromRecentComps, getEffectiveMonthlyInsurance } from '@/utils/financialCalculations';
@@ -70,7 +72,8 @@ import {
   Lock,
   Unlock,
   RefreshCw,
-  ShieldAlert
+  ShieldAlert,
+  BarChart3
 } from 'lucide-react';
 import { ZillowIcon } from '@/components/icons/ZillowIcon';
 import { generateDealPDF } from '@/utils/pdfExport';
@@ -199,6 +202,7 @@ export default function DealDetailPage() {
     rentalOtherFees: deal?.overrides?.rentalOtherFees?.toString() || '',
     rentalInterestOnly: (deal?.overrides as any)?.rentalInterestOnly?.toString() || '',
     brrrrInterestOnly: (deal?.overrides as any)?.brrrrInterestOnly?.toString() || '',
+    inventoryMonths: deal?.overrides?.inventoryMonths?.toString() || '',
   });
   const [isOverridesDirty, setIsOverridesDirty] = useState(false);
   const baselineOverridesRef = useRef(localOverrides);
@@ -228,6 +232,7 @@ export default function DealDetailPage() {
   const [expansionAnalysisOpen, setExpansionAnalysisOpen] = useState(false);
   const [rentalAnalysisOpen, setRentalAnalysisOpen] = useState(false);
   const [brrrrAnalysisOpen, setBrrrrAnalysisOpen] = useState(false);
+  const [acquisitionEngineOpen, setAcquisitionEngineOpen] = useState(false);
   const [saleCompsOpen, setSaleCompsOpen] = useState(false);
   const [rentCompsOpen, setRentCompsOpen] = useState(false);
   const [moreInfoOpen, setMoreInfoOpen] = useState(false);
@@ -309,6 +314,7 @@ export default function DealDetailPage() {
       rentalOtherFees: deal.overrides?.rentalOtherFees?.toString() || '',
       rentalInterestOnly: (deal.overrides as any)?.rentalInterestOnly?.toString() || '',
       brrrrInterestOnly: (deal.overrides as any)?.brrrrInterestOnly?.toString() || '',
+      inventoryMonths: deal.overrides?.inventoryMonths?.toString() || '',
     });
     baselineOverridesRef.current = {
       arv: deal.overrides?.arv?.toString() || '',
@@ -366,6 +372,7 @@ export default function DealDetailPage() {
       rentalOtherFees: deal.overrides?.rentalOtherFees?.toString() || '',
       rentalInterestOnly: (deal.overrides as any)?.rentalInterestOnly?.toString() || '',
       brrrrInterestOnly: (deal.overrides as any)?.brrrrInterestOnly?.toString() || '',
+      inventoryMonths: deal.overrides?.inventoryMonths?.toString() || '',
     };
     setNotes(deal.notes || '');
     setRejectionReason(deal.rejectionReason || '');
@@ -438,6 +445,7 @@ export default function DealDetailPage() {
         rentalOtherFees: deal.overrides?.rentalOtherFees?.toString() || '',
         rentalInterestOnly: (deal.overrides as any)?.rentalInterestOnly?.toString() || '',
         brrrrInterestOnly: (deal.overrides as any)?.brrrrInterestOnly?.toString() || '',
+        inventoryMonths: deal.overrides?.inventoryMonths?.toString() || '',
       };
       setLocalOverrides(synced);
       baselineOverridesRef.current = synced;
@@ -523,6 +531,7 @@ export default function DealDetailPage() {
       capexPercent: localOverrides.capexPercent ? parseFloat(localOverrides.capexPercent) : null,
       lotSizeSqft: localOverrides.lotSizeSqft ? parseFloat(localOverrides.lotSizeSqft) : null,
       holdingOtherMonthly: localOverrides.holdingOtherMonthly ? parseFloat(localOverrides.holdingOtherMonthly) : null,
+      inventoryMonths: localOverrides.inventoryMonths ? parseFloat(localOverrides.inventoryMonths) : null,
       rentalAppraisalCost: localOverrides.rentalAppraisalCost ? parseFloat(localOverrides.rentalAppraisalCost) : null,
       rentalUnderwritingFee: localOverrides.rentalUnderwritingFee ? parseFloat(localOverrides.rentalUnderwritingFee) : null,
       rentalPointsPercent: localOverrides.rentalPointsPercent ? parseFloat(localOverrides.rentalPointsPercent) : null,
@@ -756,7 +765,8 @@ export default function DealDetailPage() {
     const rentalInsuranceDiff = rentalInsuranceVal - insuranceMonthly;
     const rentalMonthlyCashflow = liveFinancials.monthlyCashflow - rentalInsuranceDiff;
     const rentalAdjustedNOI = liveFinancials.yearlyNOI - (rentalInsuranceDiff * 12);
-    const rentalCapRate = flipTotalInvestment > 0 ? (rentalAdjustedNOI / flipTotalInvestment) * 100 : 0;
+    const rentalMonthlyNOI = rentalAdjustedNOI / 12;
+    const rentalCapRate = purchasePrice > 0 ? (rentalAdjustedNOI / purchasePrice) * 100 : 0;
     
     // ========== BRRRR SUMMARY METRICS ==========
     const brrrrHmlLtvPurchase = localOverrides.hmlLtvPurchasePercent 
@@ -798,7 +808,7 @@ export default function DealDetailPage() {
       : 0;
     const brrrrNoi = rent - (liveFinancials.monthlyExpenses ?? 0);
     const brrrrMonthlyCashflow = brrrrNoi - brrrrMonthlyMortgage;
-    const brrrrEquity = arv - brrrrRefiLoanAmount - brrrrCashLeftInDeal;
+    const brrrrEquity = arv - brrrrRefiLoanAmount;
     
     return {
       purchasePrice,
@@ -823,6 +833,7 @@ export default function DealDetailPage() {
       flipNetProfit,
       flipRoi,
       rentalMonthlyCashflow,
+      rentalMonthlyNOI,
       rentalCapRate,
       brrrrCashLeftInDeal,
       brrrrMonthlyCashflow,
@@ -847,10 +858,25 @@ export default function DealDetailPage() {
   const flipNetProfit        = safeNum(derivedValues?.flipNetProfit);
   const flipRoi              = safeNum(derivedValues?.flipRoi);
   const rentalMonthlyCashflow= safeNum(derivedValues?.rentalMonthlyCashflow);
+  const rentalMonthlyNOI     = safeNum(derivedValues?.rentalMonthlyNOI);
   const rentalCapRate        = safeNum(derivedValues?.rentalCapRate);
   const brrrrCashLeftInDeal  = safeNum(derivedValues?.brrrrCashLeftInDeal);
   const brrrrMonthlyCashflow = safeNum(derivedValues?.brrrrMonthlyCashflow);
   const brrrrEquity          = safeNum(derivedValues?.brrrrEquity);
+
+  // Investment Score for header badge — computed once, shared everywhere
+  const headerInvestmentScore = useMemo(() => {
+    if (!arv || !purchasePrice) return null;
+    return calculateInvestmentScore({
+      monthlyCashflow: brrrrMonthlyCashflow || null,
+      cashLeftInDeal: brrrrCashLeftInDeal || null,
+      arv,
+      purchasePrice,
+      rehabCost,
+      schoolTotal: apiData?.schoolScore ?? null,
+      inventoryMonths: localOverrides.inventoryMonths ? parseFloat(localOverrides.inventoryMonths) : null,
+    }, settings.investmentScoreSettings);
+  }, [arv, purchasePrice, rehabCost, brrrrMonthlyCashflow, brrrrCashLeftInDeal, apiData?.schoolScore, localOverrides.inventoryMonths, settings.investmentScoreSettings]);
 
   // Build display-default map: what shows in each input when override is empty
   const fieldDisplayDefaults = useMemo((): Record<string, string> => {
@@ -1091,6 +1117,7 @@ export default function DealDetailPage() {
       rentalOtherFees: (saved as any).rentalOtherFees?.toString() || '',
       rentalInterestOnly: (saved as any).rentalInterestOnly?.toString() || '',
       brrrrInterestOnly: (saved as any).brrrrInterestOnly?.toString() || '',
+      inventoryMonths: (saved as any).inventoryMonths?.toString() || '',
     });
     baselineOverridesRef.current = {
       arv: (saved as any).arv?.toString() || '',
@@ -1146,6 +1173,7 @@ export default function DealDetailPage() {
       rentalOtherFees: (saved as any).rentalOtherFees?.toString() || '',
       rentalInterestOnly: (saved as any).rentalInterestOnly?.toString() || '',
       brrrrInterestOnly: (saved as any).brrrrInterestOnly?.toString() || '',
+      inventoryMonths: (saved as any).inventoryMonths?.toString() || '',
     };
     setIsOverridesDirty(false);
     toast.success('Changes discarded');
@@ -1763,8 +1791,8 @@ export default function DealDetailPage() {
               {apiData.grade && (
                 <HoverCard>
                   <HoverCardTrigger asChild>
-                    <Badge 
-                      variant="outline" 
+                    <Badge
+                      variant="outline"
                       className={cn(
                         "cursor-pointer text-xs font-semibold",
                         apiData.grade === 'A' && "border-emerald-500 text-emerald-500",
@@ -1797,6 +1825,81 @@ export default function DealDetailPage() {
                     </div>
                   </HoverCardContent>
                 </HoverCard>
+              )}
+              {/* Investment Decision Score badge */}
+              {headerInvestmentScore ? (
+                <HoverCard>
+                  <HoverCardTrigger asChild>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "cursor-pointer text-xs font-semibold",
+                        headerInvestmentScore.decision === 'Buy'
+                          ? "border-emerald-500 text-emerald-400 bg-emerald-500/10"
+                          : headerInvestmentScore.finalScore >= 5
+                            ? "border-yellow-500 text-yellow-400 bg-yellow-500/10"
+                            : "border-red-500 text-red-400 bg-red-500/10"
+                      )}
+                    >
+                      <BarChart3 className="w-3 h-3 mr-1" />
+                      Score: {headerInvestmentScore.finalScore.toFixed(1)}/10
+                      <span className="ml-1.5 font-bold">
+                        {headerInvestmentScore.decision === 'Buy' ? '✓' : '✗'}
+                      </span>
+                    </Badge>
+                  </HoverCardTrigger>
+                  <HoverCardContent className="w-64" side="bottom" align="start">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold">Investment Score</span>
+                        <span className={cn(
+                          "text-sm font-bold",
+                          headerInvestmentScore.decision === 'Buy' ? "text-emerald-400" : "text-red-400"
+                        )}>
+                          {headerInvestmentScore.decision === 'Buy' ? '✓ Buy' : '✗ Pass'}
+                        </span>
+                      </div>
+                      {headerInvestmentScore.isFullBrrrr && (
+                        <div className="px-2 py-1.5 rounded-md bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-medium text-center">
+                          🎉 Full BRRRR — ∞ Return on Cash!
+                        </div>
+                      )}
+                      <div className="space-y-1 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Cash Flow</span>
+                          <span className={cn("font-medium", headerInvestmentScore.cashFlowScore >= 7 ? "text-emerald-400" : headerInvestmentScore.cashFlowScore >= 5 ? "text-yellow-400" : "text-red-400")}>
+                            {headerInvestmentScore.isFullBrrrr ? '∞ ' : ''}{headerInvestmentScore.cashFlowScore.toFixed(1)}/10
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Equity</span>
+                          <span className={cn("font-medium", headerInvestmentScore.equityScore >= 7 ? "text-emerald-400" : headerInvestmentScore.equityScore >= 5 ? "text-yellow-400" : "text-red-400")}>
+                            {headerInvestmentScore.equityScore.toFixed(1)}/10
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Location</span>
+                          <span className={cn("font-medium", headerInvestmentScore.locationScore >= 7 ? "text-emerald-400" : headerInvestmentScore.locationScore >= 5 ? "text-yellow-400" : "text-red-400")}>
+                            {headerInvestmentScore.locationScore.toFixed(1)}/10
+                          </span>
+                        </div>
+                      </div>
+                      {headerInvestmentScore.missingFields.length > 0 && (
+                        <p className="text-xs text-orange-400">
+                          ⚠ Partial: {headerInvestmentScore.missingFields.join(', ')} missing
+                        </p>
+                      )}
+                      <p className="text-xs text-muted-foreground pt-1 border-t border-border">
+                        Configure weights in Settings
+                      </p>
+                    </div>
+                  </HoverCardContent>
+                </HoverCard>
+              ) : liveFinancials && (
+                <Badge variant="outline" className="text-xs text-muted-foreground border-muted-foreground/30">
+                  <BarChart3 className="w-3 h-3 mr-1" />
+                  Score: N/A
+                </Badge>
               )}
             </div>
             <p className="text-muted-foreground flex items-center gap-1">
@@ -2074,7 +2177,7 @@ export default function DealDetailPage() {
                 const brrrrMonthlyMortgage = refiLoanAmount > 0
                   ? refiLoanAmount * ((loanDefaults.rentalInterestRate / 100 / 12) * Math.pow(1 + (loanDefaults.rentalInterestRate / 100 / 12), refiTermMonths2)) / (Math.pow(1 + (loanDefaults.rentalInterestRate / 100 / 12), refiTermMonths2) - 1)
                   : 0;
-                const brrrrMonthlyCashflow = rent - (liveFinancials?.monthlyExpenses ?? 0) + (liveFinancials?.monthlyDebtService ?? 0) - brrrrMonthlyMortgage;
+                const brrrrMonthlyCashflow = rent - (liveFinancials?.monthlyExpenses ?? 0) - brrrrMonthlyMortgage;
 
                 return (
                   <>
@@ -3231,9 +3334,12 @@ BRRRR STRATEGY:
         // Cash to close (no financing)
         const cashToClose = purchasePrice + closingCostsBuy;
         
-        // Check for suspicious data
+        // Check for suspicious data — use liveFinancials.arv as the effective ARV
+        // (it already accounts for comp validation), so the warning only fires when
+        // the *effective* ARV is unrealistic, not when the raw API value is bad but comps fixed it.
+        const effectiveArvForCheck = localOverrides.arv ? parseFloat(localOverrides.arv) : (liveFinancials?.arv ?? null);
         const suspiciousCheck = detectSuspiciousData(apiData, {
-          arv: localOverrides.arv ? parseFloat(localOverrides.arv) : null,
+          arv: effectiveArvForCheck,
           purchasePrice: localOverrides.purchasePrice ? parseFloat(localOverrides.purchasePrice) : null,
           rent: localOverrides.rent ? parseFloat(localOverrides.rent) : null,
           rehabCost: localOverrides.rehabCost ? parseFloat(localOverrides.rehabCost) : null,
@@ -4035,7 +4141,14 @@ BRRRR STRATEGY:
               const scoreTitleFee = localOverrides.titleFees ? parseFloat(localOverrides.titleFees) : FINANCIAL_CONFIG.titleFees;
               const flipNetProfit = arv - flipTotalInvestment - flipAgentCommission - (scoreNotaryFee * 2) - scoreTitleFee;
               const flipRoi = flipTotalInvestment > 0 ? (flipNetProfit / flipTotalInvestment) * 100 : 0;
-              
+
+              // Confidence-adjusted scoring: ARV and rehab uncertainty reduce the score
+              const _arvConf = analyzeArv(arv, apiData?.saleComps ?? []).confidence;
+              const _rehabConf = analyzeRehab(deal).confidence;
+              const _arvFactor = _arvConf === 'green' ? 1.0 : _arvConf === 'yellow' ? 0.85 : 0.70;
+              const _rehabFactor = _rehabConf === 'high' ? 1.0 : _rehabConf === 'medium' ? 0.88 : 0.75;
+              const _confMultiplier = _arvFactor * _rehabFactor;
+
               // RENTAL metrics
               const rentalMonthlyCashflow = liveFinancials?.monthlyCashflow ?? 0;
               const rentalCashOnCash = (liveFinancials?.cashOnCashReturn ?? 0) * 100;
@@ -4103,21 +4216,21 @@ BRRRR STRATEGY:
                   // Net Profit warnings/success indicators
                   netProfitWarning: flipNetProfit < 25000,
                   netProfitSuccess: flipNetProfit >= 50000,
-                  // Flip score 1-10 based on ROI % (cash deal, no financing)
-                  // ≤8% = 1, 8-10% = 1-2, 11-12% = 3-4, 13-14% = 5, 15-17% = 6
-                  // 18-20% = 7-8, 20-25% = 9, ≥25% = 10
+                  // Flip score 1-10 based on ROI %, penalised for low ARV/rehab confidence
                   score: (() => {
                     const roi = flipRoi;
-                    if (roi >= 25) return 10;
-                    if (roi >= 20) return 9;
-                    if (roi >= 18) return 8;
-                    if (roi >= 17) return 7; // 18-20% midpoint
-                    if (roi >= 15) return 6;
-                    if (roi >= 13) return 5;
-                    if (roi >= 11) return 4;
-                    if (roi >= 10) return 3; // 11-12% midpoint
-                    if (roi >= 8) return 2;
-                    return 1;
+                    let base: number;
+                    if (roi >= 25) base = 10;
+                    else if (roi >= 20) base = 9;
+                    else if (roi >= 18) base = 8;
+                    else if (roi >= 17) base = 7;
+                    else if (roi >= 15) base = 6;
+                    else if (roi >= 13) base = 5;
+                    else if (roi >= 11) base = 4;
+                    else if (roi >= 10) base = 3;
+                    else if (roi >= 8) base = 2;
+                    else base = 1;
+                    return Math.max(1, Math.round(base * _confMultiplier));
                   })(),
                   isProfitable: flipNetProfit > 0,
                 },
@@ -4459,18 +4572,30 @@ BRRRR STRATEGY:
                       <div className="flex items-center gap-2">
                         <Calculator className="w-4 h-4 text-orange-400" />
                         <span className="text-orange-400">Flip Analysis</span>
-                        {!flipAnalysisOpen && (
-                          <div className="flex items-center gap-3 ml-2 text-xs">
-                            <span className="text-muted-foreground">Profit:</span>
-                            <span className={cn("font-bold", flipNetProfit >= 30000 ? "text-emerald-400" : flipNetProfit >= 0 ? "text-amber-400" : "text-red-400")}>
-                              {formatCurrency(flipNetProfit)}
-                            </span>
-                            <span className="text-muted-foreground">ROI:</span>
-                            <span className={cn("font-bold", flipRoi >= 25 ? "text-emerald-400" : flipRoi >= 15 ? "text-amber-400" : "text-red-400")}>
-                              {flipRoi.toFixed(1)}%
-                            </span>
-                          </div>
-                        )}
+                        {!flipAnalysisOpen && (() => {
+                          // Compute cash-deal summary using same formula as expanded section
+                          const _cp = localOverrides.closingCostsPercent ? parseFloat(localOverrides.closingCostsPercent) / 100 : loanDefaults.closingCostsPercent / 100;
+                          const _closing = localOverrides.closingCostsDollar ? parseFloat(localOverrides.closingCostsDollar) : purchasePrice * _cp;
+                          const _contingency = rehabCost * (localOverrides.contingencyPercent ? parseFloat(localOverrides.contingencyPercent) / 100 : loanDefaults.contingencyPercent / 100);
+                          const _totalInv = purchasePrice + _closing + rehabCost + _contingency + totalHoldingCosts;
+                          const _agent = arv * (localOverrides.agentCommissionPercent ? parseFloat(localOverrides.agentCommissionPercent) / 100 : loanDefaults.agentCommissionPercent / 100);
+                          const _notary = localOverrides.cashNotaryFee ? parseFloat(localOverrides.cashNotaryFee) : 400;
+                          const _title = localOverrides.titleFees ? parseFloat(localOverrides.titleFees) : 500;
+                          const _profit = arv - _totalInv - _agent - _notary - _title;
+                          const _roi = _totalInv > 0 ? (_profit / _totalInv) * 100 : 0;
+                          return (
+                            <div className="flex items-center gap-3 ml-2 text-xs">
+                              <span className="text-muted-foreground">Profit:</span>
+                              <span className={cn("font-bold", _profit >= 30000 ? "text-emerald-400" : _profit >= 0 ? "text-amber-400" : "text-red-400")}>
+                                {formatCurrency(_profit)}
+                              </span>
+                              <span className="text-muted-foreground">ROI:</span>
+                              <span className={cn("font-bold", _roi >= 25 ? "text-emerald-400" : _roi >= 15 ? "text-amber-400" : "text-red-400")}>
+                                {_roi.toFixed(1)}%
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </div>
                       <div className="flex items-center gap-2">
                         <Button 
@@ -5224,9 +5349,9 @@ BRRRR STRATEGY:
                         <span className="text-cyan-400">Rental Analysis</span>
                         {!rentalAnalysisOpen && (
                           <div className="flex items-center gap-3 ml-2 text-xs">
-                            <span className="text-muted-foreground">Cashflow:</span>
-                            <span className={cn("font-bold", rentalMonthlyCashflow >= 200 ? "text-emerald-400" : rentalMonthlyCashflow >= 0 ? "text-amber-400" : "text-red-400")}>
-                              {formatCurrency(rentalMonthlyCashflow)}/mo
+                            <span className="text-muted-foreground">NOI:</span>
+                            <span className={cn("font-bold", rentalMonthlyNOI >= 200 ? "text-emerald-400" : rentalMonthlyNOI >= 0 ? "text-amber-400" : "text-red-400")}>
+                              {formatCurrency(rentalMonthlyNOI)}/mo
                             </span>
                             <span className="text-muted-foreground">Cap Rate:</span>
                             <span className={cn("font-bold", rentalCapRate >= 8 ? "text-emerald-400" : rentalCapRate >= 6 ? "text-amber-400" : "text-red-400")}>
@@ -5861,6 +5986,51 @@ BRRRR STRATEGY:
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <CardContent className="p-3 pt-2">
+                  {/* Investment Score Breakdown */}
+                  {headerInvestmentScore && (
+                    <div className="mb-4 p-3 rounded-lg border border-purple-500/20 bg-purple-500/5">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm font-semibold text-purple-300">Investment Score</span>
+                        <span className={cn(
+                          "text-sm font-bold px-2 py-0.5 rounded",
+                          headerInvestmentScore.decision === 'Buy'
+                            ? "bg-emerald-500/20 text-emerald-400"
+                            : "bg-red-500/20 text-red-400"
+                        )}>
+                          {headerInvestmentScore.decision === 'Buy' ? '✓ Buy' : '✗ Pass'} · {headerInvestmentScore.finalScore.toFixed(1)}/10
+                        </span>
+                      </div>
+                      {headerInvestmentScore.isFullBrrrr && (
+                        <div className="px-2 py-1.5 rounded-md bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-medium text-center">
+                          🎉 Full BRRRR — כל הכסף חזר! תשואה = ∞
+                        </div>
+                      )}
+                      <div className="space-y-2">
+                        {[
+                          { label: 'Cash Flow', score: headerInvestmentScore.cashFlowScore, weight: 33, detail: `${formatCurrency(headerInvestmentScore.monthlyCashflow)}/mo · ${headerInvestmentScore.isFullBrrrr ? '∞ CoC' : headerInvestmentScore.annualReturnPct.toFixed(1) + '% CoC'}` },
+                          { label: 'Equity',    score: headerInvestmentScore.equityScore,    weight: 33, detail: `${formatCurrency(headerInvestmentScore.trueEquity)} true equity` },
+                          { label: 'Location',  score: headerInvestmentScore.locationScore,  weight: 34, detail: headerInvestmentScore.schoolTotal > 0 ? `Schools: ${headerInvestmentScore.schoolTotal.toFixed(1)}/15${headerInvestmentScore.inventoryMonths != null ? ` · Inv: ${headerInvestmentScore.inventoryMonths}mo` : ''}` : 'School data missing' },
+                        ].map(({ label, score, weight, detail }) => (
+                          <div key={label} className="flex items-center gap-2 text-xs">
+                            <span className="w-20 text-muted-foreground shrink-0">{label} <span className="text-muted-foreground/50">{weight}%</span></span>
+                            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                              <div
+                                className={cn("h-full rounded-full transition-all", score >= 7 ? "bg-emerald-500" : score >= 5 ? "bg-yellow-500" : "bg-red-500")}
+                                style={{ width: `${score * 10}%` }}
+                              />
+                            </div>
+                            <span className={cn("w-8 text-right font-medium shrink-0", score >= 7 ? "text-emerald-400" : score >= 5 ? "text-yellow-400" : "text-red-400")}>
+                              {score.toFixed(1)}
+                            </span>
+                            <span className="text-muted-foreground truncate max-w-[140px]">{detail}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {headerInvestmentScore.missingFields.length > 0 && (
+                        <p className="text-xs text-orange-400 mt-2">⚠ Partial: {headerInvestmentScore.missingFields.join(', ')} missing</p>
+                      )}
+                    </div>
+                  )}
                 {(() => {
                   // BRRRR combines HML for acquisition + Refi loan for long-term hold
                   // Phase 1: HML acquisition (reuses Flip HML calculations)
@@ -6357,10 +6527,230 @@ BRRRR STRATEGY:
                     </div>
                   );
                 })()}
+
+                {/* ── Investment Decision Score ── */}
+                {(() => {
+                  const invScore = calculateInvestmentScore({
+                    monthlyCashflow: brrrrMonthlyCashflow || null,
+                    cashLeftInDeal: brrrrCashLeftInDeal,
+                    arv,
+                    purchasePrice,
+                    rehabCost,
+                    schoolTotal: apiData?.schoolScore ?? null,
+                    inventoryMonths: localOverrides.inventoryMonths ? parseFloat(localOverrides.inventoryMonths) : null,
+                  }, settings.investmentScoreSettings);
+                  const isBuy = invScore?.decision === 'Buy';
+                  return (
+                    <div className="mt-4 rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-semibold text-base">Investment Decision Score</h3>
+                        {invScore ? (
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl font-bold">{invScore.finalScore.toFixed(1)}<span className="text-sm text-muted-foreground">/10</span></span>
+                            <span className={cn("text-sm font-bold px-3 py-1 rounded-full border", isBuy ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40" : "bg-red-500/20 text-red-400 border-red-500/40")}>
+                              {isBuy ? '✓ Buy' : '✗ Pass'}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">N/A — missing data</span>
+                        )}
+                      </div>
+
+                      {invScore && (
+                        <div className="grid grid-cols-1 gap-3 text-sm">
+                          {/* Cash Flow */}
+                          <div className="rounded-lg border border-border bg-card/60 p-3 space-y-1.5">
+                            <div className="flex justify-between font-medium">
+                              <span>1. Cash Flow Score</span>
+                              <span className={cn("font-bold", invScore.cashFlowScore >= 8 ? "text-emerald-400" : invScore.cashFlowScore >= 6 ? "text-amber-400" : "text-red-400")}>{invScore.cashFlowScore.toFixed(1)}/10</span>
+                            </div>
+                            <div className="flex justify-between text-muted-foreground pl-2">
+                              <span>Monthly cashflow</span>
+                              <span>{formatCurrency(invScore.monthlyCashflow)}/mo → <span className="text-foreground">{invScore.monthlyCashFlowScore.toFixed(1)}</span></span>
+                            </div>
+                            <div className="flex justify-between text-muted-foreground pl-2">
+                              <span>Annual CoC return</span>
+                              <span>{invScore.annualReturnPct > 100 ? '∞' : `${invScore.annualReturnPct.toFixed(1)}%`} → <span className="text-foreground">{invScore.annualReturnScore.toFixed(1)}</span></span>
+                            </div>
+                          </div>
+
+                          {/* Equity */}
+                          <div className="rounded-lg border border-border bg-card/60 p-3 space-y-1.5">
+                            <div className="flex justify-between font-medium">
+                              <span>2. True Equity Score</span>
+                              <span className={cn("font-bold", invScore.equityScore >= 8 ? "text-emerald-400" : invScore.equityScore >= 6 ? "text-amber-400" : "text-red-400")}>{invScore.equityScore.toFixed(1)}/10</span>
+                            </div>
+                            <div className="flex justify-between text-muted-foreground pl-2">
+                              <span>ARV − Purchase − Rehab</span>
+                              <span>{formatCurrency(invScore.trueEquity)}</span>
+                            </div>
+                          </div>
+
+                          {/* Location */}
+                          <div className="rounded-lg border border-border bg-card/60 p-3 space-y-1.5">
+                            <div className="flex justify-between font-medium">
+                              <span>3. Location Score</span>
+                              <span className={cn("font-bold", invScore.locationScore >= 8 ? "text-emerald-400" : invScore.locationScore >= 6 ? "text-amber-400" : "text-red-400")}>{invScore.locationScore.toFixed(1)}/10</span>
+                            </div>
+                            <div className="flex justify-between text-muted-foreground pl-2">
+                              <span>School score (cumulative)</span>
+                              <span>{invScore.schoolTotal.toFixed(1)} → <span className="text-foreground">{invScore.schoolScore.toFixed(1)}</span></span>
+                            </div>
+                            {invScore.inventoryScore != null && (
+                              <div className="flex justify-between text-muted-foreground pl-2">
+                                <span>Inventory</span>
+                                <span>{invScore.inventoryMonths} mo → <span className="text-foreground">{invScore.inventoryScore.toFixed(1)}</span></span>
+                              </div>
+                            )}
+                            {invScore.inventoryScore == null && (
+                              <div className="pl-2 text-xs text-muted-foreground/70 italic">Inventory not set — score based on schools only</div>
+                            )}
+                            <div className="flex items-center gap-2 pt-1.5">
+                              <Label className="text-xs text-muted-foreground shrink-0">Inventory (months)</Label>
+                              <Input
+                                type="number"
+                                placeholder="e.g. 4"
+                                className="h-7 text-xs w-24"
+                                value={localOverrides.inventoryMonths || ''}
+                                onChange={e => setLocalOverrides(prev => ({ ...prev, inventoryMonths: e.target.value }))}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </CardContent>
                 </CollapsibleContent>
               </Card>
             </Collapsible>
+
+            {/* ACQUISITION ENGINE */}
+            {headerInvestmentScore && (
+            <Collapsible open={acquisitionEngineOpen} onOpenChange={setAcquisitionEngineOpen}>
+              <Card className="border border-emerald-500/30 bg-card/50">
+                <CollapsibleTrigger asChild>
+                  <CardHeader className="pb-2 cursor-pointer hover:bg-muted/30 transition-colors">
+                    <CardTitle className="text-base flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Zap className="w-4 h-4 text-emerald-400" />
+                        <span className="text-emerald-400">Acquisition Engine</span>
+                        {!acquisitionEngineOpen && (
+                          <span className={cn(
+                            "text-xs font-bold ml-1",
+                            headerInvestmentScore.decision === 'Buy' ? "text-emerald-400" : "text-red-400"
+                          )}>
+                            {headerInvestmentScore.decision === 'Buy' ? '✓ Buy' : '✗ Pass'} · {headerInvestmentScore.finalScore.toFixed(1)}/10
+                          </span>
+                        )}
+                      </div>
+                      <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform", acquisitionEngineOpen && "rotate-180")} />
+                    </CardTitle>
+                  </CardHeader>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent className="p-4 pt-0 space-y-4">
+                    {/* Verdict */}
+                    <div className={cn(
+                      "flex items-center justify-between p-3 rounded-lg border",
+                      headerInvestmentScore.decision === 'Buy'
+                        ? "border-emerald-500/40 bg-emerald-500/10"
+                        : "border-red-500/40 bg-red-500/10"
+                    )}>
+                      <div>
+                        <p className={cn("text-2xl font-bold", headerInvestmentScore.decision === 'Buy' ? "text-emerald-400" : "text-red-400")}>
+                          {headerInvestmentScore.decision === 'Buy' ? '✓ BUY' : '✗ PASS'}
+                        </p>
+                        {headerInvestmentScore.isFullBrrrr && (
+                          <p className="text-xs text-emerald-300 font-semibold mt-0.5">🎉 Full BRRRR — ∞ תשואה על הכסף!</p>
+                        )}
+                        <p className="text-xs text-muted-foreground mt-0.5">Threshold: ≥{(settings.investmentScoreSettings?.buyThreshold ?? 7).toFixed(1)} to Buy</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-3xl font-bold text-foreground">{headerInvestmentScore.finalScore.toFixed(1)}</p>
+                        <p className="text-xs text-muted-foreground">out of 10</p>
+                      </div>
+                    </div>
+
+                    {/* Score bar */}
+                    <div className="space-y-1">
+                      <div className="relative h-3 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={cn("h-full rounded-full transition-all", headerInvestmentScore.decision === 'Buy' ? "bg-emerald-500" : headerInvestmentScore.finalScore >= 5 ? "bg-yellow-500" : "bg-red-500")}
+                          style={{ width: `${headerInvestmentScore.finalScore * 10}%` }}
+                        />
+                        {/* Threshold marker */}
+                        <div
+                          className="absolute top-0 bottom-0 w-0.5 bg-white/50"
+                          style={{ left: `${(settings.investmentScoreSettings?.buyThreshold ?? 7) * 10}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>0</span>
+                        <span className="text-white/50">← Buy threshold at {(settings.investmentScoreSettings?.buyThreshold ?? 7).toFixed(1)}</span>
+                        <span>10</span>
+                      </div>
+                    </div>
+
+                    {/* Component breakdown */}
+                    <div className="space-y-3">
+                      {[
+                        {
+                          label: 'Cash Flow', score: headerInvestmentScore.cashFlowScore, weight: settings.investmentScoreSettings?.cashFlowWeight ?? 33,
+                          lines: [
+                            `Monthly CF: ${formatCurrency(headerInvestmentScore.monthlyCashflow)}/mo → ${headerInvestmentScore.monthlyCashFlowScore.toFixed(1)}/10`,
+                            `Annual CoC: ${headerInvestmentScore.annualReturnPct >= 100 ? '∞ (full BRRRR)' : headerInvestmentScore.annualReturnPct.toFixed(1) + '%'} → ${headerInvestmentScore.annualReturnScore.toFixed(1)}/10`,
+                          ],
+                        },
+                        {
+                          label: 'Equity', score: headerInvestmentScore.equityScore, weight: settings.investmentScoreSettings?.equityWeight ?? 33,
+                          lines: [
+                            `ARV ${formatCurrency(arv)} − Purchase ${formatCurrency(purchasePrice)} − Rehab ${formatCurrency(rehabCost)}`,
+                            `True Equity: ${formatCurrency(headerInvestmentScore.trueEquity)}`,
+                          ],
+                        },
+                        {
+                          label: 'Location', score: headerInvestmentScore.locationScore, weight: settings.investmentScoreSettings?.locationWeight ?? 34,
+                          lines: [
+                            `Schools: ${headerInvestmentScore.schoolTotal.toFixed(1)}/15 → ${headerInvestmentScore.schoolScore.toFixed(1)}/10 (60%)`,
+                            headerInvestmentScore.inventoryMonths != null
+                              ? `Inventory: ${headerInvestmentScore.inventoryMonths}mo → ${headerInvestmentScore.inventoryScore?.toFixed(1)}/10 (40%)`
+                              : `Inventory: not set (enter in overrides)`,
+                          ],
+                        },
+                      ].map(({ label, score, weight, lines }) => (
+                        <div key={label} className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium w-24 shrink-0">{label} <span className="text-muted-foreground">{weight}%</span></span>
+                            <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                              <div
+                                className={cn("h-full rounded-full", score >= 7 ? "bg-emerald-500" : score >= 5 ? "bg-yellow-500" : "bg-red-500")}
+                                style={{ width: `${score * 10}%` }}
+                              />
+                            </div>
+                            <span className={cn("text-xs font-bold w-10 text-right shrink-0", score >= 7 ? "text-emerald-400" : score >= 5 ? "text-yellow-400" : "text-red-400")}>
+                              {score.toFixed(1)}/10
+                            </span>
+                          </div>
+                          {lines.map((l, i) => (
+                            <p key={i} className="text-xs text-muted-foreground ml-26 pl-1">{l}</p>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+
+                    {headerInvestmentScore.missingFields.length > 0 && (
+                      <p className="text-xs text-orange-400 border border-orange-500/30 rounded p-2 bg-orange-500/5">
+                        ⚠ Partial score — {headerInvestmentScore.missingFields.join(', ')} missing. Add in Modified Assumptions.
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground border-t border-border pt-2">Adjust weights & threshold in Settings → Investment Score</p>
+                  </CardContent>
+                </CollapsibleContent>
+              </Card>
+            </Collapsible>
+            )}
 
             {/* ZIP Market Intelligence */}
             {deal.address.zip && (

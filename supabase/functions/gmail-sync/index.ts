@@ -484,6 +484,7 @@ RULES:
 - "Total Interior Area", "Living Area", "Heated Sq Ft" etc. → use as sqft
 - "Budget", "Rehab Budget", "Repairs" → use as rehabCost
 - "Market Rent", "Rental Income" → use as rent
+- "Asking $245,000" or "Asking: $245,000" (without the word "price") → use as purchasePrice
 - "FCFS" = First Come First Served (note in dealNotes)
 - Beds/Baths may appear as "3 Beds / 3 Baths", "3BD/2BA", "Bedrooms: 3", "3 bed 2 bath"
 - "Total Interior Area", "Second Floor Finished", "First Floor Finished" → sum for sqft if no single total given
@@ -1096,15 +1097,18 @@ serve(async (req) => {
         );
 
         let extractionResult: ExtractionResult;
+        let prefilterScore = 0; // Track score for use after the if/else
 
         // If thread reply found new properties, skip prefilter+extract, convert legacy format
         if (preExtractedDeals !== null) {
+          prefilterScore = 10; // Thread replies are implicitly high-confidence
           extractionResult = {
             email_type: 'deal',
             properties: preExtractedDeals.map(d => legacyToExtractedProperty(d)),
           };
         } else {
           const prefilterResult = prefilter(normalized, knownWholesalerEmails);
+          prefilterScore = prefilterResult.score;
 
           // Save prefilter result (fire and forget)
           if (!dry_run) {
@@ -1145,15 +1149,22 @@ serve(async (req) => {
 
         if (extractionResult.email_type === 'non_deal' || extractionResult.properties.length === 0) {
           await markEmailAsRead(access_token, msg.id);
+          // High prefilter score (≥3) = email looks like a real deal but AI found no address.
+          // Show it to the user as 'no_address' so they can manually enter the address.
+          // Low score = true newsletter/non-deal — hide it.
+          const noDealsAction = prefilterScore >= 3 ? 'no_address' : 'skipped_newsletter';
+          const noDealsReason = prefilterScore >= 3
+            ? `No address found. Body preview: "${normalized.combinedContext.substring(0, 500)}"`
+            : `email_type:${extractionResult.email_type}`;
           state.syncDetails.push({
             address: '',
-            action: 'skipped_newsletter',
+            action: noDealsAction,
             senderEmail: senderInfo.email,
             senderName: senderInfo.name,
             subject,
             messageId: msg.id,
             emailSnippet: snippet,
-            reason: `email_type:${extractionResult.email_type}`,
+            reason: noDealsReason,
           });
           return;
         }
