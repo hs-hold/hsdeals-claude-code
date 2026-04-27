@@ -27,6 +27,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter, Zap, Loader2, Lock, X, CheckCircle2, AlertTriangle, Mail, Globe, Trash2, ExternalLink, ScanLine } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { DealAgeFilter, AgeFilterType, applyDealAgeFilter } from '@/components/deals/DealAgeFilter';
@@ -50,9 +51,10 @@ interface DealsTableProps {
   excludeStatuses?: DealStatus[];
   showCloseAction?: boolean;
   showAnalyzeButton?: boolean;
+  isLoading?: boolean;
 }
 
-export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true, showAnalyzeButton = true }: DealsTableProps) {
+export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true, showAnalyzeButton = true, isLoading = false }: DealsTableProps) {
   const { analyzeDeal, updateDealStatus, deleteDeal } = useDeals();
   const { settings } = useSettings();
   const scoreSettings = settings.investmentScoreSettings;
@@ -68,7 +70,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
   const [minYield, setMinYield] = useState<string>('');
   const [sortField, setSortField] = useState<SortField>('created');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-  const [ageFilter, setAgeFilter] = useState<AgeFilterType>('month');
+  const [ageFilter, setAgeFilter] = useState<AgeFilterType>('all');
 
   const handleAnalyze = async (dealId: string) => {
     setAnalyzingId(dealId);
@@ -281,6 +283,41 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
       )}
     </Button>
   );
+
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        {/* Mobile skeleton */}
+        <div className="md:hidden space-y-2">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="rounded-xl border border-border bg-card px-4 py-3 space-y-2">
+              <div className="flex justify-between"><Skeleton className="h-4 w-40" /><Skeleton className="h-4 w-12" /></div>
+              <div className="flex justify-between"><Skeleton className="h-3 w-24" /><Skeleton className="h-5 w-16 rounded-full" /></div>
+              <div className="flex gap-4"><Skeleton className="h-3 w-20" /><Skeleton className="h-3 w-20" /></div>
+            </div>
+          ))}
+        </div>
+        {/* Desktop skeleton */}
+        <div className="hidden md:block rounded-xl border border-border overflow-hidden">
+          <div className="bg-muted/30 px-4 py-3 flex gap-4 border-b border-border">
+            {['w-48', 'w-24', 'w-20', 'w-24', 'w-24', 'w-24', 'w-20'].map((w, i) => (
+              <Skeleton key={i} className={`h-4 ${w}`} />
+            ))}
+          </div>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="px-4 py-3 flex gap-4 border-b border-border/50 last:border-0">
+              <div className="w-48 space-y-1"><Skeleton className="h-4 w-36" /><Skeleton className="h-3 w-24" /></div>
+              <Skeleton className="h-5 w-20 rounded-full" />
+              <Skeleton className="h-4 w-16 ml-auto" />
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="h-4 w-16" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

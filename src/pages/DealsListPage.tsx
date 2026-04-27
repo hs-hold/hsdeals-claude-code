@@ -4,7 +4,7 @@ import { DealsTable } from '@/components/deals/DealsTable';
 import { getAnalyzedDeals } from '@/utils/dealHelpers';
 
 export default function DealsListPage() {
-  const { deals } = useDeals();
+  const { deals, isLoading } = useDeals();
 
   // Filter to show only analyzed deals (excludes not_relevant and closed in DealsTable)
   const analyzedDeals = useMemo(() => getAnalyzedDeals(deals), [deals]);
@@ -22,10 +22,11 @@ export default function DealsListPage() {
       </div>
 
       {/* Deals Table - hide Analyze button since these are already analyzed */}
-      <DealsTable 
-        deals={analyzedDeals} 
-        excludeStatuses={['not_relevant', 'closed']} 
+      <DealsTable
+        deals={analyzedDeals}
+        excludeStatuses={['not_relevant', 'closed']}
         showAnalyzeButton={false}
+        isLoading={isLoading}
       />
     </div>
   );
