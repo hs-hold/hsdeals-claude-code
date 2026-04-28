@@ -480,7 +480,9 @@ RULES:
 - Find ALL properties listed — wholesalers often list 2-10 properties per email
 - Each property needs a street number (e.g. "463 Main St"). City-only phrases are NOT addresses.
 - ALL numeric fields MUST be plain numbers — no $ signs, no commas. e.g. 162000 not "$162,000"
-- Extract EVERY available field. Never leave a field null if the data exists in the email.
+- Extract ONLY values explicitly stated in the email. Return null for any field not explicitly present.
+- NEVER infer, guess, or invent values. Null is preferred over a guessed value.
+- In multi-property emails, only attach a value to a property if it appears next to (or clearly tied to) that specific property's address. Never copy values from one property to another.
 - "Total Interior Area", "Living Area", "Heated Sq Ft" etc. → use as sqft
 - "Budget", "Rehab Budget", "Repairs" → use as rehabCost
 - "Market Rent", "Rental Income" → use as rent
@@ -488,6 +490,9 @@ RULES:
 - "FCFS" = First Come First Served (note in dealNotes)
 - Beds/Baths may appear as "3 Beds / 3 Baths", "3BD/2BA", "Bedrooms: 3", "3 bed 2 bath"
 - "Total Interior Area", "Second Floor Finished", "First Floor Finished" → sum for sqft if no single total given
+- "condition" must come from explicit wording in the email ("needs work", "vacant", "tenant occupied", "fully renovated"). Do NOT classify rehab severity ("Light Rehab", "Moderate Rehab") unless the email uses those words.
+- "dealNotes" must be a short factual summary or direct quote from the email. Do NOT add marketing language ("strong value-add", "great opportunity", "growing area") unless that exact phrasing appears in the email.
+- "propertyDescription" must summarize only details actually present in the email — no embellishments, no invented neighborhood claims, no pricing not stated.
 
 For each property, extract:
 - address: Full US address with street, city, state, and ZIP if available. ZIP is optional — "123 Main St, Atlanta, GA" is valid. If multiple properties share the same city/state context, apply it to all of them.
