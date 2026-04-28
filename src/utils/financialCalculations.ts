@@ -71,7 +71,8 @@ export function calculateArvFromRecentComps(
   apiArv: number,
   saleComps: { salePrice: number; sqft: number; bedrooms: number; bathrooms: number; saleDate?: string }[],
   targetBedrooms: number,
-  targetBathrooms: number
+  targetBathrooms: number,
+  propertySqft: number
 ): { calculatedArv: number; useApiArv: boolean; compsUsed: number; explanation: string } {
   const now = new Date();
   const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
@@ -129,9 +130,14 @@ export function calculateArvFromRecentComps(
     };
   }
 
-  const calculatedArv = Math.round(
-    compsToUse.reduce((sum, c) => sum + c.salePrice, 0) / compsToUse.length
-  );
+  // Normalize by price-per-sqft so a much larger/smaller comp doesn't skew ARV.
+  // Falls back to raw price averaging when sqft data is missing.
+  const compsWithSqft = compsToUse.filter(c => c.sqft && c.sqft > 0);
+  const calculatedArv = (propertySqft > 0 && compsWithSqft.length > 0)
+    ? Math.round(
+        (compsWithSqft.reduce((sum, c) => sum + c.salePrice / c.sqft, 0) / compsWithSqft.length) * propertySqft
+      )
+    : Math.round(compsToUse.reduce((sum, c) => sum + c.salePrice, 0) / compsToUse.length);
 
   // Guard: if calculatedArv is 0 or NaN, fall back to apiArv
   if (!calculatedArv || !isFinite(calculatedArv)) {
@@ -375,7 +381,7 @@ export function calculateFinancials(
     const saleComps = apiData.saleComps || [];
     const apiArv = (apiData.arv ?? 0) + layoutArvIncrease;
     
-    const arvCalc = calculateArvFromRecentComps(apiArv, saleComps, targetBedrooms, targetBathrooms);
+    const arvCalc = calculateArvFromRecentComps(apiArv, saleComps, targetBedrooms, targetBathrooms, apiData.sqft ?? 0);
     arv = arvCalc.calculatedArv;
     
     // Also validate against highest comp for safety
