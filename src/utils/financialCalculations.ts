@@ -107,9 +107,27 @@ export function calculateArvFromRecentComps(
     c.bedrooms === targetBedrooms && c.bathrooms === targetBathrooms
   );
 
+  // Layout-range fallback (±1 bed/bath) — mirrors DealDetailPage so Hot Deals'
+  // ARV doesn't get inflated by comps whose layout is far from the subject.
+  const layoutRangeComps = validRecentComps.filter(c =>
+    Math.abs((c.bedrooms || 0) - targetBedrooms) <= 1 &&
+    Math.abs((c.bathrooms || 0) - targetBathrooms) <= 1
+  );
+
   const compsToUse = exactMatchComps.length > 0
     ? exactMatchComps.slice(0, 5)
-    : validRecentComps.slice(0, 5);
+    : layoutRangeComps.slice(0, 5);
+
+  // No comps survived the layout filter — fall back to API ARV rather than
+  // averaging unrelated layouts.
+  if (compsToUse.length === 0) {
+    return {
+      calculatedArv: apiArv,
+      useApiArv: true,
+      compsUsed: 0,
+      explanation: 'No recent comps within ±1 bed/bath of target layout — using API ARV',
+    };
+  }
 
   const calculatedArv = Math.round(
     compsToUse.reduce((sum, c) => sum + c.salePrice, 0) / compsToUse.length
