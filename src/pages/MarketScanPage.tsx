@@ -172,7 +172,31 @@ type Stage = 0 | 1 | 2 | 4 | 5 | 6;
 
 // ─── Filter listings ─────────────────────────────────────────────────────────
 
+// Median list-price-per-sqft per ZIP, computed from the same scan batch.
+// Used as a comp-driven ARV proxy when Zestimate is missing — more accurate
+// than the static ZIP_MEDIAN because it reflects current local pricing AND
+// adjusts for the subject's actual sqft.
+function computeZipPpsf(raw: RawListing[]): Record<string, number> {
+  const byZip = new Map<string, number[]>();
+  for (const l of raw) {
+    if (!l.zipcode || !l.price || !l.sqft || l.sqft < 400) continue;
+    const ppsf = l.price / l.sqft;
+    if (ppsf < 50 || ppsf > 500) continue;
+    const arr = byZip.get(l.zipcode) ?? [];
+    arr.push(ppsf);
+    byZip.set(l.zipcode, arr);
+  }
+  const out: Record<string, number> = {};
+  for (const [zip, arr] of byZip) {
+    if (arr.length < 3) continue;
+    const sorted = [...arr].sort((a, b) => a - b);
+    out[zip] = sorted[Math.floor(sorted.length / 2)];
+  }
+  return out;
+}
+
 function filterListings(raw: RawListing[]): ScoredListing[] {
+  const zipPpsf = computeZipPpsf(raw);
   const passed: ScoredListing[] = [];
   for (const l of raw) {
     if (l.price < MIN_PRICE || l.price > MAX_PRICE) continue;
@@ -182,8 +206,11 @@ function filterListings(raw: RawListing[]): ScoredListing[] {
     if (l.sqft && (l.sqft < MIN_SQFT || l.sqft > MAX_SQFT)) continue;
     if (l.bedrooms !== null && l.bedrooms < MIN_BEDS) continue;
 
-    // ARV: real zestimate > ZIP median > null
-    const arv = l.zestimate ?? ZIP_MEDIAN[l.zipcode] ?? null;
+    // ARV: real Zestimate > local ZIP $/sqft × subject sqft > static ZIP median > null
+    const localArv = l.sqft && zipPpsf[l.zipcode]
+      ? Math.round(l.sqft * zipPpsf[l.zipcode])
+      : null;
+    const arv = l.zestimate ?? localArv ?? ZIP_MEDIAN[l.zipcode] ?? null;
 
     // Filter out properties with no upside (price > 90% of ARV)
     if (arv && l.price / arv > 0.90) continue;
