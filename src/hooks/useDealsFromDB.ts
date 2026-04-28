@@ -5,6 +5,10 @@ import { calculateFinancials } from '@/utils/financialCalculations';
 import { extractArvFromSummary } from '@/utils/arv';
 import { useSettings } from '@/context/SettingsContext';
 
+// DB columns are typed as JSON in Supabase — the runtime shape is loose, so we
+// keep these as Record<string, unknown> | null and narrow at the call sites.
+type DBJson = Record<string, unknown> | null;
+
 interface DBDeal {
   id: string;
   address_street: string;
@@ -14,9 +18,9 @@ interface DBDeal {
   address_full: string;
   status: string;
   source: string;
-  api_data: any;
-  overrides: any;
-  financials: any;
+  api_data: DBJson;
+  overrides: DBJson;
+  financials: DBJson;
   rejection_reason: string | null;
   notes: string | null;
   email_subject: string | null;
@@ -32,16 +36,75 @@ interface DBDeal {
   is_locked: boolean;
   is_off_market: boolean;
   deal_type: string | null;
-  email_extracted_data: any;
-  scout_ai_data: Record<string, any> | null;
+  email_extracted_data: DBJson;
+  scout_ai_data: DBJson;
+  created_by?: string | null;
+  job_id?: string | null;
 }
+
+// Loose shapes for the analyze-property edge-function response.
+// The remote API field names differ from our internal model, so we accept
+// unknown extra fields and cherry-pick what we need.
+type RawComp = {
+  address?: string;
+  sale_price?: number;
+  saleDate?: string;
+  sale_date?: string;
+  bedrooms?: number;
+  bathrooms?: number;
+  sqft?: number;
+  distance?: number;
+  similarity?: { overall_score?: number; notes?: string[] };
+  similarityScore?: number;
+  notes?: string[];
+  days_on_market?: number | null;
+  daysOnMarket?: number | null;
+  salePrice?: number;
+};
+
+type RawRentComp = {
+  address?: string;
+  bedrooms?: number;
+  bathrooms?: number;
+  sqft?: number;
+  originalRent?: number;
+  adjustedRent?: number;
+  adjustment?: number;
+  adjustmentReason?: string;
+};
+
+type RawTaxEntry = {
+  time?: number;
+  taxPaid?: number | null;
+  value?: number | null;
+  taxIncreaseRate?: number;
+  valueIncreaseRate?: number;
+};
+
+type RawPriceHistoryEntry = {
+  date?: string;
+  time?: number;
+  price?: number;
+  event?: string;
+};
+
+type RawZillowSearchProperty = {
+  address?: string;
+  agentEmail?: string | null;
+  agentPhone?: string | null;
+};
 
 function mapDBDealToDeal(dbDeal: DBDeal, loanDefaults?: ReturnType<typeof import('@/context/SettingsContext').useSettings>['settings']['loanDefaults']): Deal {
   // Shallow copy so per-row mutations below don't bleed into the cached
   // Supabase response — that would defeat downstream React.memo / useMemo
   // reference equality on anything reading deal.apiData.
-  const apiData = { ...(dbDeal.api_data || {}) };
-  const overrides = dbDeal.overrides || { arv: null, rent: null, rehabCost: null, purchasePrice: null, downPaymentPercent: null, interestRate: null, loanTermYears: null };
+  // apiData kept as a loose Record because consumers read many dynamic fields;
+  // narrowing here would require typing the entire downstream surface.
+  const apiData: Record<string, any> = { ...((dbDeal.api_data as Record<string, any>) || {}) };
+  const overrides: DealOverrides = (dbDeal.overrides as DealOverrides | null) ?? {
+    arv: null, rent: null, rehabCost: null, purchasePrice: null,
+    downPaymentPercent: null, interestRate: null, loanTermYears: null,
+  } as DealOverrides;
   
   // Calculate financials if we have API data
   let financials = dbDeal.financials;
@@ -62,14 +125,14 @@ function mapDBDealToDeal(dbDeal: DBDeal, loanDefaults?: ReturnType<typeof import
       .replace(/[^a-z0-9]/g, '');
 
   if (Array.isArray(apiData.saleComps) && apiData.saleComps.length > 0 && rawComps.length > 0) {
-    apiData.saleComps = apiData.saleComps.map((comp: any) => {
+    apiData.saleComps = apiData.saleComps.map((comp: RawComp) => {
       if (Array.isArray(comp?.notes) && comp.notes.length > 0) return comp;
 
-      const byAddress = rawComps.find((rc: any) => normalizeAddr(rc?.address) === normalizeAddr(comp?.address));
+      const byAddress = (rawComps as RawComp[]).find((rc) => normalizeAddr(rc?.address) === normalizeAddr(comp?.address));
       const byFacts =
         byAddress ||
-        rawComps.find(
-          (rc: any) =>
+        (rawComps as RawComp[]).find(
+          (rc) =>
             (rc?.sale_price ?? null) === (comp?.salePrice ?? null) &&
             normalizeAddr(rc?.sale_date) === normalizeAddr(comp?.saleDate) &&
             (rc?.sqft ?? null) === (comp?.sqft ?? null)
@@ -88,7 +151,7 @@ function mapDBDealToDeal(dbDeal: DBDeal, loanDefaults?: ReturnType<typeof import
       [];
     
     if (rawTaxHistory.length > 0) {
-      apiData.taxHistory = rawTaxHistory.map((t: any) => ({
+      apiData.taxHistory = (rawTaxHistory as RawTaxEntry[]).map((t) => ({
         time: t.time || 0,
         taxPaid: t.taxPaid ?? null,
         value: t.value ?? null,
@@ -101,8 +164,9 @@ function mapDBDealToDeal(dbDeal: DBDeal, loanDefaults?: ReturnType<typeof import
   // Fix propertyTax: Use latest taxPaid from taxHistory if available (annual amount)
   // This fixes deals that were saved with monthly values instead of annual
   if (Array.isArray(apiData.taxHistory) && apiData.taxHistory.length > 0) {
-    const latestTaxEntry = apiData.taxHistory.reduce((latest: any, entry: any) => 
-      (!latest || (entry.time && entry.time > latest.time)) ? entry : latest, null
+    const latestTaxEntry = (apiData.taxHistory as RawTaxEntry[]).reduce<RawTaxEntry | null>(
+      (latest, entry) => (!latest || (entry.time && entry.time > (latest.time ?? 0)) ? entry : latest),
+      null,
     );
     if (latestTaxEntry?.taxPaid && latestTaxEntry.taxPaid > (apiData.propertyTax ?? 0)) {
       // If taxHistory has a higher taxPaid value, use it (it's the correct annual amount)
@@ -124,7 +188,7 @@ function mapDBDealToDeal(dbDeal: DBDeal, loanDefaults?: ReturnType<typeof import
     }
   }
 
-  const result: any = {
+  const result: Deal & { _jobId: string | null } = {
     id: dbDeal.id,
     address: {
       street: dbDeal.address_street,
@@ -151,15 +215,15 @@ function mapDBDealToDeal(dbDeal: DBDeal, loanDefaults?: ReturnType<typeof import
     updatedAt: dbDeal.updated_at,
     analyzedAt: dbDeal.analyzed_at,
     owner: 'Default User',
-    createdBy: (dbDeal as any).created_by || null,
+    createdBy: dbDeal.created_by ?? null,
     isLocked: dbDeal.is_locked || false,
     isOffMarket: dbDeal.is_off_market || false,
     dealType: dbDeal.deal_type || null,
     emailExtractedData: dbDeal.email_extracted_data || null,
     scoutAiData: dbDeal.scout_ai_data || null,
-    _jobId: (dbDeal as any).job_id || null,
+    _jobId: dbDeal.job_id ?? null,
   };
-  return result as Deal;
+  return result;
 }
 
 export function useDealsFromDB() {
@@ -513,8 +577,10 @@ export function useDealsFromDB() {
     // Get latest property tax from tax_history (most accurate source)
     const taxHistory = property.tax_history || [];
     const latestTaxHistory = taxHistory.length > 0 
-      ? taxHistory.reduce((latest: any, entry: any) => 
-          !latest || (entry.time && entry.time > latest.time) ? entry : latest, null)
+      ? (taxHistory as RawTaxEntry[]).reduce<RawTaxEntry | null>(
+          (latest, entry) => (!latest || (entry.time && entry.time > (latest.time ?? 0)) ? entry : latest),
+          null,
+        )
       : null;
     const latestTaxPaid = latestTaxHistory?.taxPaid;
     
@@ -589,13 +655,13 @@ export function useDealsFromDB() {
       mlsName: attribution.mlsName || null,
       
       // Additional data
-      priceHistory: (property.priceHistory || []).map((h: any) => ({
+      priceHistory: (property.priceHistory || []).map((h: RawPriceHistoryEntry) => ({
         date: h.date || (h.time ? new Date(h.time * 1000).toISOString().split('T')[0] : null),
         price: h.price || 0,
         event: h.event || 'Unknown',
-      })).filter((h: any) => h.price > 0),
-      
-      taxHistory: (property.tax_history || []).map((t: any) => ({
+      })).filter((h: { price: number }) => h.price > 0),
+
+      taxHistory: (property.tax_history || []).map((t: RawTaxEntry) => ({
         time: t.time || 0,
         taxPaid: t.taxPaid ?? null,
         value: t.value ?? null,
@@ -605,7 +671,7 @@ export function useDealsFromDB() {
       
       section8: (() => { const s8 = metrics.section8 || property.section8 || null; return s8 ? { areaName: s8.areaName || '', minRent: s8.minRent || 0, maxRent: s8.maxRent || 0, bedrooms: s8.bedrooms || 0 } : null; })(),
 
-      saleComps: (metrics.comps || property.comps || property.saleComps || []).slice(0, 4).map((c: any) => ({
+      saleComps: (metrics.comps || property.comps || property.saleComps || []).slice(0, 4).map((c: RawComp) => ({
         address: c.address || '',
         salePrice: c.sale_price || 0,
         saleDate: c.sale_date || '',
@@ -618,7 +684,7 @@ export function useDealsFromDB() {
         daysOnMarket: c.days_on_market ?? c.daysOnMarket ?? null,
       })),
       
-      rentComps: (metrics.rent_comps || property.rent_comps || property.rentComps || []).map((r: any) => ({
+      rentComps: (metrics.rent_comps || property.rent_comps || property.rentComps || []).map((r: RawRentComp) => ({
         address: r.address || '',
         bedrooms: r.bedrooms || 0,
         bathrooms: r.bathrooms || 0,
@@ -635,7 +701,7 @@ export function useDealsFromDB() {
 
     // Preserve agent info from prior analysis if DealBeast returns different/worse data on re-analyze.
     // Agent identity (name, phone, broker, MLS) that was already saved is treated as authoritative.
-    const existingAgent = (deal.apiData as any) || {};
+    const existingAgent: Record<string, any> = deal.apiData || {};
     if (existingAgent.agentName && !apiData.agentName)   apiData.agentName   = existingAgent.agentName;
     if (existingAgent.agentPhone && !apiData.agentPhone) apiData.agentPhone  = existingAgent.agentPhone;
     if (existingAgent.brokerName && !apiData.brokerName) apiData.brokerName  = existingAgent.brokerName;
@@ -660,7 +726,7 @@ export function useDealsFromDB() {
           });
           const streetRaw = (deal.address.street || deal.address.full || '').toLowerCase().replace(/[^a-z0-9]/g, '');
           const streetKey = streetRaw.slice(0, 12);
-          const match = (searchData?.properties ?? []).find((p: any) => {
+          const match = (searchData?.properties ?? []).find((p: RawZillowSearchProperty) => {
             const pAddr = (p.address || '').toLowerCase().replace(/[^a-z0-9]/g, '');
             return pAddr.includes(streetKey);
           });
@@ -680,7 +746,7 @@ export function useDealsFromDB() {
     // NEVER merge: arv, rent, capRate, cashFlow — get these from DealBeast API only.
     const emailData = deal.emailExtractedData;
     if (emailData && typeof emailData === 'object') {
-      const trusted = emailData as any;
+      const trusted = emailData as Record<string, any>;
       if (!apiData.bedrooms   && trusted.bedrooms)    apiData.bedrooms    = trusted.bedrooms;
       if (!apiData.bathrooms  && trusted.bathrooms)   apiData.bathrooms   = trusted.bathrooms;
       if (!apiData.sqft       && trusted.sqft)        apiData.sqft        = trusted.sqft;
