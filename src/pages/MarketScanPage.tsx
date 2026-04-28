@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -343,11 +343,27 @@ export default function MarketScanPage() {
 
   // ── Derived state ─────────────────────────────────────────────────────────
 
-  const visibleResults = results.filter(r => !r.excluded);
-  const nonDupeResults = visibleResults.filter(r => !r.alreadyAnalyzed || r.includeAnyway);
-  const aiChecked = nonDupeResults.filter(r => r.aiResult && r.aiResult.status !== 'pending');
-  const aiPassed = nonDupeResults.filter(r => r.aiResult?.status === 'pass');
+  const visibleResults = useMemo(() => results.filter(r => !r.excluded), [results]);
+  const nonDupeResults = useMemo(
+    () => visibleResults.filter(r => !r.alreadyAnalyzed || r.includeAnyway),
+    [visibleResults]
+  );
+  const aiChecked = useMemo(
+    () => nonDupeResults.filter(r => r.aiResult && r.aiResult.status !== 'pending'),
+    [nonDupeResults]
+  );
+  const aiPassed = useMemo(
+    () => nonDupeResults.filter(r => r.aiResult?.status === 'pass'),
+    [nonDupeResults]
+  );
   const hasAiResults = aiChecked.length > 0;
+  const excludedCount = useMemo(() => results.filter(r => r.excluded).length, [results]);
+  const alreadyAnalyzedCount = useMemo(() => results.filter(r => r.alreadyAnalyzed).length, [results]);
+  const areasDueCount = useMemo(() => getAreasToScan(scanCooldownDays).length, [scanCooldownDays]);
+  const sendableDealsCount = useMemo(
+    () => nonDupeResults.filter(r => r.dealScore >= MIN_DEAL_SCORE).length,
+    [nonDupeResults]
+  );
 
   // ── Scan ──────────────────────────────────────────────────────────────────
 
@@ -579,7 +595,7 @@ export default function MarketScanPage() {
                 className="w-8 h-5 text-center text-xs rounded border border-border/50 bg-background"
               />
               days ·{' '}
-              <span className="text-blue-400">{getAreasToScan(scanCooldownDays).length} areas due</span>
+              <span className="text-blue-400">{areasDueCount} areas due</span>
             </span>
           </div>
         </div>
@@ -615,7 +631,7 @@ export default function MarketScanPage() {
         <div className="flex items-center gap-2 flex-wrap">
           {/* Scan button — shown at all stages except DealBeast running */}
           {stage !== 5 && (() => {
-            const dueCnt = getAreasToScan(scanCooldownDays).length;
+            const dueCnt = areasDueCount;
             const allOnCooldown = dueCnt === 0;
             const nextMs = allOnCooldown ? getNextScanMs(scanCooldownDays) : null;
             const nextDays = nextMs ? Math.ceil((nextMs - Date.now()) / 86_400_000) : null;
@@ -665,7 +681,7 @@ export default function MarketScanPage() {
                 {dbRunning ? (
                   <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Analyzing…</>
                 ) : (
-                  <><Zap className="w-3.5 h-3.5" /> Analyze in DealBeast <span className="opacity-70">({Math.min(maxToSend, nonDupeResults.filter(r => r.dealScore >= MIN_DEAL_SCORE).length)} deals)</span></>
+                  <><Zap className="w-3.5 h-3.5" /> Analyze in DealBeast <span className="opacity-70">({Math.min(maxToSend, sendableDealsCount)} deals)</span></>
                 )}
               </Button>
             </div>
@@ -880,9 +896,9 @@ export default function MarketScanPage() {
         <div className="shrink-0 px-4 py-2 border-t border-border/30 bg-card/20 flex items-center gap-4 text-[11px] text-muted-foreground">
           <span>{results.length} total</span>
           <span className="text-muted-foreground/40">·</span>
-          <span>{results.filter(r => r.excluded).length} excluded</span>
+          <span>{excludedCount} excluded</span>
           <span className="text-muted-foreground/40">·</span>
-          <span>{results.filter(r => r.alreadyAnalyzed).length} already analyzed</span>
+          <span>{alreadyAnalyzedCount} already analyzed</span>
           {hasAiResults && (
             <>
               <span className="text-muted-foreground/40">·</span>
