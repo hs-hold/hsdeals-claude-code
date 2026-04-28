@@ -661,6 +661,50 @@ export default function DealDetailPage() {
     [apiData, loanDefaults]
   );
 
+  // Sale comps grouped + numbered consistently for the comps list and the map.
+  // Numbers run sequentially across recent → older so each marker matches its row.
+  const numberedSaleComps = useMemo(() => {
+    if (!apiData?.saleComps?.length) {
+      return { recent: [], older: [], onMarket: [], mapComps: [] as { address: string; number: number; label?: string }[] };
+    }
+    const targetBed = localOverrides.targetBedrooms ? parseInt(localOverrides.targetBedrooms) : (apiData.bedrooms ?? 0);
+    const targetBath = localOverrides.targetBathrooms ? parseInt(localOverrides.targetBathrooms) : (apiData.bathrooms ?? 0);
+
+    const filterByLayoutRange = (cs: typeof apiData.saleComps) => cs.filter(c => {
+      const bedDiff = Math.abs((c.bedrooms || 0) - targetBed);
+      const bathDiff = Math.abs((c.bathrooms || 0) - targetBath);
+      return bedDiff <= 1 && bathDiff <= 1;
+    });
+    const sortByLayoutMatch = (cs: typeof apiData.saleComps) => [...cs].sort((a, b) => {
+      const aExact = a.bedrooms === targetBed && a.bathrooms === targetBath;
+      const bExact = b.bedrooms === targetBed && b.bathrooms === targetBath;
+      if (aExact && !bExact) return -1;
+      if (!aExact && bExact) return 1;
+      return b.salePrice - a.salePrice;
+    });
+
+    const now = new Date();
+    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+    const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+
+    const allSold = apiData.saleComps.filter(c => c.saleDate);
+    const allOnMarket = apiData.saleComps.filter(c => !c.saleDate);
+    const sold = sortByLayoutMatch(filterByLayoutRange(allSold));
+    const onMarket = sortByLayoutMatch(filterByLayoutRange(allOnMarket)).slice(0, 3);
+
+    const recent = sold.filter(c => new Date(c.saleDate) >= sixMonthsAgo).slice(0, 8);
+    const older = sold.filter(c => new Date(c.saleDate) < sixMonthsAgo && new Date(c.saleDate) >= oneYearAgo).slice(0, 8);
+
+    const mapComps: { address: string; number: number; label?: string }[] = [];
+    let n = 1;
+    recent.forEach(c => mapComps.push({ address: c.address, number: n++, label: `${c.address} • $${c.salePrice.toLocaleString()}` }));
+    older.forEach(c => mapComps.push({ address: c.address, number: n++, label: `${c.address} • $${c.salePrice.toLocaleString()}` }));
+
+    return { recent, older, onMarket, mapComps };
+  }, [apiData, localOverrides.targetBedrooms, localOverrides.targetBathrooms]);
+
+  const mapComps = numberedSaleComps.mapComps;
+
   // Check if current local overrides differ from baseline (what was loaded from DB)
   // Resolves empty values to their display defaults so typing the default value = no change
   const hasUnsavedChanges = useMemo(() => {
@@ -6680,6 +6724,9 @@ Best regards`;
                             )}>
                               <div className="flex justify-between items-start mb-2">
                                 <div className="flex items-center gap-2">
+                                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex-shrink-0">
+                                    {idx + 1}
+                                  </span>
                                   <span className="font-medium text-sm">{comp.address}</span>
                                   {!isExactMatch && (
                                     <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 text-muted-foreground border-muted-foreground/30">
@@ -6752,6 +6799,9 @@ Best regards`;
                                 )}>
                                   <div className="flex justify-between items-start mb-2">
                                     <div className="flex items-center gap-2">
+                                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary/70 text-primary-foreground text-[10px] font-bold flex-shrink-0">
+                                        {recentSoldComps.length + idx + 1}
+                                      </span>
                                       <span className="font-medium text-sm text-muted-foreground">{comp.address}</span>
                                       {!isExactMatch && (
                                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 text-muted-foreground border-muted-foreground/30">
@@ -7144,10 +7194,12 @@ Best regards`;
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <PropertyMap 
-                  latitude={apiData.latitude} 
-                  longitude={apiData.longitude} 
+                <PropertyMap
+                  latitude={apiData.latitude}
+                  longitude={apiData.longitude}
                   address={deal.address.full}
+                  comps={mapComps}
+                  cityStateZip={[deal.address.city, deal.address.state, deal.address.zip].filter(Boolean).join(', ')}
                 />
               </CardContent>
             </Card>
