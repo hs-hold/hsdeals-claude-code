@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
-interface SyncDetail {
+export interface SyncDetail {
   address: string;
   action: 'created' | 'skipped_duplicate' | 'skipped_portal' | 'skipped_over_budget' | 'skipped_wrong_state' | 'updated_existing' | 'no_address' | 'error';
   dealId?: string;
@@ -19,7 +19,7 @@ interface SyncDetail {
   extractionSource?: 'ai' | 'regex';
 }
 
-interface SyncResult {
+export interface SyncResult {
   success: boolean;
   processed: number;
   deals: any[];

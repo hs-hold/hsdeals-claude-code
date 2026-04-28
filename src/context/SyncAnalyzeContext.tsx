@@ -1,7 +1,15 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { useDeals } from '@/context/DealsContext';
-import { useGmailSync } from '@/hooks/useGmailSync';
+import { useGmailSync, type SyncResult } from '@/hooks/useGmailSync';
 import { toast } from 'sonner';
+
+type DBDealRow = {
+  id: string;
+  address_full: string | null;
+  api_data: Record<string, any> | null;
+  overrides: Record<string, any> | null;
+  status: string | null;
+};
 
 interface AnalyzedDealInfo {
   id: string;
@@ -13,7 +21,7 @@ interface AnalyzedDealInfo {
 interface SyncAnalyzeState {
   isRunning: boolean;
   phase: 'idle' | 'syncing' | 'analyzing' | 'done';
-  syncResult: any | null;
+  syncResult: SyncResult | null;
   analyzedDeals: AnalyzedDealInfo[];
   currentIndex: number;
   totalToAnalyze: number;
@@ -91,17 +99,17 @@ export function SyncAnalyzeProvider({ children }: { children: React.ReactNode })
       await refetchRef.current();
 
       // Collect deals to analyze: newly created + updated with better price
-      const dealsToAnalyze = result.syncDetails
-        .filter((d: any) => (d.action === 'created' || d.action === 'updated_existing') && (d.dealId || d.existingDealId))
-        .map((d: any) => ({
-          id: d.dealId || d.existingDealId!,
+      const dealsToAnalyze: AnalyzedDealInfo[] = result.syncDetails
+        .filter(d => (d.action === 'created' || d.action === 'updated_existing') && (d.dealId || d.existingDealId))
+        .map(d => ({
+          id: (d.dealId || d.existingDealId)!,
           address: d.address || 'Unknown',
           status: 'pending' as const,
         }));
 
       // Deduplicate by deal ID
-      const uniqueDeals = dealsToAnalyze.filter((d: any, i: number, arr: any[]) => 
-        arr.findIndex((x: any) => x.id === d.id) === i
+      const uniqueDeals = dealsToAnalyze.filter((d, i, arr) =>
+        arr.findIndex(x => x.id === d.id) === i
       );
 
       if (uniqueDeals.length === 0) {
@@ -201,7 +209,7 @@ export function SyncAnalyzeProvider({ children }: { children: React.ReactNode })
     }
 
     // Filter: deals without analysis (no grade and no aiSummary) and within budget
-    const unanalyzed = dbDeals.filter((d: any) => {
+    const unanalyzed = (dbDeals as DBDealRow[]).filter(d => {
       const apiData = d.api_data || {};
       const hasAnalysis = apiData.grade || apiData.aiSummary;
       if (hasAnalysis) return false;
@@ -210,7 +218,7 @@ export function SyncAnalyzeProvider({ children }: { children: React.ReactNode })
       if (price > MAX_PRICE && price > 0) return false;
 
       return true;
-    }).map((d: any) => ({
+    }).map(d => ({
       id: d.id,
       address: d.address_full || 'Unknown',
       status: 'pending' as const,
