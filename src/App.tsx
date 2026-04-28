@@ -39,12 +39,15 @@ import EmailDealPreviewPage from "./pages/EmailDealPreviewPage";
 import PotentialDealsPage from "./pages/PotentialDealsPage";
 import PotentialMarketDealsPage from "./pages/PotentialMarketDealsPage";
 import AcquisitionPage from "./pages/AcquisitionPage";
+import ErrorLogPage from "./pages/ErrorLogPage";
 import NotFound from "./pages/NotFound";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const queryClient = new QueryClient({});
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
+    <ErrorBoundary>
     <AuthProvider>
       <SettingsProvider>
         <TooltipProvider>
@@ -84,6 +87,7 @@ const App = () => (
                   <Route path="/agent-management" element={<ProtectedRoute><AppLayout><AgentManagementPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/api-docs" element={<ProtectedRoute><AppLayout><ApiDocumentationPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/api-activity" element={<ProtectedRoute><AppLayout><ApiActivityPage /></AppLayout></ProtectedRoute>} />
+                  <Route path="/errors" element={<ProtectedRoute><AppLayout><ErrorLogPage /></AppLayout></ProtectedRoute>} />
                   <Route path="*" element={<ProtectedRoute><AppLayout><NotFound /></AppLayout></ProtectedRoute>} />
                 </Routes>
               </SyncAnalyzeProvider>
@@ -92,6 +96,7 @@ const App = () => (
         </TooltipProvider>
       </SettingsProvider>
     </AuthProvider>
+    </ErrorBoundary>
   </QueryClientProvider>
 );
 

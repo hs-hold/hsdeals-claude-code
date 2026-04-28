@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
 import { FINANCIAL_CONFIG } from '@/config/financial';
 import { InvestmentScoreSettings, DEFAULT_INVESTMENT_SCORE_SETTINGS } from '@/utils/investmentScore';
 
@@ -238,8 +238,15 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     }));
   };
 
+  // Stabilize the context value so consumers don't re-render on every parent
+  // render — only when settings or effectiveTheme actually change.
+  const value = useMemo(
+    () => ({ settings, updateSettings, updateLoanDefaults, updateInvestmentScoreSettings, effectiveTheme }),
+    [settings, effectiveTheme]
+  );
+
   return (
-    <SettingsContext.Provider value={{ settings, updateSettings, updateLoanDefaults, updateInvestmentScoreSettings, effectiveTheme }}>
+    <SettingsContext.Provider value={value}>
       {children}
     </SettingsContext.Provider>
   );
