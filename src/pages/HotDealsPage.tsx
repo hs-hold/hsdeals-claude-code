@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useDeals } from '@/context/DealsContext';
 import { useSettings } from '@/context/SettingsContext';
-import { DealAgeFilter, AgeFilterType, applyDealAgeFilter } from '@/components/deals/DealAgeFilter';
+import { DealAgeFilter, AgeFilterType, matchesDealAgeFilter } from '@/components/deals/DealAgeFilter';
 import { formatCurrency } from '@/utils/financialCalculations';
 import { calculateFlipScore } from '@/utils/flipScore';
 import { Card, CardContent } from '@/components/ui/card';
@@ -67,10 +67,7 @@ export default function HotDealsPage() {
       })
       .filter(Boolean)
       .sort((a, b) => b!.score - a!.score || b!.flipRoi - a!.flipRoi)
-      .filter(item => {
-        const filtered = applyDealAgeFilter([item!.deal], ageFilter);
-        return filtered.length > 0;
-      }) as {
+      .filter(item => matchesDealAgeFilter(item!.deal, ageFilter)) as {
         deal: Deal;
         score: number;
         flipRoi: number;

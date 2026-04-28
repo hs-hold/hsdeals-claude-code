@@ -270,6 +270,54 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
   );
   const hasMore = visibleCount < filteredAndSorted.length;
 
+  // Precompute per-row derived data once per visibleDeals/scoreSettings change so
+  // unrelated re-renders (tooltip hover, button hover) don't re-run suspicious
+  // detection / score calculation for every row.
+  const rowDerived = useMemo(() => {
+    const map = new Map<string, {
+      suspicious: ReturnType<typeof detectSuspiciousData>;
+      missingBadges: string[];
+      score: ReturnType<typeof calculateInvestmentScore> | null;
+      scoreMissing: string[];
+    }>();
+    for (const deal of visibleDeals) {
+      const suspicious = detectSuspiciousData(deal.apiData, deal.overrides);
+      const missingBadges = getMissingFields(deal);
+
+      const fin = deal.financials;
+      const arv = deal.overrides?.arv ?? fin?.arv ?? deal.apiData?.arv ?? 0;
+      const purchasePrice = deal.overrides?.purchasePrice ?? fin?.purchasePrice ?? deal.apiData?.purchasePrice ?? 0;
+      const rehabCost = deal.overrides?.rehabCost ?? fin?.rehabCost ?? deal.apiData?.rehabCost ?? 0;
+      const monthlyCashflow = fin?.monthlyCashflow ?? null;
+      const cashLeftInDeal = fin?.totalCashRequired ?? null;
+
+      const scoreMissing: string[] = [];
+      if (!monthlyCashflow && monthlyCashflow !== 0) scoreMissing.push('Cash flow');
+      if (!arv) scoreMissing.push('ARV');
+      if (!purchasePrice) scoreMissing.push('Price');
+
+      const score = scoreMissing.length === 0 && monthlyCashflow !== null
+        ? calculateInvestmentScore({
+            monthlyCashflow,
+            cashLeftInDeal,
+            arv,
+            purchasePrice,
+            rehabCost,
+            schoolTotal: deal.apiData?.schoolScore ?? null,
+            inventoryMonths: deal.overrides?.inventoryMonths ?? null,
+          }, scoreSettings)
+        : null;
+
+      map.set(deal.id, { suspicious, missingBadges, score, scoreMissing });
+    }
+    return map;
+  }, [visibleDeals, scoreSettings]);
+
+  const totalCount = useMemo(
+    () => deals.filter(d => !excludeStatuses.includes(d.status)).length,
+    [deals, excludeStatuses]
+  );
+
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!hasMore) return;
@@ -461,7 +509,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
         })}
         {hasMore && <div ref={sentinelRef} className="h-8" />}
         <p className="text-xs text-muted-foreground pt-1">
-          Showing {visibleDeals.length} of {filteredAndSorted.length} matching · {deals.filter(d => !excludeStatuses.includes(d.status)).length} total
+          Showing {visibleDeals.length} of {filteredAndSorted.length} matching · {totalCount} total
         </p>
       </div>
 
@@ -509,9 +557,9 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
               visibleDeals.map(deal => {
                 const cocReturn = deal.financials?.cashOnCashReturn ?? 0;
                 const equity = deal.financials?.equityAtPurchase ?? 0;
-                
-                // Check for suspicious data
-                const suspiciousCheck = detectSuspiciousData(deal.apiData, deal.overrides);
+
+                const derived = rowDerived.get(deal.id);
+                const suspiciousCheck = derived?.suspicious ?? { hasSuspiciousData: false, fields: [] as { field: string; reason: string }[] };
                 const hasSuspiciousArv = suspiciousCheck.fields.some(f => f.field === 'arv' || f.field === 'arvRatio');
                 
                 return (
@@ -581,7 +629,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                     </TableCell>
                     <TableCell className="text-center">
                       {(() => {
-                        const missing = getMissingFields(deal);
+                        const missing = derived?.missingBadges ?? [];
                         if (missing.length === 0) return null;
                         return (
                           <div className="flex flex-wrap gap-0.5 justify-center">
@@ -618,16 +666,8 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                     <TableCell className="text-center">
                       {(() => {
                         const fin = deal.financials;
-                        const arv = deal.overrides?.arv ?? fin?.arv ?? deal.apiData?.arv ?? 0;
-                        const purchasePrice = deal.overrides?.purchasePrice ?? fin?.purchasePrice ?? deal.apiData?.purchasePrice ?? 0;
-                        const rehabCost = deal.overrides?.rehabCost ?? fin?.rehabCost ?? deal.apiData?.rehabCost ?? 0;
-                        const monthlyCashflow = fin?.monthlyCashflow ?? null;
-                        const cashLeftInDeal = fin?.totalCashRequired ?? null;
-
-                        const missing: string[] = [];
-                        if (!monthlyCashflow && monthlyCashflow !== 0) missing.push('Cash flow');
-                        if (!arv) missing.push('ARV');
-                        if (!purchasePrice) missing.push('Price');
+                        const missing = derived?.scoreMissing ?? [];
+                        const score = derived?.score ?? null;
 
                         if (missing.length > 0 && !fin) {
                           return (
@@ -653,16 +693,6 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                             </Tooltip>
                           );
                         }
-
-                        const score = calculateInvestmentScore({
-                          monthlyCashflow: monthlyCashflow!,
-                          cashLeftInDeal,
-                          arv,
-                          purchasePrice,
-                          rehabCost,
-                          schoolTotal: deal.apiData?.schoolScore ?? null,
-                          inventoryMonths: deal.overrides?.inventoryMonths ?? null,
-                        }, scoreSettings);
 
                         if (!score) return <span className="text-[10px] text-muted-foreground/60">—</span>;
 
@@ -901,7 +931,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
       )}
 
       <p className="hidden md:block text-sm text-muted-foreground">
-        Showing {visibleDeals.length} of {filteredAndSorted.length} matching · {deals.filter(d => !excludeStatuses.includes(d.status)).length} total
+        Showing {visibleDeals.length} of {filteredAndSorted.length} matching · {totalCount} total
       </p>
     </div>
   );

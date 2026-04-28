@@ -37,7 +37,10 @@ interface DBDeal {
 }
 
 function mapDBDealToDeal(dbDeal: DBDeal, loanDefaults?: ReturnType<typeof import('@/context/SettingsContext').useSettings>['settings']['loanDefaults']): Deal {
-  const apiData = dbDeal.api_data || {};
+  // Shallow copy so per-row mutations below don't bleed into the cached
+  // Supabase response — that would defeat downstream React.memo / useMemo
+  // reference equality on anything reading deal.apiData.
+  const apiData = { ...(dbDeal.api_data || {}) };
   const overrides = dbDeal.overrides || { arv: null, rent: null, rehabCost: null, purchasePrice: null, downPaymentPercent: null, interestRate: null, loanTermYears: null };
   
   // Calculate financials if we have API data

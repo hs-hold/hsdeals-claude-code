@@ -96,6 +96,37 @@ export function applyDealAgeFilter<
 }
 
 /**
+ * Boolean predicate variant of {@link applyDealAgeFilter} — for hot loops over
+ * thousands of deals where allocating a single-element array per item adds up.
+ */
+export function matchesDealAgeFilter<
+  T extends { updatedAt?: string; createdAt?: string; analyzedAt?: string | null }
+>(
+  item: T,
+  filter: AgeFilterType,
+  options: { dateField?: keyof T; strict?: boolean } = {},
+): boolean {
+  const { dateField = 'updatedAt' as keyof T, strict = false } = options;
+  if (filter === 'all') return true;
+
+  const now = Date.now();
+  const ref = ((item[dateField] ?? item.updatedAt ?? item.createdAt ?? '') as string);
+  const refMs = new Date(ref).getTime();
+
+  if (filter === 'old') {
+    const old = refMs < now - MONTH_MS;
+    return strict ? old : (old && !!item.analyzedAt);
+  }
+
+  const cutoffMs = now - (filter === 'week' ? WEEK_MS : MONTH_MS);
+
+  if (filter === 'month' && !strict) {
+    return refMs >= cutoffMs || !item.analyzedAt;
+  }
+  return refMs >= cutoffMs;
+}
+
+/**
  * Apply the age filter to scout AI deals (which use analyzedAt as their primary date).
  */
 export function applyScoutAgeFilter<T extends { analyzedAt?: string }>(
