@@ -72,6 +72,50 @@ export const FINANCIAL_CONFIG = {
   },
 } as const;
 
+// Hot Deals / Flip Score scoring configuration.
+// Used by the unified flip score calculator (src/utils/flipScore.ts) consumed by
+// HotDealsPage, AgentDealsPage, and AgentManagementPage. Kept separate from
+// FINANCIAL_CONFIG.flip because the scoring view uses different assumptions
+// (live property tax/insurance, 6% agent commission) than the generic flip
+// modeling in calculateFinancials.
+export const FLIP_SCORE_CONFIG = {
+  // Max purchase price for Hot Deals filter
+  maxPurchasePrice: 300_000,
+  // Rehab floors by deal source — applied when no manual rehab override exists
+  rehabFloor: {
+    email: 80_000,
+    api: 60_000,
+  },
+  // Layout change costs (added on top of base rehab when targetBedrooms/Bathrooms set)
+  layoutCost: {
+    perBedroom: 20_000,
+    perBathroom: 15_000,
+  },
+  // Estimated monthly utilities during holding period
+  utilitiesMonthly: 300,
+  // Sale-side costs
+  agentCommissionPercent: 0.06,
+  notaryFee: 500,
+  // Buy-side closing costs (% of purchase price)
+  closingCostsPercent: 0.02,
+  // ROI → score brackets (descending). First match wins.
+  scoreBrackets: [
+    { minRoi: 25, score: 10 },
+    { minRoi: 20, score: 9 },
+    { minRoi: 18, score: 8 },
+    { minRoi: 16, score: 7 },
+    { minRoi: 15, score: 6 },
+    { minRoi: 13, score: 5 },
+    { minRoi: 11, score: 4 },
+    { minRoi: 9, score: 3 },
+    { minRoi: 8, score: 2 },
+  ],
+  // Default holding period in months (overridden by loanDefaults.holdingMonths)
+  defaultHoldingMonths: 4,
+  // Target ROI used to back out MAO from ARV
+  maoTargetRoi: 0.18,
+} as const;
+
 export const API_CONFIG = {
   // Placeholder for external API configuration
   baseUrl: '',

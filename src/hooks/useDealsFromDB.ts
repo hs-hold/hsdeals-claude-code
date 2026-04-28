@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Deal, DealStatus, DealSource, DealOverrides } from '@/types/deal';
 import { calculateFinancials } from '@/utils/financialCalculations';
@@ -211,10 +211,18 @@ export function useDealsFromDB() {
     }
   }, [loanDefaults]);
 
+  // Hold the latest fetchDeals in a ref so the realtime subscription can call
+  // it without needing to re-subscribe whenever fetchDeals identity changes
+  // (e.g. when loanDefaults updates). Re-subscribing on every settings change
+  // briefly drops realtime updates and wastes connections.
+  const fetchDealsRef = useRef(fetchDeals);
   useEffect(() => {
-    fetchDeals();
+    fetchDealsRef.current = fetchDeals;
+  }, [fetchDeals]);
 
-    // Subscribe to realtime changes for auto-refresh
+  useEffect(() => {
+    fetchDealsRef.current();
+
     const channel = supabase
       .channel('deals-changes')
       .on(
@@ -225,8 +233,7 @@ export function useDealsFromDB() {
           table: 'deals',
         },
         () => {
-          // Refetch deals when any change occurs
-          fetchDeals();
+          fetchDealsRef.current();
         }
       )
       .subscribe();
@@ -234,7 +241,7 @@ export function useDealsFromDB() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [fetchDeals]);
+  }, []);
 
   const getDeal = useCallback((id: string) => {
     return deals.find(d => d.id === id);
@@ -305,7 +312,7 @@ export function useDealsFromDB() {
     } catch (err) {
       console.error('Error updating deal overrides:', err);
     }
-  }, [deals]);
+  }, [deals, loanDefaults]);
   
   const toggleDealLock = useCallback(async (id: string) => {
     const deal = deals.find(d => d.id === id);
@@ -521,11 +528,6 @@ export function useDealsFromDB() {
     const aiSummaryText = analysis.ai_summary || analysis.aiSummary || property.ai_summary || property.aiSummary || null;
     const arv = (numericArv && numericArv > 0) ? numericArv : extractArvFromSummary(aiSummaryText);
 
-    console.log('[analyzeDeal] inner keys:', Object.keys(inner));
-    console.log('[analyzeDeal] analysis keys:', Object.keys(analysis));
-    console.log('[analyzeDeal] metrics keys:', Object.keys(metrics));
-    console.log('[analyzeDeal] arv:', arv, '| grade:', analysis.grade ?? property.grade, '| rent:', metrics.monthly_rent ?? property.monthly_rent);
-
     const apiData = {
       // Core property values from AI analysis metrics
       arv: arv,
@@ -687,8 +689,6 @@ export function useDealsFromDB() {
     // Calculate financials with new API data
     const financials = calculateFinancials(apiData, deal.overrides, loanDefaults);
 
-    console.log('[analyzeDeal] saving to DB — arv:', apiData.arv, 'grade:', apiData.grade, 'aiSummary:', !!apiData.aiSummary, 'rawResponse:', !!apiData.rawResponse);
-
     const nowIso = new Date().toISOString();
 
     // Update the database
@@ -707,8 +707,6 @@ export function useDealsFromDB() {
       console.error('[analyzeDeal] DB update error:', updateError);
       throw updateError;
     }
-    console.log('[analyzeDeal] DB update success for deal:', id);
-
     // Update local state
     setDeals(prev => prev.map(d => {
       if (d.id !== id) return d;
@@ -723,7 +721,7 @@ export function useDealsFromDB() {
     }));
 
     return data;
-  }, [deals]);
+  }, [deals, loanDefaults]);
 
   const refreshDealFromApi = useCallback(async (id: string) => {
     return analyzeDeal(id);

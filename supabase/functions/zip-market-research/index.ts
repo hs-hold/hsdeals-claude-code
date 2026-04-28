@@ -91,12 +91,12 @@ async function researchZipMarket(zipCode: string): Promise<ZipMarketData | null>
 async function callAnthropicWithSearch(apiKey: string, zipCode: string): Promise<Partial<ZipMarketData> | null> {
   const prompt = `You are a real estate investment analyst. Research the real estate market for ZIP code ${zipCode} using web search.
 
-Search for current data from Zillow, Redfin, Realtor.com, Census Bureau, GreatSchools, and similar sources.
+Search Zillow, Redfin, Census Bureau, and GreatSchools. Use at most 3 searches.
 
-Return ONLY this JSON object with real data (null for anything you can't find):
-${JSON_TEMPLATE(zipCode)}
+CRITICAL: Only fill fields with values you find in search results. If web search returns no data for a field, return null. Do not infer, estimate, or guess from your training knowledge — null is always preferred over a made-up number.
 
-Return ONLY the JSON, nothing else.`;
+Return ONLY this JSON object (no commentary, no explanation, no markdown):
+${JSON_TEMPLATE(zipCode)}`;
 
   try {
     console.log('[zip-research] Trying with web search...');
@@ -110,8 +110,8 @@ Return ONLY the JSON, nothing else.`;
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 4096,
-        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
+        max_tokens: 1500,
+        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],
         messages: [{ role: 'user', content: prompt }],
       }),
     });
@@ -132,14 +132,12 @@ Return ONLY the JSON, nothing else.`;
 }
 
 async function callAnthropicNoSearch(apiKey: string, zipCode: string): Promise<Partial<ZipMarketData> | null> {
-  const prompt = `You are a real estate investment analyst with deep knowledge of US real estate markets.
+  const prompt = `You are a real estate investment analyst with knowledge of US real estate markets.
 
-Provide your best analysis for ZIP code ${zipCode} based on your training data. Be specific and realistic for this area. Use null only if you truly have no data for a field.
+Provide your best analysis for ZIP code ${zipCode}. Use null for any field you are not confident about — null is strongly preferred over a made-up or guessed value. Mark "dataSource" reasoning is not needed.
 
-Return ONLY this JSON object:
-${JSON_TEMPLATE(zipCode)}
-
-Return ONLY the JSON, nothing else.`;
+Return ONLY this JSON object (no commentary, no markdown):
+${JSON_TEMPLATE(zipCode)}`;
 
   try {
     console.log('[zip-research] Trying without web search (AI knowledge)...');
@@ -152,7 +150,7 @@ Return ONLY the JSON, nothing else.`;
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 2048,
+        max_tokens: 1500,
         messages: [{ role: 'user', content: prompt }],
       }),
     });

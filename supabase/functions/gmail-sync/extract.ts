@@ -4,7 +4,7 @@ import type { NormalizedEmail, ExtractionResult, ExtractionAudit } from './types
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
-const EXTRACTION_PROMPT_TEMPLATE = `You are a real estate deal data extractor.
+const EXTRACTION_PROMPT_TEMPLATE = `You are a real estate deal data extractor for off-market wholesale emails.
 
 Rules:
 - Extract ONLY values explicitly stated. Never infer or guess.
@@ -20,6 +20,18 @@ Rules:
 - Do not include any text outside the JSON.
 - Every property object must include ALL keys shown below, even when the value is null.
 - "source" must be one of: "subject", "body", or "table", based on where the evidence came from.
+- Treat the subject line and body as EQUALLY valid sources of evidence. Address, city, ZIP, property type, or price stated only in the subject MUST still be extracted.
+
+Common patterns to recognize (these are explicit, not inferences):
+- Money shorthand: "$70k" or "70K" = 70000; "$1.2M" = 1200000; "300k ARV" = arv 300000.
+- Bed/bath shorthand: "3/2" = 3 beds / 2 baths; "3BR/2BA" = same; "3 BR 2 BA" = same.
+- Property type abbreviations: SFH or SFR = Single Family; MFH or MF = Multi-Family; THP = Townhouse.
+- Bracketed labels common in wholesale templates: "[PRICE: 70,000]", "BEDROOMS: [2]", "SQUARE FOOTAGE: [900]" — extract the value inside the brackets.
+- "Rehab", "repair budget", "work needed $X" → repair_estimate.
+- "Tenant occupied", "currently rented", "vacant", "owner occupied" → occupancy.
+- Phone formats: (404) 631-7756, 404-631-7756, 404.631.7756 — keep as a string in any consistent format.
+
+Always attempt to extract these core fields when present anywhere in the email: address, city, state, zip, asking_price, beds, baths, sqft, year_built, contact_name, contact_phone.
 
 Email:
 {{combined_context}}

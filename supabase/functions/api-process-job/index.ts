@@ -675,6 +675,10 @@ serve(async (req) => {
           },
           body: JSON.stringify({ address: fullAddress, filters: {}, extraParams: {} }),
         });
+        // Log paid call for daily-budget tracking (best-effort, never throws).
+        supabase.from('api_call_log')
+          .insert({ service: 'dealbeast', meta: { address: fullAddress, job_id } })
+          .then(() => {}, (e: unknown) => console.error('[api-process-job] usage log failed:', String(e)));
       } catch (retryErr) {
         const msg = retryErr instanceof Error ? retryErr.message : 'unknown fetch error';
         errors.push(`${fullAddress}: ${msg}`);

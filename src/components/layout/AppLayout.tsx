@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
 import { useUserRole } from '@/hooks/useUserRole';
 import { StateSelector } from '@/components/layout/StateSelector';
+import { ApiUsageBadge } from '@/components/layout/ApiUsageBadge';
 import { Button } from '@/components/ui/button';
 import {
   LayoutDashboard,
@@ -430,6 +431,8 @@ function AppSidebar() {
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
+
+        {!isCollapsed && <ApiUsageBadge />}
 
         {!isCollapsed && (
           <div className="px-2 py-1 text-xs text-muted-foreground">
