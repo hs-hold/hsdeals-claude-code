@@ -2874,10 +2874,10 @@ BRRRR STRATEGY:
         {/* Right side - Email and Phone (Phone rightmost) */}
         {(() => {
           const attrInfo = rawProperty?.attributionInfo;
-          const email = attrInfo?.listingAgentEmail || attrInfo?.agentEmail;
-          const phone = attrInfo?.listingAgentPhone || attrInfo?.agentPhoneNumber || attrInfo?.brokerPhoneNumber;
-          
-          if (!email && !phone) return null;
+          const email = attrInfo?.listingAgentEmail || attrInfo?.agentEmail || apiData.agentEmail;
+          const phone = attrInfo?.listingAgentPhone || attrInfo?.agentPhoneNumber || attrInfo?.brokerPhoneNumber || apiData.agentPhone || apiData.brokerPhone;
+
+          if (!email && !phone && !apiData.agentName && !apiData.brokerName) return null;
           
           return (
             <div className="flex items-center gap-3">

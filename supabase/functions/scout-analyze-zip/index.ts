@@ -44,8 +44,13 @@ function mapListing(l: any): any {
     daysOnMarket: l.list_date ? Math.max(0, Math.floor((Date.now() - new Date(l.list_date).getTime()) / 86_400_000)) : 0,
     description: desc.text || '',
     agentName: agent.name || null,
-    agentEmail: agent.email || null,
-    agentPhone: agent.phones?.[0]?.number || null,
+    agentEmail:
+      agent.email ||
+      agent.office?.email ||
+      agent.broker?.email ||
+      l.list_agent?.email ||
+      null,
+    agentPhone: agent.phones?.[0]?.number || agent.office?.phones?.[0]?.number || null,
     brokerName: agent.office?.name || null,
   };
 }

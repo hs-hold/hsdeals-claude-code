@@ -199,6 +199,27 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('dealflow-settings', JSON.stringify(settings));
   }, [settings]);
 
+  // Cross-tab sync — when another tab writes to dealflow-settings, mirror the
+  // change here so theme/loan defaults/etc. stay consistent across tabs.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== 'dealflow-settings' || !e.newValue) return;
+      try {
+        const parsed = JSON.parse(e.newValue);
+        setSettings({
+          ...defaultSettings,
+          ...parsed,
+          loanDefaults: { ...defaultLoanDefaults, ...(parsed.loanDefaults || {}) },
+          investmentScoreSettings: { ...DEFAULT_INVESTMENT_SCORE_SETTINGS, ...(parsed.investmentScoreSettings || {}) },
+        });
+      } catch {
+        // ignore malformed payloads from other tabs
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
   const updateSettings = (updates: Partial<Settings>) => {
     setSettings(prev => ({ ...prev, ...updates }));
   };
