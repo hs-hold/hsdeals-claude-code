@@ -55,7 +55,7 @@ export function useDealInvestors(dealId?: string) {
       const mapped = (data || []).map(di => ({
         ...di,
         profit_split_percent: di.profit_split_percent ? Number(di.profit_split_percent) : null,
-        preferred_return_percent: (di as any).preferred_return_percent ? Number((di as any).preferred_return_percent) : 15,
+        preferred_return_percent: di.preferred_return_percent ? Number(di.preferred_return_percent) : 15,
         visible_strategies: di.visible_strategies || [],
         investor_notes: di.investor_notes || null,
         investor: di.investor ? {
@@ -86,7 +86,7 @@ export function useDealInvestors(dealId?: string) {
         preferred_return_percent: input.preferred_return_percent ?? 15,
         visible_strategies: input.visible_strategies || ['flip', 'rental', 'brrrr'],
         notes: input.notes || null,
-      } as any)
+      })
       .select()
       .single();
 
@@ -101,7 +101,7 @@ export function useDealInvestors(dealId?: string) {
   ) => {
     const { error } = await supabase
       .from('deal_investors')
-      .update(updates as any)
+      .update(updates)
       .eq('id', id);
 
     if (error) throw error;
@@ -119,10 +119,9 @@ export function useDealInvestors(dealId?: string) {
   }, [fetchDealInvestors]);
 
   const updateInvestorNotes = useCallback(async (id: string, investorNotes: string) => {
-    // Use raw SQL-style update since investor_notes may not be in types yet
     const { error } = await supabase
       .from('deal_investors')
-      .update({ investor_notes: investorNotes } as any)
+      .update({ investor_notes: investorNotes })
       .eq('id', id);
 
     if (error) throw error;

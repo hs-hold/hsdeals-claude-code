@@ -42,7 +42,7 @@ export function useUserState() {
     if (!user) { setIsLoading(false); return; }
     
     const load = async () => {
-      const { data } = await (supabase as any)
+      const { data } = await supabase
         .from('user_preferences')
         .select('selected_state')
         .eq('user_id', user.id)
@@ -58,19 +58,19 @@ export function useUserState() {
     if (!user) return;
     setSelectedState(stateCode);
     
-    const { data: existing } = await (supabase as any)
+    const { data: existing } = await supabase
       .from('user_preferences')
       .select('id')
       .eq('user_id', user.id)
       .maybeSingle();
 
     if (existing) {
-      await (supabase as any)
+      await supabase
         .from('user_preferences')
         .update({ selected_state: stateCode, updated_at: new Date().toISOString() })
         .eq('user_id', user.id);
     } else {
-      await (supabase as any)
+      await supabase
         .from('user_preferences')
         .insert({ user_id: user.id, selected_state: stateCode });
     }
