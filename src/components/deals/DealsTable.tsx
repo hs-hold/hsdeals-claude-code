@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ArrowUpDown, ArrowUp, ArrowDown, Search, Filter, Zap, Loader2, Lock, X, CheckCircle2, AlertTriangle, Mail, Globe, Trash2, ExternalLink, ScanLine } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { DealAgeFilter, AgeFilterType, applyDealAgeFilter } from '@/components/deals/DealAgeFilter';
@@ -51,11 +52,12 @@ interface DealsTableProps {
   excludeStatuses?: DealStatus[];
   showCloseAction?: boolean;
   showAnalyzeButton?: boolean;
+  isLoading?: boolean;
 }
 
 const PAGE_SIZE = 100;
 
-export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true, showAnalyzeButton = true }: DealsTableProps) {
+export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true, showAnalyzeButton = true, isLoading = false }: DealsTableProps) {
   const { analyzeDeal, updateDealStatus, deleteDeal } = useDeals();
   const { settings } = useSettings();
   const isMobile = useIsMobile();
@@ -72,7 +74,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
   const [minYield, setMinYield] = useState<string>('');
   const [sortField, setSortField] = useState<SortField>('created');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-  const [ageFilter, setAgeFilter] = useState<AgeFilterType>('month');
+  const [ageFilter, setAgeFilter] = useState<AgeFilterType>('all');
 
   const handleAnalyze = async (dealId: string) => {
     setAnalyzingId(dealId);
@@ -257,9 +259,6 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
     return result;
   }, [deals, search, statusFilter, lockedFilter, sourceFilter, minCashflow, minYield, ageFilter, sortField, sortDirection, excludeStatuses]);
 
-  // Pagination — show first PAGE_SIZE rows, "Load More" on desktop, infinite
-  // scroll on mobile. Search runs over the full filtered set, so global search
-  // works regardless of how many pages have been loaded.
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
@@ -273,7 +272,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (!isMobile || !hasMore) return;
+    if (!hasMore) return;
     const node = sentinelRef.current;
     if (!node) return;
     const obs = new IntersectionObserver(
@@ -286,7 +285,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
     );
     obs.observe(node);
     return () => obs.disconnect();
-  }, [isMobile, hasMore]);
+  }, [hasMore]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -316,6 +315,41 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
       )}
     </Button>
   );
+
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        {/* Mobile skeleton */}
+        <div className="md:hidden space-y-2">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="rounded-xl border border-border bg-card px-4 py-3 space-y-2">
+              <div className="flex justify-between"><Skeleton className="h-4 w-40" /><Skeleton className="h-4 w-12" /></div>
+              <div className="flex justify-between"><Skeleton className="h-3 w-24" /><Skeleton className="h-5 w-16 rounded-full" /></div>
+              <div className="flex gap-4"><Skeleton className="h-3 w-20" /><Skeleton className="h-3 w-20" /></div>
+            </div>
+          ))}
+        </div>
+        {/* Desktop skeleton */}
+        <div className="hidden md:block rounded-xl border border-border overflow-hidden">
+          <div className="bg-muted/30 px-4 py-3 flex gap-4 border-b border-border">
+            {['w-48', 'w-24', 'w-20', 'w-24', 'w-24', 'w-24', 'w-20'].map((w, i) => (
+              <Skeleton key={i} className={`h-4 ${w}`} />
+            ))}
+          </div>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="px-4 py-3 flex gap-4 border-b border-border/50 last:border-0">
+              <div className="w-48 space-y-1"><Skeleton className="h-4 w-36" /><Skeleton className="h-3 w-24" /></div>
+              <Skeleton className="h-5 w-20 rounded-full" />
+              <Skeleton className="h-4 w-16 ml-auto" />
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="h-4 w-16" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -382,8 +416,57 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
         <DealAgeFilter value={ageFilter} onChange={setAgeFilter} className="ml-auto" />
       </div>
 
-      {/* Table */}
-      <div className="rounded-xl border border-border overflow-hidden">
+      {/* Mobile card list — shown instead of table on small screens */}
+      <div className="md:hidden space-y-2">
+        {filteredAndSorted.length === 0 ? (
+          <p className="text-center text-muted-foreground py-10">No deals found</p>
+        ) : visibleDeals.map(deal => {
+          const cocReturn = deal.financials?.cashOnCashReturn ?? 0;
+          const equity = deal.financials?.equityAtPurchase ?? 0;
+          const arv = deal.overrides?.arv ?? deal.apiData?.arv ?? 0;
+          return (
+            <Link key={deal.id} to={`/deals/${deal.id}`} className="block">
+              <div className="rounded-xl border border-border bg-card px-4 py-3 space-y-2 active:opacity-70 transition-opacity">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-sm truncate">{deal.address.street}</span>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {deal.apiData.grade && (
+                      <span className={cn(
+                        "px-1.5 py-0.5 rounded text-xs font-bold",
+                        deal.apiData.grade === 'A' && "bg-emerald-500/20 text-emerald-400",
+                        deal.apiData.grade === 'B' && "bg-cyan-500/20 text-cyan-400",
+                        deal.apiData.grade === 'C' && "bg-yellow-500/20 text-yellow-400",
+                        deal.apiData.grade === 'D' && "bg-orange-500/20 text-orange-400",
+                        deal.apiData.grade === 'F' && "bg-red-500/20 text-red-400",
+                      )}>{deal.apiData.grade}</span>
+                    )}
+                    {cocReturn !== 0 && (
+                      <span className={cn("text-xs font-medium", cocReturn >= 0.08 ? "text-success" : cocReturn > 0 ? "text-warning" : "text-destructive")}>
+                        {(cocReturn * 100).toFixed(1)}%
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">{deal.address.city}, {deal.address.state}</span>
+                  <DealStatusBadge status={deal.status} />
+                </div>
+                <div className="flex items-center gap-4 text-xs">
+                  {arv > 0 && <span className="text-muted-foreground">ARV <span className="text-foreground font-medium">{formatCurrency(arv)}</span></span>}
+                  {equity !== 0 && <span className={cn("text-muted-foreground", equity > 0 ? "" : "")}>Equity <span className={cn("font-medium", equity > 0 ? "text-success" : "text-destructive")}>{formatCurrency(equity)}</span></span>}
+                </div>
+              </div>
+            </Link>
+          );
+        })}
+        {hasMore && <div ref={sentinelRef} className="h-8" />}
+        <p className="text-xs text-muted-foreground pt-1">
+          Showing {visibleDeals.length} of {filteredAndSorted.length} matching · {deals.filter(d => !excludeStatuses.includes(d.status)).length} total
+        </p>
+      </div>
+
+      {/* Table — desktop only */}
+      <div className="hidden md:block rounded-xl border border-border overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/30 hover:bg-muted/30">
@@ -810,15 +893,14 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
       </div>
 
       {hasMore && !isMobile && (
-        <div className="flex justify-center">
+        <div className="hidden md:flex justify-center">
           <Button variant="outline" onClick={() => setVisibleCount(c => c + PAGE_SIZE)}>
             Load more ({filteredAndSorted.length - visibleCount} remaining)
           </Button>
         </div>
       )}
-      {isMobile && hasMore && <div ref={sentinelRef} className="h-8" />}
 
-      <p className="text-sm text-muted-foreground">
+      <p className="hidden md:block text-sm text-muted-foreground">
         Showing {visibleDeals.length} of {filteredAndSorted.length} matching · {deals.filter(d => !excludeStatuses.includes(d.status)).length} total
       </p>
     </div>
