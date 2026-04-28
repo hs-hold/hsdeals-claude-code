@@ -134,8 +134,8 @@ export default function EmailDealPreviewPage() {
       navigate(`/deals/${item.dealId}`, { state: { triggerAnalysis: true } });
       return;
     }
-    if (item.action === 'skipped_duplicate' && (item as any).existingDealId) {
-      navigate(`/deals/${(item as any).existingDealId}`);
+    if (item.action === 'skipped_duplicate' && item.existingDealId) {
+      navigate(`/deals/${item.existingDealId}`);
       return;
     }
     if (item.action === 'no_address' || !item.dealId) {
@@ -146,7 +146,7 @@ export default function EmailDealPreviewPage() {
     navigate('/analyze/email');
   }
 
-  const targetDealId = item.dealId || (item.action === 'skipped_duplicate' ? (item as any).existingDealId : null);
+  const targetDealId = item.dealId || (item.action === 'skipped_duplicate' ? item.existingDealId : null);
 
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-6 animate-fade-in">

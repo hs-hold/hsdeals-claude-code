@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { useGmailAuth } from '@/hooks/useGmailAuth';
-import { useGmailSync } from '@/hooks/useGmailSync';
+import { useGmailSync, type SyncDetail } from '@/hooks/useGmailSync';
 import { useUserState } from '@/hooks/useUserState';
 import { useDeals } from '@/context/DealsContext';
 import { useSyncAnalyze } from '@/context/SyncAnalyzeContext';
@@ -722,16 +722,16 @@ export default function EmailSearchPage() {
       // Mark all processed messages as read directly via Gmail API using the client token.
       if (result?.syncDetails) {
         const idsToMark: string[] = result.syncDetails
-          .filter((d: any) => d.messageId && d.action !== 'error')
-          .map((d: any) => d.messageId);
+          .filter((d: SyncDetail) => d.messageId && d.action !== 'error')
+          .map((d: SyncDetail) => d.messageId!);
         await Promise.allSettled(idsToMark.map(id => markMessageRead(accessToken, id)));
       }
 
       if (result?.syncDetails) {
         const scannedAt = new Date().toISOString();
         const newItems: EmailResultItem[] = result.syncDetails
-          .filter((d: any) => d.action !== 'skipped_portal')
-          .map((d: any, idx: number) => {
+          .filter((d: SyncDetail) => d.action !== 'skipped_portal')
+          .map((d: SyncDetail, idx: number) => {
             const dealId = d.dealId || d.existingDealId || null;
             return {
               key: dealId ?? `skip-${scannedAt}-${batchNum}-${idx}`,
@@ -937,8 +937,8 @@ export default function EmailSearchPage() {
       await startAnalyzeList([{ id: dealId, address: addr }]);
       await refetch();
       window.open(`/deals/${dealId}`, '_blank', 'noopener,noreferrer');
-    } catch (err: any) {
-      toast.error('Failed: ' + (err?.message || 'Unknown error'));
+    } catch (err) {
+      toast.error('Failed: ' + (err instanceof Error ? err.message : 'Unknown error'));
     } finally {
       setCreatingKey(null);
     }
