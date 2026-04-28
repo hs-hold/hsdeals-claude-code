@@ -14,6 +14,59 @@ import { coerceLotSizeSqft } from '@/utils/lotSize';
 import { DealApiData, DealOverrides } from '@/types/deal';
 import { formatIL as format } from '@/utils/dateFormat';
 
+// Loose shape for raw API responses where field names vary (snake_case / camelCase)
+type LooseRecord = Record<string, any>;
+
+interface MapboxFeature {
+  place_name: string;
+  center: [number, number];
+  text?: string;
+  address?: string;
+  context?: Array<{ id: string; text: string }>;
+}
+
+interface ZillowSearchProperty {
+  address?: string;
+  agentName?: string | null;
+  agentEmail?: string | null;
+  agentPhone?: string | null;
+  brokerName?: string | null;
+}
+
+interface RawPriceHistory { date?: string; price?: number; event?: string }
+interface RawTaxHistory {
+  time?: number;
+  taxPaid?: number | null;
+  value?: number | null;
+  taxIncreaseRate?: number;
+  valueIncreaseRate?: number;
+}
+interface RawSaleComp {
+  address?: string;
+  sale_price?: number;
+  salePrice?: number;
+  sale_date?: string;
+  saleDate?: string;
+  bedrooms?: number;
+  bathrooms?: number;
+  sqft?: number;
+  distance?: number;
+  similarity?: { overall_score?: number };
+  similarityScore?: number;
+  days_on_market?: number | null;
+  daysOnMarket?: number | null;
+}
+interface RawRentComp {
+  address?: string;
+  originalRent?: number;
+  adjustedRent?: number;
+  bedrooms?: number;
+  bathrooms?: number;
+  sqft?: number;
+  adjustment?: number;
+  adjustmentReason?: string;
+}
+
 interface AddressSuggestion {
   place_name: string;
   center: [number, number];
@@ -93,7 +146,7 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
       const data = await response.json();
       
       if (data.features && data.features.length > 0) {
-        setSuggestions(data.features.map((f: any) => ({
+        setSuggestions((data.features as MapboxFeature[]).map(f => ({
           place_name: f.place_name,
           center: f.center,
           text: f.text || '',
@@ -356,7 +409,7 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
       // Log full response for debugging
       console.log('[analyze-property] raw response:', JSON.stringify(data).slice(0, 800));
 
-      const raw = data as any;
+      const raw = data as LooseRecord;
       console.log('[analyze-property] raw response:', JSON.stringify(raw).slice(0, 800));
 
       const isSuccess = raw?.success === true;
@@ -385,7 +438,7 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
       }
 
       try {
-        const purchasePrice = (analysis as any).asking_price ?? (analysis as any).purchasePrice ?? null;
+        const purchasePrice = (analysis as LooseRecord).asking_price ?? (analysis as LooseRecord).purchasePrice ?? null;
         if (!purchasePrice || purchasePrice <= 0) {
           toast.error('This property has no purchase price — cannot save');
           setLoading(false);
@@ -438,9 +491,9 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
       if (error || !data?.properties?.length) return null;
       const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
       const inputStreet = norm(fullAddress.split(',')[0]);
-      const match = data.properties.find((p: any) =>
+      const match = (data.properties as ZillowSearchProperty[]).find(p =>
         norm(p.address || '').includes(inputStreet) || inputStreet.includes(norm(p.address || ''))
-      ) ?? data.properties[0];
+      ) ?? (data.properties[0] as ZillowSearchProperty);
       return {
         agentName:  match?.agentName  ?? null,
         agentEmail: match?.agentEmail ?? null,
@@ -468,13 +521,13 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
 
     // `p` gives us direct (any-typed) access to the raw object —
     // needed when `analysis` is actually the property object with flat/alternative field names.
-    const p = analysis as any;
+    const p = analysis as LooseRecord;
 
     // Resolve the metrics sub-object — could live at analysis.metrics, p.metrics, p.analysis.metrics, etc.
-    const m: any = analysis.metrics || p.metrics || p.analysis?.metrics || p.analysis || {};
+    const m: LooseRecord = analysis.metrics || p.metrics || p.analysis?.metrics || p.analysis || {};
 
     // Resolved property — prefer the explicit `property` arg; fall back to `p` itself (same object)
-    const prop: any = property || p;
+    const prop: LooseRecord = property || p;
 
     // Log what we're working with so we can diagnose any remaining field-name mismatches
     console.log('[mapToDealApiData] analysis keys:', Object.keys(p));
@@ -541,12 +594,12 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
       mlsName: prop?.attributionInfo?.mlsName ?? p.attributionInfo?.mlsName ?? null,
 
       // Additional data
-      priceHistory: (prop?.priceHistory ?? p.priceHistory ?? []).map((ph: any) => ({
+      priceHistory: ((prop?.priceHistory ?? p.priceHistory ?? []) as RawPriceHistory[]).map(ph => ({
         date: ph.date || '',
         price: ph.price || 0,
         event: ph.event || '',
       })),
-      taxHistory: (prop?.tax_history ?? p.tax_history ?? []).map((t: any) => ({
+      taxHistory: ((prop?.tax_history ?? p.tax_history ?? []) as RawTaxHistory[]).map(t => ({
         time: t.time || 0,
         taxPaid: t.taxPaid ?? null,
         value: t.value ?? null,
@@ -562,7 +615,7 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
           bedrooms: s8.bedrooms || 0,
         } : null;
       })(),
-      saleComps: (m.comps ?? p.comps ?? p.saleComps ?? []).map((c: any) => ({
+      saleComps: ((m.comps ?? p.comps ?? p.saleComps ?? []) as RawSaleComp[]).map(c => ({
         address: c.address || '',
         salePrice: c.sale_price || c.salePrice || 0,
         saleDate: c.sale_date || c.saleDate || '',
@@ -573,7 +626,7 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
         similarityScore: c.similarity?.overall_score ?? c.similarityScore ?? 0,
         daysOnMarket: c.days_on_market ?? c.daysOnMarket ?? null,
       })),
-      rentComps: (m.rent_comps ?? p.rent_comps ?? p.rentComps ?? []).map((c: any) => ({
+      rentComps: ((m.rent_comps ?? p.rent_comps ?? p.rentComps ?? []) as RawRentComp[]).map(c => ({
         address: c.address || '',
         originalRent: c.originalRent || c.adjustedRent || 0,
         adjustedRent: c.adjustedRent || 0,
@@ -645,7 +698,7 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
   // Save deal to database - returns the deal id
   const saveDealToDb = async (analysisData: PropertyAnalysis, propertyData?: PropertyData, agentFallback?: { agentName: string|null; agentEmail: string|null; agentPhone: string|null; brokerName: string|null } | null): Promise<string | null> => {
     try {
-      const anyData = analysisData as any;
+      const anyData = analysisData as LooseRecord;
       // User-typed address is the ground truth — never let the API override it with
       // a generic "Unknown Address" when it can't geocode the property.
       // Only fall back to the API response address if the user didn't type one.
@@ -658,7 +711,7 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
       const addressParts = resolvedAddress?.split(',').map((s: string) => s.trim()) || [];
       const street = addressParts[0] || address;
       console.log('[saveDealToDb] resolved address:', resolvedAddress, '| parts:', addressParts);
-      const city = anyData.address_city || analysisData.city || (analysisData as any).city || addressParts[1] || '';
+      const city = anyData.address_city || analysisData.city || addressParts[1] || '';
       const stateZip = addressParts[2] || '';
       const [state, zip] = stateZip.split(' ').filter(Boolean);
       
@@ -668,7 +721,7 @@ export function PropertyAnalyzer({ initialAddress = '' }: PropertyAnalyzerProps)
       // Get current user for created_by
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       
-      const dealInsert: any = {
+      const dealInsert: LooseRecord = {
         address_full: resolvedAddress || address,
         address_street: street,
         address_city: city,
