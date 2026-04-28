@@ -113,6 +113,70 @@ import { useDealMessages } from '@/hooks/useDealMessages';
 import { EmailThreadChat } from '@/components/deals/EmailThreadChat';
 import { OfferEmailDraft } from '@/components/deals/OfferEmailDraft';
 
+// Build the string-form overrides object that drives the form inputs.
+// Centralizes the deal.overrides → string normalization (used in initial state, deal-id sync, and updatedAt sync).
+function dealOverridesToStrings(deal: { overrides?: any } | null | undefined) {
+  const o: any = deal?.overrides;
+  return {
+    arv: o?.arv?.toString() || '',
+    rent: o?.rent?.toString() || '',
+    rehabCost: o?.rehabCost?.toString() || '',
+    purchasePrice: o?.purchasePrice?.toString() || '',
+    downPaymentPercent: o?.downPaymentPercent?.toString() || '',
+    interestRate: o?.interestRate?.toString() || '',
+    loanTermYears: o?.loanTermYears?.toString() || '',
+    targetBedrooms: o?.targetBedrooms?.toString() || '',
+    targetBathrooms: o?.targetBathrooms?.toString() || '',
+    holdingMonths: o?.holdingMonths?.toString() || '',
+    propertyTaxMonthly: o?.propertyTaxMonthly?.toString() || '',
+    insuranceMonthly: o?.insuranceMonthly?.toString() || '',
+    rentalInsuranceMonthly: o?.rentalInsuranceMonthly?.toString() || '',
+    stateTaxMonthly: o?.stateTaxMonthly?.toString() || '',
+    hoaMonthly: o?.hoaMonthly?.toString() || '',
+    utilitiesMonthly: o?.utilitiesMonthly?.toString() || '',
+    propertyManagementPercent: o?.propertyManagementPercent?.toString() || '',
+    maintenanceVacancyPercent: o?.maintenanceVacancyPercent?.toString() || '',
+    closingCostsPercent: o?.closingCostsPercent?.toString() || '',
+    closingCostsDollar: o?.closingCostsDollar?.toString() || '',
+    closingCostsSalePercent: o?.closingCostsSalePercent?.toString() || '',
+    closingCostsSaleDollar: o?.closingCostsSaleDollar?.toString() || '',
+    contingencyPercent: o?.contingencyPercent?.toString() || '',
+    agentCommissionPercent: o?.agentCommissionPercent?.toString() || '',
+    notaryFees: o?.notaryFees?.toString() || '',
+    cashNotaryFee: o?.cashNotaryFee?.toString() || '',
+    titleFees: o?.titleFees?.toString() || '',
+    hmlLoanType: o?.hmlLoanType || 'ltc',
+    brrrrPhase1Type: o?.brrrrPhase1Type || 'hml',
+    hmlLtvPurchasePercent: o?.hmlLtvPurchasePercent?.toString() || '',
+    hmlLtvRehabPercent: o?.hmlLtvRehabPercent?.toString() || '',
+    hmlPointsPercent: o?.hmlPointsPercent?.toString() || '',
+    hmlInterestRate: o?.hmlInterestRate?.toString() || '',
+    hmlProcessingFee: o?.hmlProcessingFee?.toString() || '',
+    hmlAppraisalCost: o?.hmlAppraisalCost?.toString() || '',
+    hmlUnderwritingFee: o?.hmlUnderwritingFee?.toString() || '',
+    hmlOtherFees: o?.hmlOtherFees?.toString() || '',
+    hmlAnnualInsurance: o?.hmlAnnualInsurance?.toString() || '',
+    refiLenderName: o?.refiLenderName?.toString() || '',
+    refiLtvPercent: o?.refiLtvPercent?.toString() || '',
+    refiInterestRate: o?.refiInterestRate?.toString() || '',
+    refiAppraisalCost: o?.refiAppraisalCost?.toString() || '',
+    refiUnderwritingFee: o?.refiUnderwritingFee?.toString() || '',
+    refiPointsPercent: o?.refiPointsPercent?.toString() || '',
+    refiOtherFees: o?.refiOtherFees?.toString() || '',
+    refiClosingPercent: o?.refiClosingPercent?.toString() || '',
+    capexPercent: o?.capexPercent?.toString() || '',
+    lotSizeSqft: o?.lotSizeSqft?.toString() || '',
+    holdingOtherMonthly: o?.holdingOtherMonthly?.toString() || '',
+    rentalAppraisalCost: o?.rentalAppraisalCost?.toString() || '',
+    rentalUnderwritingFee: o?.rentalUnderwritingFee?.toString() || '',
+    rentalPointsPercent: o?.rentalPointsPercent?.toString() || '',
+    rentalOtherFees: o?.rentalOtherFees?.toString() || '',
+    rentalInterestOnly: o?.rentalInterestOnly?.toString() || '',
+    brrrrInterestOnly: o?.brrrrInterestOnly?.toString() || '',
+    inventoryMonths: o?.inventoryMonths?.toString() || '',
+  };
+}
+
 export default function DealDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -146,64 +210,7 @@ export default function DealDetailPage() {
   const deal = getDeal(id || '');
   const { messages: smsMessages, sending: smsSending, sendSms } = useDealMessages(deal?.id);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [localOverrides, setLocalOverrides] = useState({
-    arv: deal?.overrides?.arv?.toString() || '',
-    rent: deal?.overrides?.rent?.toString() || '',
-    rehabCost: deal?.overrides?.rehabCost?.toString() || '',
-    purchasePrice: deal?.overrides?.purchasePrice?.toString() || '',
-    downPaymentPercent: deal?.overrides?.downPaymentPercent?.toString() || '',
-    interestRate: deal?.overrides?.interestRate?.toString() || '',
-    loanTermYears: deal?.overrides?.loanTermYears?.toString() || '',
-    targetBedrooms: deal?.overrides?.targetBedrooms?.toString() || '',
-    targetBathrooms: deal?.overrides?.targetBathrooms?.toString() || '',
-    holdingMonths: deal?.overrides?.holdingMonths?.toString() || '',
-    propertyTaxMonthly: deal?.overrides?.propertyTaxMonthly?.toString() || '',
-    insuranceMonthly: deal?.overrides?.insuranceMonthly?.toString() || '',
-    rentalInsuranceMonthly: deal?.overrides?.rentalInsuranceMonthly?.toString() || '',
-    stateTaxMonthly: deal?.overrides?.stateTaxMonthly?.toString() || '',
-    hoaMonthly: deal?.overrides?.hoaMonthly?.toString() || '',
-    utilitiesMonthly: deal?.overrides?.utilitiesMonthly?.toString() || '',
-    propertyManagementPercent: deal?.overrides?.propertyManagementPercent?.toString() || '',
-    maintenanceVacancyPercent: deal?.overrides?.maintenanceVacancyPercent?.toString() || '',
-    closingCostsPercent: deal?.overrides?.closingCostsPercent?.toString() || '',
-    closingCostsDollar: deal?.overrides?.closingCostsDollar?.toString() || '',
-    closingCostsSalePercent: (deal?.overrides as any)?.closingCostsSalePercent?.toString() || '',
-    closingCostsSaleDollar: (deal?.overrides as any)?.closingCostsSaleDollar?.toString() || '',
-    contingencyPercent: deal?.overrides?.contingencyPercent?.toString() || '',
-    agentCommissionPercent: deal?.overrides?.agentCommissionPercent?.toString() || '',
-    notaryFees: deal?.overrides?.notaryFees?.toString() || '',
-    cashNotaryFee: (deal?.overrides as any)?.cashNotaryFee?.toString() || '',
-    titleFees: deal?.overrides?.titleFees?.toString() || '',
-    hmlLoanType: deal?.overrides?.hmlLoanType || 'ltc',
-    brrrrPhase1Type: deal?.overrides?.brrrrPhase1Type || 'hml',
-    hmlLtvPurchasePercent: deal?.overrides?.hmlLtvPurchasePercent?.toString() || '',
-    hmlLtvRehabPercent: deal?.overrides?.hmlLtvRehabPercent?.toString() || '',
-    hmlPointsPercent: deal?.overrides?.hmlPointsPercent?.toString() || '',
-    hmlInterestRate: deal?.overrides?.hmlInterestRate?.toString() || '',
-    hmlProcessingFee: deal?.overrides?.hmlProcessingFee?.toString() || '',
-    hmlAppraisalCost: deal?.overrides?.hmlAppraisalCost?.toString() || '',
-    hmlUnderwritingFee: deal?.overrides?.hmlUnderwritingFee?.toString() || '',
-    hmlOtherFees: deal?.overrides?.hmlOtherFees?.toString() || '',
-    hmlAnnualInsurance: deal?.overrides?.hmlAnnualInsurance?.toString() || '',
-    refiLenderName: deal?.overrides?.refiLenderName?.toString() || '',
-    refiLtvPercent: deal?.overrides?.refiLtvPercent?.toString() || '',
-    refiInterestRate: deal?.overrides?.refiInterestRate?.toString() || '',
-    refiAppraisalCost: deal?.overrides?.refiAppraisalCost?.toString() || '',
-    refiUnderwritingFee: deal?.overrides?.refiUnderwritingFee?.toString() || '',
-    refiPointsPercent: deal?.overrides?.refiPointsPercent?.toString() || '',
-    refiOtherFees: deal?.overrides?.refiOtherFees?.toString() || '',
-    refiClosingPercent: deal?.overrides?.refiClosingPercent?.toString() || '',
-    capexPercent: deal?.overrides?.capexPercent?.toString() || '',
-    lotSizeSqft: deal?.overrides?.lotSizeSqft?.toString() || '',
-    holdingOtherMonthly: deal?.overrides?.holdingOtherMonthly?.toString() || '',
-    rentalAppraisalCost: deal?.overrides?.rentalAppraisalCost?.toString() || '',
-    rentalUnderwritingFee: deal?.overrides?.rentalUnderwritingFee?.toString() || '',
-    rentalPointsPercent: deal?.overrides?.rentalPointsPercent?.toString() || '',
-    rentalOtherFees: deal?.overrides?.rentalOtherFees?.toString() || '',
-    rentalInterestOnly: (deal?.overrides as any)?.rentalInterestOnly?.toString() || '',
-    brrrrInterestOnly: (deal?.overrides as any)?.brrrrInterestOnly?.toString() || '',
-    inventoryMonths: deal?.overrides?.inventoryMonths?.toString() || '',
-  });
+  const [localOverrides, setLocalOverrides] = useState(() => dealOverridesToStrings(deal));
   const [isOverridesDirty, setIsOverridesDirty] = useState(false);
   const baselineOverridesRef = useRef(localOverrides);
   
@@ -258,122 +265,9 @@ export default function DealDetailPage() {
   // Sync local state when deal changes (e.g., navigating to another deal)
   useEffect(() => {
     if (!deal) return;
-    setLocalOverrides({
-      arv: deal.overrides?.arv?.toString() || '',
-      rent: deal.overrides?.rent?.toString() || '',
-      rehabCost: deal.overrides?.rehabCost?.toString() || '',
-      purchasePrice: deal.overrides?.purchasePrice?.toString() || '',
-      downPaymentPercent: deal.overrides?.downPaymentPercent?.toString() || '',
-      interestRate: deal.overrides?.interestRate?.toString() || '',
-      loanTermYears: deal.overrides?.loanTermYears?.toString() || '',
-      targetBedrooms: deal.overrides?.targetBedrooms?.toString() || '',
-      targetBathrooms: deal.overrides?.targetBathrooms?.toString() || '',
-      holdingMonths: deal.overrides?.holdingMonths?.toString() || '',
-      propertyTaxMonthly: deal.overrides?.propertyTaxMonthly?.toString() || '',
-      insuranceMonthly: deal.overrides?.insuranceMonthly?.toString() || '',
-      rentalInsuranceMonthly: deal.overrides?.rentalInsuranceMonthly?.toString() || '',
-      stateTaxMonthly: deal.overrides?.stateTaxMonthly?.toString() || '',
-      hoaMonthly: deal.overrides?.hoaMonthly?.toString() || '',
-      utilitiesMonthly: deal.overrides?.utilitiesMonthly?.toString() || '',
-      propertyManagementPercent: deal.overrides?.propertyManagementPercent?.toString() || '',
-      maintenanceVacancyPercent: deal.overrides?.maintenanceVacancyPercent?.toString() || '',
-      closingCostsPercent: deal.overrides?.closingCostsPercent?.toString() || '',
-      closingCostsDollar: deal.overrides?.closingCostsDollar?.toString() || '',
-      closingCostsSalePercent: (deal.overrides as any)?.closingCostsSalePercent?.toString() || '',
-      closingCostsSaleDollar: (deal.overrides as any)?.closingCostsSaleDollar?.toString() || '',
-      contingencyPercent: deal.overrides?.contingencyPercent?.toString() || '',
-      agentCommissionPercent: deal.overrides?.agentCommissionPercent?.toString() || '',
-      notaryFees: deal.overrides?.notaryFees?.toString() || '',
-      cashNotaryFee: (deal.overrides as any)?.cashNotaryFee?.toString() || '',
-      titleFees: deal.overrides?.titleFees?.toString() || '',
-      hmlLoanType: deal.overrides?.hmlLoanType || 'ltc',
-      brrrrPhase1Type: deal.overrides?.brrrrPhase1Type || 'hml',
-      hmlLtvPurchasePercent: deal.overrides?.hmlLtvPurchasePercent?.toString() || '',
-      hmlLtvRehabPercent: deal.overrides?.hmlLtvRehabPercent?.toString() || '',
-      hmlPointsPercent: deal.overrides?.hmlPointsPercent?.toString() || '',
-      hmlInterestRate: deal.overrides?.hmlInterestRate?.toString() || '',
-      hmlProcessingFee: deal.overrides?.hmlProcessingFee?.toString() || '',
-      hmlAppraisalCost: deal.overrides?.hmlAppraisalCost?.toString() || '',
-      hmlUnderwritingFee: deal.overrides?.hmlUnderwritingFee?.toString() || '',
-      hmlOtherFees: deal.overrides?.hmlOtherFees?.toString() || '',
-      hmlAnnualInsurance: deal.overrides?.hmlAnnualInsurance?.toString() || '',
-      refiLenderName: deal.overrides?.refiLenderName?.toString() || '',
-      refiLtvPercent: deal.overrides?.refiLtvPercent?.toString() || '',
-      refiInterestRate: deal.overrides?.refiInterestRate?.toString() || '',
-      refiAppraisalCost: deal.overrides?.refiAppraisalCost?.toString() || '',
-      refiUnderwritingFee: deal.overrides?.refiUnderwritingFee?.toString() || '',
-      refiPointsPercent: deal.overrides?.refiPointsPercent?.toString() || '',
-      refiOtherFees: deal.overrides?.refiOtherFees?.toString() || '',
-      refiClosingPercent: deal.overrides?.refiClosingPercent?.toString() || '',
-      capexPercent: deal.overrides?.capexPercent?.toString() || '',
-      lotSizeSqft: deal.overrides?.lotSizeSqft?.toString() || '',
-      holdingOtherMonthly: deal.overrides?.holdingOtherMonthly?.toString() || '',
-      rentalAppraisalCost: deal.overrides?.rentalAppraisalCost?.toString() || '',
-      rentalUnderwritingFee: deal.overrides?.rentalUnderwritingFee?.toString() || '',
-      rentalPointsPercent: deal.overrides?.rentalPointsPercent?.toString() || '',
-      rentalOtherFees: deal.overrides?.rentalOtherFees?.toString() || '',
-      rentalInterestOnly: (deal.overrides as any)?.rentalInterestOnly?.toString() || '',
-      brrrrInterestOnly: (deal.overrides as any)?.brrrrInterestOnly?.toString() || '',
-      inventoryMonths: deal.overrides?.inventoryMonths?.toString() || '',
-    });
-    baselineOverridesRef.current = {
-      arv: deal.overrides?.arv?.toString() || '',
-      rent: deal.overrides?.rent?.toString() || '',
-      rehabCost: deal.overrides?.rehabCost?.toString() || '',
-      purchasePrice: deal.overrides?.purchasePrice?.toString() || '',
-      downPaymentPercent: deal.overrides?.downPaymentPercent?.toString() || '',
-      interestRate: deal.overrides?.interestRate?.toString() || '',
-      loanTermYears: deal.overrides?.loanTermYears?.toString() || '',
-      targetBedrooms: deal.overrides?.targetBedrooms?.toString() || '',
-      targetBathrooms: deal.overrides?.targetBathrooms?.toString() || '',
-      holdingMonths: deal.overrides?.holdingMonths?.toString() || '',
-      propertyTaxMonthly: deal.overrides?.propertyTaxMonthly?.toString() || '',
-      insuranceMonthly: deal.overrides?.insuranceMonthly?.toString() || '',
-      rentalInsuranceMonthly: deal.overrides?.rentalInsuranceMonthly?.toString() || '',
-      stateTaxMonthly: deal.overrides?.stateTaxMonthly?.toString() || '',
-      hoaMonthly: deal.overrides?.hoaMonthly?.toString() || '',
-      utilitiesMonthly: deal.overrides?.utilitiesMonthly?.toString() || '',
-      propertyManagementPercent: deal.overrides?.propertyManagementPercent?.toString() || '',
-      maintenanceVacancyPercent: deal.overrides?.maintenanceVacancyPercent?.toString() || '',
-      closingCostsPercent: deal.overrides?.closingCostsPercent?.toString() || '',
-      closingCostsDollar: deal.overrides?.closingCostsDollar?.toString() || '',
-      closingCostsSalePercent: (deal.overrides as any)?.closingCostsSalePercent?.toString() || '',
-      closingCostsSaleDollar: (deal.overrides as any)?.closingCostsSaleDollar?.toString() || '',
-      contingencyPercent: deal.overrides?.contingencyPercent?.toString() || '',
-      agentCommissionPercent: deal.overrides?.agentCommissionPercent?.toString() || '',
-      notaryFees: deal.overrides?.notaryFees?.toString() || '',
-      cashNotaryFee: (deal.overrides as any)?.cashNotaryFee?.toString() || '',
-      titleFees: deal.overrides?.titleFees?.toString() || '',
-      hmlLoanType: deal.overrides?.hmlLoanType || 'ltc',
-      brrrrPhase1Type: deal.overrides?.brrrrPhase1Type || 'hml',
-      hmlLtvPurchasePercent: deal.overrides?.hmlLtvPurchasePercent?.toString() || '',
-      hmlLtvRehabPercent: deal.overrides?.hmlLtvRehabPercent?.toString() || '',
-      hmlPointsPercent: deal.overrides?.hmlPointsPercent?.toString() || '',
-      hmlInterestRate: deal.overrides?.hmlInterestRate?.toString() || '',
-      hmlProcessingFee: deal.overrides?.hmlProcessingFee?.toString() || '',
-      hmlAppraisalCost: deal.overrides?.hmlAppraisalCost?.toString() || '',
-      hmlUnderwritingFee: deal.overrides?.hmlUnderwritingFee?.toString() || '',
-      hmlOtherFees: deal.overrides?.hmlOtherFees?.toString() || '',
-      hmlAnnualInsurance: deal.overrides?.hmlAnnualInsurance?.toString() || '',
-      refiLenderName: deal.overrides?.refiLenderName?.toString() || '',
-      refiLtvPercent: deal.overrides?.refiLtvPercent?.toString() || '',
-      refiInterestRate: deal.overrides?.refiInterestRate?.toString() || '',
-      refiAppraisalCost: deal.overrides?.refiAppraisalCost?.toString() || '',
-      refiUnderwritingFee: deal.overrides?.refiUnderwritingFee?.toString() || '',
-      refiPointsPercent: deal.overrides?.refiPointsPercent?.toString() || '',
-      refiOtherFees: deal.overrides?.refiOtherFees?.toString() || '',
-      refiClosingPercent: deal.overrides?.refiClosingPercent?.toString() || '',
-      capexPercent: deal.overrides?.capexPercent?.toString() || '',
-      lotSizeSqft: deal.overrides?.lotSizeSqft?.toString() || '',
-      holdingOtherMonthly: deal.overrides?.holdingOtherMonthly?.toString() || '',
-      rentalAppraisalCost: deal.overrides?.rentalAppraisalCost?.toString() || '',
-      rentalUnderwritingFee: deal.overrides?.rentalUnderwritingFee?.toString() || '',
-      rentalPointsPercent: deal.overrides?.rentalPointsPercent?.toString() || '',
-      rentalOtherFees: deal.overrides?.rentalOtherFees?.toString() || '',
-      rentalInterestOnly: (deal.overrides as any)?.rentalInterestOnly?.toString() || '',
-      brrrrInterestOnly: (deal.overrides as any)?.brrrrInterestOnly?.toString() || '',
-      inventoryMonths: deal.overrides?.inventoryMonths?.toString() || '',
-    };
+    const initial = dealOverridesToStrings(deal);
+    setLocalOverrides(initial);
+    baselineOverridesRef.current = initial;
     setNotes(deal.notes || '');
     setRejectionReason(deal.rejectionReason || '');
     setIsOverridesDirty(false);
@@ -389,64 +283,7 @@ export default function DealDetailPage() {
     lastSyncedUpdatedAtRef.current = deal.updatedAt;
     
     if (!isOverridesDirty) {
-      const synced = {
-        arv: deal.overrides?.arv?.toString() || '',
-        rent: deal.overrides?.rent?.toString() || '',
-        rehabCost: deal.overrides?.rehabCost?.toString() || '',
-        purchasePrice: deal.overrides?.purchasePrice?.toString() || '',
-        downPaymentPercent: deal.overrides?.downPaymentPercent?.toString() || '',
-        interestRate: deal.overrides?.interestRate?.toString() || '',
-        loanTermYears: deal.overrides?.loanTermYears?.toString() || '',
-        targetBedrooms: deal.overrides?.targetBedrooms?.toString() || '',
-        targetBathrooms: deal.overrides?.targetBathrooms?.toString() || '',
-        holdingMonths: deal.overrides?.holdingMonths?.toString() || '',
-        propertyTaxMonthly: deal.overrides?.propertyTaxMonthly?.toString() || '',
-        insuranceMonthly: deal.overrides?.insuranceMonthly?.toString() || '',
-        rentalInsuranceMonthly: deal.overrides?.rentalInsuranceMonthly?.toString() || '',
-        stateTaxMonthly: deal.overrides?.stateTaxMonthly?.toString() || '',
-        hoaMonthly: deal.overrides?.hoaMonthly?.toString() || '',
-        utilitiesMonthly: deal.overrides?.utilitiesMonthly?.toString() || '',
-        propertyManagementPercent: deal.overrides?.propertyManagementPercent?.toString() || '',
-        maintenanceVacancyPercent: deal.overrides?.maintenanceVacancyPercent?.toString() || '',
-        closingCostsPercent: deal.overrides?.closingCostsPercent?.toString() || '',
-        closingCostsDollar: deal.overrides?.closingCostsDollar?.toString() || '',
-        closingCostsSalePercent: (deal.overrides as any)?.closingCostsSalePercent?.toString() || '',
-        closingCostsSaleDollar: (deal.overrides as any)?.closingCostsSaleDollar?.toString() || '',
-        contingencyPercent: deal.overrides?.contingencyPercent?.toString() || '',
-        agentCommissionPercent: deal.overrides?.agentCommissionPercent?.toString() || '',
-        notaryFees: deal.overrides?.notaryFees?.toString() || '',
-        cashNotaryFee: (deal.overrides as any)?.cashNotaryFee?.toString() || '',
-        titleFees: deal.overrides?.titleFees?.toString() || '',
-        hmlLoanType: deal.overrides?.hmlLoanType || 'ltc',
-        brrrrPhase1Type: deal.overrides?.brrrrPhase1Type || 'hml',
-        hmlLtvPurchasePercent: deal.overrides?.hmlLtvPurchasePercent?.toString() || '',
-        hmlLtvRehabPercent: deal.overrides?.hmlLtvRehabPercent?.toString() || '',
-        hmlPointsPercent: deal.overrides?.hmlPointsPercent?.toString() || '',
-        hmlInterestRate: deal.overrides?.hmlInterestRate?.toString() || '',
-        hmlProcessingFee: deal.overrides?.hmlProcessingFee?.toString() || '',
-        hmlAppraisalCost: deal.overrides?.hmlAppraisalCost?.toString() || '',
-        hmlUnderwritingFee: deal.overrides?.hmlUnderwritingFee?.toString() || '',
-        hmlOtherFees: deal.overrides?.hmlOtherFees?.toString() || '',
-        hmlAnnualInsurance: deal.overrides?.hmlAnnualInsurance?.toString() || '',
-        refiLenderName: deal.overrides?.refiLenderName?.toString() || '',
-        refiLtvPercent: deal.overrides?.refiLtvPercent?.toString() || '',
-        refiInterestRate: deal.overrides?.refiInterestRate?.toString() || '',
-        refiAppraisalCost: deal.overrides?.refiAppraisalCost?.toString() || '',
-        refiUnderwritingFee: deal.overrides?.refiUnderwritingFee?.toString() || '',
-        refiPointsPercent: deal.overrides?.refiPointsPercent?.toString() || '',
-        refiOtherFees: deal.overrides?.refiOtherFees?.toString() || '',
-        refiClosingPercent: deal.overrides?.refiClosingPercent?.toString() || '',
-        capexPercent: deal.overrides?.capexPercent?.toString() || '',
-        lotSizeSqft: deal.overrides?.lotSizeSqft?.toString() || '',
-        holdingOtherMonthly: deal.overrides?.holdingOtherMonthly?.toString() || '',
-        rentalAppraisalCost: deal.overrides?.rentalAppraisalCost?.toString() || '',
-        rentalUnderwritingFee: deal.overrides?.rentalUnderwritingFee?.toString() || '',
-        rentalPointsPercent: deal.overrides?.rentalPointsPercent?.toString() || '',
-        rentalOtherFees: deal.overrides?.rentalOtherFees?.toString() || '',
-        rentalInterestOnly: (deal.overrides as any)?.rentalInterestOnly?.toString() || '',
-        brrrrInterestOnly: (deal.overrides as any)?.brrrrInterestOnly?.toString() || '',
-        inventoryMonths: deal.overrides?.inventoryMonths?.toString() || '',
-      };
+      const synced = dealOverridesToStrings(deal);
       setLocalOverrides(synced);
       baselineOverridesRef.current = synced;
     }
@@ -877,6 +714,44 @@ export default function DealDetailPage() {
       inventoryMonths: localOverrides.inventoryMonths ? parseFloat(localOverrides.inventoryMonths) : null,
     }, settings.investmentScoreSettings);
   }, [arv, purchasePrice, rehabCost, brrrrMonthlyCashflow, brrrrCashLeftInDeal, apiData?.schoolScore, localOverrides.inventoryMonths, settings.investmentScoreSettings]);
+
+  // ARV-vs-comps validation result, memoized so the comp-loop doesn't run on every render.
+  // Returns null when the user has manually overridden ARV (we trust their value) or when prerequisites are missing.
+  const arvValidationMemo = useMemo(() => {
+    if (!apiData || !derivedValues || localOverrides.arv) return null;
+    const baseArv = apiData.arv ?? 0;
+    const layoutArvIncrease = (derivedValues.bedroomsAdded * 30000) + (derivedValues.bathroomsAdded * 20000);
+    const arvBeforeValidation = baseArv + layoutArvIncrease;
+    const sqft = apiData.sqft ?? 0;
+    return validateArvAgainstComps(
+      arvBeforeValidation,
+      apiData.saleComps || [],
+      sqft,
+      derivedValues.targetBedrooms,
+      derivedValues.targetBathrooms,
+    );
+  }, [apiData, derivedValues, localOverrides.arv]);
+
+  const suspiciousCheckMemo = useMemo(() => {
+    if (!apiData) return null;
+    const effectiveArvForCheck = localOverrides.arv ? parseFloat(localOverrides.arv) : (liveFinancials?.arv ?? null);
+    return detectSuspiciousData(apiData, {
+      arv: effectiveArvForCheck,
+      purchasePrice: localOverrides.purchasePrice ? parseFloat(localOverrides.purchasePrice) : null,
+      rent: localOverrides.rent ? parseFloat(localOverrides.rent) : null,
+      rehabCost: localOverrides.rehabCost ? parseFloat(localOverrides.rehabCost) : null,
+    });
+  }, [apiData, liveFinancials?.arv, localOverrides.arv, localOverrides.purchasePrice, localOverrides.rent, localOverrides.rehabCost]);
+
+  const arvAnalysisMemo = useMemo(() => {
+    if (!apiData) return null;
+    return analyzeArv(arv, apiData?.saleComps ?? []);
+  }, [arv, apiData]);
+
+  const rehabAnalysisMemo = useMemo(() => {
+    if (!deal) return null;
+    return analyzeRehab(deal);
+  }, [deal]);
 
   // Build display-default map: what shows in each input when override is empty
   const fieldDisplayDefaults = useMemo((): Record<string, string> => {
@@ -3244,10 +3119,7 @@ BRRRR STRATEGY:
         const sqft = apiData.sqft ?? 0;
 
         // Validate API-derived ARV against comps (do not override user ARV override)
-        const shouldValidateArv = !localOverrides.arv;
-        const arvValidation = shouldValidateArv
-          ? validateArvAgainstComps(arvBeforeValidation, apiData.saleComps || [], sqft, targetBedrooms, targetBathrooms)
-          : null;
+        const arvValidation = arvValidationMemo;
 
         const arv = arvValidation ? arvValidation.validatedArv : arvBeforeValidation;
         const arvValidationDelta = arvValidation ? Math.max(0, arvBeforeValidation - arv) : 0;
@@ -3338,12 +3210,7 @@ BRRRR STRATEGY:
         // (it already accounts for comp validation), so the warning only fires when
         // the *effective* ARV is unrealistic, not when the raw API value is bad but comps fixed it.
         const effectiveArvForCheck = localOverrides.arv ? parseFloat(localOverrides.arv) : (liveFinancials?.arv ?? null);
-        const suspiciousCheck = detectSuspiciousData(apiData, {
-          arv: effectiveArvForCheck,
-          purchasePrice: localOverrides.purchasePrice ? parseFloat(localOverrides.purchasePrice) : null,
-          rent: localOverrides.rent ? parseFloat(localOverrides.rent) : null,
-          rehabCost: localOverrides.rehabCost ? parseFloat(localOverrides.rehabCost) : null,
-        });
+        const suspiciousCheck = suspiciousCheckMemo;
         
         return (
           <>
@@ -4143,8 +4010,8 @@ BRRRR STRATEGY:
               const flipRoi = flipTotalInvestment > 0 ? (flipNetProfit / flipTotalInvestment) * 100 : 0;
 
               // Confidence-adjusted scoring: ARV and rehab uncertainty reduce the score
-              const _arvConf = analyzeArv(arv, apiData?.saleComps ?? []).confidence;
-              const _rehabConf = analyzeRehab(deal).confidence;
+              const _arvConf = (arvAnalysisMemo?.confidence ?? 'green');
+              const _rehabConf = (rehabAnalysisMemo?.confidence ?? 'high');
               const _arvFactor = _arvConf === 'green' ? 1.0 : _arvConf === 'yellow' ? 0.85 : 0.70;
               const _rehabFactor = _rehabConf === 'high' ? 1.0 : _rehabConf === 'medium' ? 0.88 : 0.75;
               const _confMultiplier = _arvFactor * _rehabFactor;
@@ -6530,15 +6397,7 @@ BRRRR STRATEGY:
 
                 {/* ── Investment Decision Score ── */}
                 {(() => {
-                  const invScore = calculateInvestmentScore({
-                    monthlyCashflow: brrrrMonthlyCashflow || null,
-                    cashLeftInDeal: brrrrCashLeftInDeal,
-                    arv,
-                    purchasePrice,
-                    rehabCost,
-                    schoolTotal: apiData?.schoolScore ?? null,
-                    inventoryMonths: localOverrides.inventoryMonths ? parseFloat(localOverrides.inventoryMonths) : null,
-                  }, settings.investmentScoreSettings);
+                  const invScore = headerInvestmentScore;
                   const isBuy = invScore?.decision === 'Buy';
                   return (
                     <div className="mt-4 rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-4">
