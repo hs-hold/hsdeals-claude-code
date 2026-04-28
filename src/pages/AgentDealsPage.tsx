@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom';
 import { useDeals } from '@/context/DealsContext';
 import { useAuth } from '@/context/AuthContext';
 import { useSettings } from '@/context/SettingsContext';
-import { formatCurrency, getEffectiveMonthlyInsurance } from '@/utils/financialCalculations';
+import { formatCurrency } from '@/utils/financialCalculations';
+import { calculateFlipScore, FlipScoreResult } from '@/utils/flipScore';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -16,69 +17,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const MAX_PRICE = 300000;
-
-interface FlipResult {
-  score: number;
-  flipRoi: number;
-  netProfit: number;
-  purchasePrice: number;
-  arv: number;
-  rehabCost: number;
-  totalInvestment: number;
-  mao: number | null;
-  priceDiffPercent: number | null;
-}
-
-function calculateFlipScoreWithMAO(deal: Deal, loanDefaults: any): FlipResult | null {
-  const financials = deal.financials;
-  const apiData = deal.apiData;
-  if (!financials || !apiData) return null;
-
-  const purchasePrice = deal.overrides?.purchasePrice ?? apiData.purchasePrice ?? 0;
-  if (purchasePrice <= 0) return null;
-
-  const arv = deal.overrides?.arv ?? apiData.arv ?? 0;
-  const rehabCost = deal.overrides?.rehabCost ?? apiData.rehabCost ?? 0;
-  if (arv <= 0) return null;
-
-  const flipClosingCosts = purchasePrice * 0.02;
-  const holdingMonths = loanDefaults?.holdingMonths ?? 4;
-  const propertyTaxMonthly = (apiData.propertyTax ?? 0) / 12;
-  const insuranceMonthly = getEffectiveMonthlyInsurance(apiData.insurance);
-  const utilitiesMonthly = 300;
-  const holdingCostsMonthly = propertyTaxMonthly + insuranceMonthly + utilitiesMonthly;
-  const totalHoldingCosts = holdingCostsMonthly * holdingMonths;
-  const agentCommission = arv * 0.06;
-  const notaryFees = 500;
-  const totalInvestment = purchasePrice + rehabCost + flipClosingCosts + totalHoldingCosts;
-  const netProfit = arv - totalInvestment - agentCommission - notaryFees;
-  const flipRoi = totalInvestment > 0 ? (netProfit / totalInvestment) * 100 : 0;
-
-  let score = 0;
-  if (flipRoi >= 25) score = 10;
-  else if (flipRoi >= 20) score = 9;
-  else if (flipRoi >= 18) score = 8;
-  else if (flipRoi >= 16) score = 7;
-  else if (flipRoi >= 15) score = 6;
-  else if (flipRoi >= 13) score = 5;
-  else if (flipRoi >= 11) score = 4;
-  else if (flipRoi >= 9) score = 3;
-  else if (flipRoi >= 8) score = 2;
-  else score = 1;
-
-  // Calculate MAO for ROI = 18%
-  // P = (arv*0.94 - 500 - 1.18*(rehabCost + holdingCosts)) / 1.2036
-  const fixedCosts = rehabCost + totalHoldingCosts;
-  const mao = (arv * 0.94 - 500 - 1.18 * fixedCosts) / 1.2036;
-  const priceDiffPercent = purchasePrice > 0 ? ((purchasePrice - mao) / purchasePrice) * 100 : null;
-
-  return { 
-    score, flipRoi, netProfit, purchasePrice, arv, rehabCost, totalInvestment,
-    mao: mao > 0 ? mao : null,
-    priceDiffPercent,
-  };
-}
+type FlipResult = FlipScoreResult;
 
 interface DealCardProps {
   deal: Deal;
@@ -165,7 +104,7 @@ export default function AgentDealsPage() {
 
     const withScores = agentDeals
       .map(deal => {
-        const result = calculateFlipScoreWithMAO(deal, loanDefaults);
+        const result = calculateFlipScore(deal, loanDefaults, { ignoreMaxPrice: true });
         return result ? { deal, result } : null;
       })
       .filter(Boolean) as { deal: Deal; result: FlipResult }[];

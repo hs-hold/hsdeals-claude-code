@@ -89,6 +89,22 @@ serve(async (req) => {
     }
 
     const data = await response.json();
+
+    // Log this paid API call so the UI can show daily usage / warn over budget.
+    try {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL');
+      const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+      if (supabaseUrl && serviceKey) {
+        const db = createClient(supabaseUrl, serviceKey);
+        await db.from('api_call_log').insert({
+          service: 'dealbeast',
+          meta: { address },
+        });
+      }
+    } catch (logErr) {
+      console.error('[analyze-property] usage log failed:', String(logErr));
+    }
+
     console.log('[analyze-property] top-level keys:', Object.keys(data || {}));
     const inner = data?.data || data?.result || {};
     console.log('[analyze-property] inner keys:', Object.keys(inner));

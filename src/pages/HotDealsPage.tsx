@@ -3,7 +3,8 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useDeals } from '@/context/DealsContext';
 import { useSettings } from '@/context/SettingsContext';
 import { DealAgeFilter, AgeFilterType, applyDealAgeFilter } from '@/components/deals/DealAgeFilter';
-import { formatCurrency, getEffectiveMonthlyInsurance, calculateFinancials } from '@/utils/financialCalculations';
+import { formatCurrency } from '@/utils/financialCalculations';
+import { calculateFlipScore } from '@/utils/flipScore';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,59 +16,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Flame, DollarSign, Inbox, Calendar, CalendarDays, Star, CheckSquare, Square, ChevronDown, X, Filter, Check } from 'lucide-react';
 import { Deal, DealStatus, DEAL_STATUS_CONFIG } from '@/types/deal';
-
-const MAX_PRICE = 300000;
-
-function calculateFlipScore(deal: Deal, loanDefaults: any) {
-  const apiData = deal.apiData;
-  if (!deal.financials || !apiData) return null;
-
-  const purchasePrice = deal.overrides?.purchasePrice ?? apiData.purchasePrice ?? 0;
-  if (purchasePrice > MAX_PRICE || purchasePrice <= 0) return null;
-
-  const liveFinancials = calculateFinancials(apiData, deal.overrides ?? {}, loanDefaults);
-  const arv = liveFinancials.arv;
-
-  const baseRehabCost = deal.overrides?.rehabCost ?? apiData.rehabCost ?? 0;
-  const bedroomsAdded = deal.overrides?.targetBedrooms != null
-    ? Math.max(0, deal.overrides.targetBedrooms - (apiData.bedrooms ?? 0))
-    : 0;
-  const bathroomsAdded = deal.overrides?.targetBathrooms != null
-    ? Math.max(0, deal.overrides.targetBathrooms - (apiData.bathrooms ?? 0))
-    : 0;
-  const layoutRehabCost = (bedroomsAdded * 20_000) + (bathroomsAdded * 15_000);
-  const rehabFloor = deal.source === 'email' ? 80_000 : 60_000;
-  const rehabCost = deal.overrides?.rehabCost != null
-    ? baseRehabCost + layoutRehabCost
-    : Math.max(baseRehabCost + layoutRehabCost, rehabFloor);
-
-  const flipClosingCosts = purchasePrice * 0.02;
-  const holdingMonths = loanDefaults?.holdingMonths ?? 4;
-  const propertyTaxMonthly = (apiData.propertyTax ?? 0) / 12;
-  const insuranceMonthly = getEffectiveMonthlyInsurance(apiData.insurance);
-  const utilitiesMonthly = 300;
-  const holdingCostsMonthly = propertyTaxMonthly + insuranceMonthly + utilitiesMonthly;
-  const totalHoldingCosts = holdingCostsMonthly * holdingMonths;
-  const agentCommission = arv * 0.06;
-  const notaryFees = 500;
-  const totalInvestment = purchasePrice + rehabCost + flipClosingCosts + totalHoldingCosts;
-  const netProfit = arv - totalInvestment - agentCommission - notaryFees;
-  const flipRoi = totalInvestment > 0 ? (netProfit / totalInvestment) * 100 : 0;
-
-  let score = 0;
-  if (flipRoi >= 25) score = 10;
-  else if (flipRoi >= 20) score = 9;
-  else if (flipRoi >= 18) score = 8;
-  else if (flipRoi >= 16) score = 7;
-  else if (flipRoi >= 15) score = 6;
-  else if (flipRoi >= 13) score = 5;
-  else if (flipRoi >= 11) score = 4;
-  else if (flipRoi >= 9) score = 3;
-  else if (flipRoi >= 8) score = 2;
-  else score = 1;
-
-  return { score, flipRoi, netProfit, purchasePrice, arv, rehabCost, totalInvestment };
-}
 
 type FilterType = 'all' | 'today' | 'week' | 'top';
 
