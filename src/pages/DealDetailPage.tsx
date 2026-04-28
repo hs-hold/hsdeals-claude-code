@@ -5,6 +5,7 @@ import { useSettings } from '@/context/SettingsContext';
 import { isDealAnalyzed } from '@/utils/dealHelpers';
 import { coerceLotSizeSqft } from '@/utils/lotSize';
 import { sanitizeNumericInput, toNumberOrNull } from '@/utils/inputHelpers';
+import { buildFieldDisplayDefaults } from '@/utils/dealFieldDefaults';
 import { detectSuspiciousData } from '@/utils/suspiciousData';
 import { analyzeArv, analyzeRehab } from '@/utils/maoCalculations';
 import { calculateInvestmentScore } from '@/utils/investmentScore';
@@ -755,52 +756,10 @@ export default function DealDetailPage() {
   }, [deal]);
 
   // Build display-default map: what shows in each input when override is empty
-  const fieldDisplayDefaults = useMemo((): Record<string, string> => {
-    if (!apiData) return {};
-    const baseArv = apiData.arv ?? 0;
-    const baseRehab = apiData.rehabCost ?? 0;
-    const baseRent = apiData.rent ?? 0;
-    const basePurchase = apiData.purchasePrice ?? 0;
-    return {
-      purchasePrice: Math.round(basePurchase).toString(),
-      arv: Math.round(baseArv).toString(),
-      rehabCost: Math.round(baseRehab).toString(),
-      rent: Math.round(baseRent).toString(),
-      targetBedrooms: (apiData.bedrooms ?? 0).toString(),
-      targetBathrooms: (apiData.bathrooms ?? 0).toString(),
-      downPaymentPercent: loanDefaults.downPaymentPercent.toString(),
-      interestRate: loanDefaults.interestRate.toString(),
-      loanTermYears: loanDefaults.loanTermYears.toString(),
-      holdingMonths: loanDefaults.holdingMonths.toString(),
-      closingCostsPercent: loanDefaults.closingCostsPercent.toString(),
-      contingencyPercent: loanDefaults.contingencyPercent.toString(),
-      agentCommissionPercent: loanDefaults.agentCommissionPercent.toString(),
-      propertyManagementPercent: loanDefaults.propertyManagementPercent.toString(),
-      maintenanceVacancyPercent: loanDefaults.maintenanceVacancyPercent.toString(),
-      capexPercent: loanDefaults.capexPercent.toString(),
-      hmlLtvPurchasePercent: loanDefaults.hmlLtvPurchasePercent.toString(),
-      hmlLtvRehabPercent: loanDefaults.hmlLtvRehabPercent.toString(),
-      hmlPointsPercent: loanDefaults.hmlPointsPercent.toString(),
-      hmlInterestRate: loanDefaults.hmlInterestRate.toString(),
-      hmlProcessingFee: loanDefaults.hmlProcessingFee.toString(),
-      hmlAppraisalCost: '',
-      hmlUnderwritingFee: '',
-      hmlOtherFees: '',
-      hmlAnnualInsurance: '',
-      refiLtvPercent: loanDefaults.refiLtvPercent.toString(),
-      refiClosingPercent: loanDefaults.refiClosingPercent.toString(),
-      propertyTaxMonthly: Math.round((apiData.propertyTax ?? 0) / 12).toString(),
-      insuranceMonthly: Math.round((apiData.insurance ?? 1200) / 12).toString(),
-      stateTaxMonthly: '0',
-      hoaMonthly: '0',
-      utilitiesMonthly: '300',
-      notaryFees: FINANCIAL_CONFIG.notaryFeePerSigning.toString(),
-      cashNotaryFee: '400',
-      titleFees: FINANCIAL_CONFIG.titleFees.toString(),
-      hmlLoanType: 'ltc',
-      brrrrPhase1Type: 'hml',
-    };
-  }, [apiData, loanDefaults]);
+  const fieldDisplayDefaults = useMemo(
+    () => buildFieldDisplayDefaults(apiData, loanDefaults),
+    [apiData, loanDefaults]
+  );
 
   // Check if current local overrides differ from baseline (what was loaded from DB)
   // Resolves empty values to their display defaults so typing the default value = no change
