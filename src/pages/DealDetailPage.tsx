@@ -4,6 +4,7 @@ import { useDeals } from '@/context/DealsContext';
 import { useSettings } from '@/context/SettingsContext';
 import { isDealAnalyzed } from '@/utils/dealHelpers';
 import { coerceLotSizeSqft } from '@/utils/lotSize';
+import { sanitizeNumericInput, toNumberOrNull } from '@/utils/inputHelpers';
 import { detectSuspiciousData } from '@/utils/suspiciousData';
 import { analyzeArv, analyzeRehab } from '@/utils/maoCalculations';
 import { calculateInvestmentScore } from '@/utils/investmentScore';
@@ -878,23 +879,6 @@ export default function DealDetailPage() {
       setIsRefreshing(false);
     }
   };
-
-  const sanitizeNumericInput = (raw: string, opts?: { allowDecimal?: boolean }) => {
-    const allowDecimal = opts?.allowDecimal ?? false;
-    // Keep only digits and (optionally) a single dot.
-    let cleaned = raw.replace(/[^0-9.]/g, '');
-    if (!allowDecimal) {
-      cleaned = cleaned.replace(/\./g, '');
-    } else {
-      const firstDot = cleaned.indexOf('.');
-      if (firstDot !== -1) {
-        cleaned = cleaned.slice(0, firstDot + 1) + cleaned.slice(firstDot + 1).replace(/\./g, '');
-      }
-    }
-    return cleaned;
-  };
-
-  const toNumberOrNull = (value: string) => (value.trim() === '' ? null : parseFloat(value));
 
   // Get original API value for a field
   const getOriginalValue = (field: keyof typeof localOverrides): number | null => {
