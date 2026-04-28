@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Deal, DealStatus } from '@/types/deal';
 import { formatCurrency, formatPercent } from '@/utils/financialCalculations';
 import { detectSuspiciousData } from '@/utils/suspiciousData';
@@ -54,9 +55,12 @@ interface DealsTableProps {
   isLoading?: boolean;
 }
 
+const PAGE_SIZE = 100;
+
 export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true, showAnalyzeButton = true, isLoading = false }: DealsTableProps) {
   const { analyzeDeal, updateDealStatus, deleteDeal } = useDeals();
   const { settings } = useSettings();
+  const isMobile = useIsMobile();
   const scoreSettings = settings.investmentScoreSettings;
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [markingNotRelevantId, setMarkingNotRelevantId] = useState<string | null>(null);
@@ -255,6 +259,34 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
     return result;
   }, [deals, search, statusFilter, lockedFilter, sourceFilter, minCashflow, minYield, ageFilter, sortField, sortDirection, excludeStatuses]);
 
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [search, statusFilter, lockedFilter, sourceFilter, minCashflow, minYield, ageFilter, sortField, sortDirection]);
+
+  const visibleDeals = useMemo(
+    () => filteredAndSorted.slice(0, visibleCount),
+    [filteredAndSorted, visibleCount]
+  );
+  const hasMore = visibleCount < filteredAndSorted.length;
+
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!hasMore) return;
+    const node = sentinelRef.current;
+    if (!node) return;
+    const obs = new IntersectionObserver(
+      entries => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount(c => c + PAGE_SIZE);
+        }
+      },
+      { rootMargin: '300px' }
+    );
+    obs.observe(node);
+    return () => obs.disconnect();
+  }, [hasMore]);
+
   const handleSort = (field: SortField) => {
     if (sortField === field) {
       setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
@@ -388,7 +420,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
       <div className="md:hidden space-y-2">
         {filteredAndSorted.length === 0 ? (
           <p className="text-center text-muted-foreground py-10">No deals found</p>
-        ) : filteredAndSorted.map(deal => {
+        ) : visibleDeals.map(deal => {
           const cocReturn = deal.financials?.cashOnCashReturn ?? 0;
           const equity = deal.financials?.equityAtPurchase ?? 0;
           const arv = deal.overrides?.arv ?? deal.apiData?.arv ?? 0;
@@ -427,8 +459,9 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
             </Link>
           );
         })}
+        {hasMore && <div ref={sentinelRef} className="h-8" />}
         <p className="text-xs text-muted-foreground pt-1">
-          Showing {filteredAndSorted.length} of {deals.filter(d => !excludeStatuses.includes(d.status)).length} deals
+          Showing {visibleDeals.length} of {filteredAndSorted.length} matching · {deals.filter(d => !excludeStatuses.includes(d.status)).length} total
         </p>
       </div>
 
@@ -473,7 +506,7 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
                 </TableCell>
               </TableRow>
             ) : (
-              filteredAndSorted.map(deal => {
+              visibleDeals.map(deal => {
                 const cocReturn = deal.financials?.cashOnCashReturn ?? 0;
                 const equity = deal.financials?.equityAtPurchase ?? 0;
                 
@@ -859,8 +892,16 @@ export function DealsTable({ deals, excludeStatuses = [], showCloseAction = true
         </Table>
       </div>
 
+      {hasMore && !isMobile && (
+        <div className="hidden md:flex justify-center">
+          <Button variant="outline" onClick={() => setVisibleCount(c => c + PAGE_SIZE)}>
+            Load more ({filteredAndSorted.length - visibleCount} remaining)
+          </Button>
+        </div>
+      )}
+
       <p className="hidden md:block text-sm text-muted-foreground">
-        Showing {filteredAndSorted.length} of {deals.filter(d => !excludeStatuses.includes(d.status)).length} deals
+        Showing {visibleDeals.length} of {filteredAndSorted.length} matching · {deals.filter(d => !excludeStatuses.includes(d.status)).length} total
       </p>
     </div>
   );
