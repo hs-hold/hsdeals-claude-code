@@ -639,6 +639,11 @@ export function useDealsFromDB() {
     if (existingAgent.mlsId      && !apiData.mlsId)      apiData.mlsId       = existingAgent.mlsId;
     if (existingAgent.agentEmail && !apiData.agentEmail) apiData.agentEmail  = existingAgent.agentEmail;
 
+    // Last-resort: fall back to original sender email — DealBeast never returns email.
+    if (!apiData.agentEmail && deal.senderEmail) {
+      apiData.agentEmail = deal.senderEmail;
+    }
+
     // DealBeast doesn't return agent email — supplement from zillow-search (best-effort)
     if (!apiData.agentEmail) {
       try {

@@ -1259,7 +1259,12 @@ serve(async (req) => {
             address_full: addressFull,
             status: 'new',
             source: 'email',
-            api_data: askingPrice ? { emailPurchasePrice: askingPrice } : null,
+            api_data: {
+              ...(askingPrice ? { emailPurchasePrice: askingPrice } : {}),
+              agentName:  prop.contact_name.value  || senderInfo.name  || null,
+              agentEmail: prop.contact_email.value || senderInfo.email || null,
+              agentPhone: prop.contact_phone.value || null,
+            },
             overrides: {
               purchasePrice: askingPrice || null,
               rehabCost: prop.repair_estimate.value || null,
