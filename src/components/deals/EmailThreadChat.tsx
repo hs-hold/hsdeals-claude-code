@@ -23,8 +23,22 @@ interface ThreadMessage {
 
 // ── Gmail MIME helpers ────────────────────────────────────────────────────────
 
-function getHeader(msg: any, name: string): string {
-  return msg?.payload?.headers?.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value ?? '';
+interface GmailHeader { name: string; value: string }
+interface GmailPayload {
+  mimeType?: string;
+  headers?: GmailHeader[];
+  body?: { data?: string };
+  parts?: GmailPayload[];
+}
+interface GmailMessage {
+  id: string;
+  threadId: string;
+  snippet?: string;
+  payload?: GmailPayload;
+}
+
+function getHeader(msg: { payload?: GmailPayload }, name: string): string {
+  return msg?.payload?.headers?.find(h => h.name.toLowerCase() === name.toLowerCase())?.value ?? '';
 }
 
 function decodeBase64(data: string): string {
@@ -37,7 +51,7 @@ function decodeBase64(data: string): string {
   }
 }
 
-function extractBody(payload: any): string {
+function extractBody(payload: GmailPayload | undefined): string {
   if (!payload) return '';
   // Plain text part
   if (payload.mimeType === 'text/plain' && payload.body?.data) {
@@ -108,7 +122,7 @@ export function EmailThreadChat({ deal }: EmailThreadChatProps) {
 
       // Derive the user's own email from the first "From" that looks like it's ours
       // We'll use sent message heuristic: "to" in the first message = the other party
-      const parsed: ThreadMessage[] = (data.messages || []).map((msg: any) => {
+      const parsed: ThreadMessage[] = ((data.messages || []) as GmailMessage[]).map(msg => {
         const from    = getHeader(msg, 'from');
         const to      = getHeader(msg, 'to');
         const subject = getHeader(msg, 'subject');
@@ -133,8 +147,8 @@ export function EmailThreadChat({ deal }: EmailThreadChatProps) {
         };
       });
       setMessages(parsed);
-    } catch (e: any) {
-      setError(e.message || 'Error loading thread');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error loading thread');
     } finally {
       setLoading(false);
     }
@@ -175,8 +189,8 @@ export function EmailThreadChat({ deal }: EmailThreadChatProps) {
       if (!res.ok) throw new Error(`Send failed: ${res.status}`);
 
       // Save outbound message in DB so it shows even without Gmail token
-      const prevData = deal.emailExtractedData || {};
-      const prevMessages: any[] = Array.isArray((prevData as any).threadMessages) ? (prevData as any).threadMessages : [];
+      const prevData = (deal.emailExtractedData || {}) as Record<string, unknown>;
+      const prevMessages: Record<string, unknown>[] = Array.isArray(prevData.threadMessages) ? (prevData.threadMessages as Record<string, unknown>[]) : [];
       prevMessages.push({
         messageId: `local-${Date.now()}`,
         direction: 'outbound',
@@ -193,8 +207,8 @@ export function EmailThreadChat({ deal }: EmailThreadChatProps) {
       setReplyBody('');
       // Refresh thread from Gmail
       await fetchThread();
-    } catch (e: any) {
-      setError(e.message || 'Error sending email');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error sending email');
     } finally {
       setSending(false);
     }
