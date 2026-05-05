@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import atlantaZipsRaw from '@/data/atlantaZips.json';
 import { cn } from '@/lib/utils';
+import { isOnMajorRoad } from '@/utils/highwayFilter';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -200,6 +201,9 @@ function filterListings(raw: RawListing[]): ScoredListing[] {
   const passed: ScoredListing[] = [];
   for (const l of raw) {
     if (l.price < MIN_PRICE || l.price > MAX_PRICE) continue;
+    // Skip properties on highways / parkways / numbered routes — they kill
+    // rentability and resale.
+    if (isOnMajorRoad(l.address)) continue;
     const pType = (l.propertyType || '').toUpperCase().replace(/[^A-Z]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
     if (pType && pType !== 'SINGLE_FAMILY') continue;
     if (l.yearBuilt && l.yearBuilt < MIN_YEAR) continue;

@@ -6,6 +6,7 @@ import { useClaudePicks } from '@/hooks/useClaudePicks';
 import { formatCurrency } from '@/utils/financialCalculations';
 import { analyzeAcquisition } from '@/utils/maoCalculations';
 import { calculateInvestmentScore, type InvestmentScoreResult } from '@/utils/investmentScore';
+import { isOnMajorRoad } from '@/utils/highwayFilter';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -147,6 +148,8 @@ export default function ClaudePicksPage() {
       .map(pick => {
         const deal = deals.find(d => d.id === pick.dealId);
         if (!deal || HIDDEN_PICK_STATUSES.has(deal.status)) return null;
+        // Skip picks that sit on a major road — bad for rent + resale.
+        if (isOnMajorRoad(deal.address?.street) || isOnMajorRoad(deal.address?.full)) return null;
         const tierInfo = evaluateTier(deal, pick);
         const score = scoreDeal(deal);
 
@@ -228,6 +231,7 @@ export default function ClaudePicksPage() {
       const candidates = deals
         .filter(d => !pickedIds.has(d.id))
         .filter(d => d.status !== 'not_relevant' && d.status !== 'closed' && d.status !== 'filtered_out')
+        .filter(d => !isOnMajorRoad(d.address?.street) && !isOnMajorRoad(d.address?.full))
         .map(d => ({ deal: d, score: scoreDeal(d) }))
         .filter(x => Number.isFinite(x.score) && x.score > 35)
         .sort((a, b) => b.score - a.score)
