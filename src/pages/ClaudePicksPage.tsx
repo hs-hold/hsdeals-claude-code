@@ -124,6 +124,11 @@ const SQFT_MAX = 2500;
 
 type PickSortMode = 'acquisition' | 'tier';
 
+// Statuses that disqualify a pick from appearing on the page.
+// not_relevant / filtered_out are user-rejected; closed is past the funnel;
+// pending_other means another investor took it.
+const HIDDEN_PICK_STATUSES = new Set(['not_relevant', 'filtered_out', 'closed', 'pending_other']);
+
 export default function ClaudePicksPage() {
   const { deals, isLoading: dealsLoading } = useDeals();
   const { settings } = useSettings();
@@ -141,7 +146,7 @@ export default function ClaudePicksPage() {
     return picks
       .map(pick => {
         const deal = deals.find(d => d.id === pick.dealId);
-        if (!deal || deal.status === 'not_relevant') return null;
+        if (!deal || HIDDEN_PICK_STATUSES.has(deal.status)) return null;
         const tierInfo = evaluateTier(deal, pick);
         const score = scoreDeal(deal);
 
@@ -202,7 +207,7 @@ export default function ClaudePicksPage() {
     if (!sqftFilter) return 0;
     return picks.reduce((n, pick) => {
       const deal = deals.find(d => d.id === pick.dealId);
-      if (!deal || deal.status === 'not_relevant') return n;
+      if (!deal || HIDDEN_PICK_STATUSES.has(deal.status)) return n;
       const sqft = deal.apiData?.sqft ?? null;
       if (sqft == null || sqft < SQFT_MIN || sqft > SQFT_MAX) return n + 1;
       return n;
