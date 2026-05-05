@@ -93,6 +93,7 @@ const dealsNavItems = [
 const otherNavItems = [
   { to: '/gmail-history', icon: Mail, label: 'Gmail History' },
   { to: '/investors', icon: Users, label: 'Investors' },
+  { to: '/arv-guide', icon: BookOpen, label: 'ARV Guide' },
 ];
 
 const agentsApiSubItems = [
