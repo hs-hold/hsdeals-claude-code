@@ -10,6 +10,7 @@ import { localOverridesToNumeric } from '@/utils/dealOverridesToNumeric';
 import { detectSuspiciousData } from '@/utils/suspiciousData';
 import { analyzeArv, analyzeRehab } from '@/utils/maoCalculations';
 import { calculateInvestmentScore } from '@/utils/investmentScore';
+import { useIsClaudePick } from '@/hooks/useClaudePicks';
 import { DealStatusBadge } from '@/components/deals/DealStatusBadge';
 import { PropertyMap } from '@/components/deals/PropertyMap';
 import { formatCurrency, formatPercent, getEffectiveValue, calculateFinancials, validateArvAgainstComps, calculateArvFromRecentComps, getEffectiveMonthlyInsurance } from '@/utils/financialCalculations';
@@ -76,7 +77,8 @@ import {
   Unlock,
   RefreshCw,
   ShieldAlert,
-  BarChart3
+  BarChart3,
+  Star
 } from 'lucide-react';
 import { ZillowIcon } from '@/components/icons/ZillowIcon';
 import { generateDealPDF } from '@/utils/pdfExport';
@@ -211,6 +213,8 @@ export default function DealDetailPage() {
   }, [id]);
   
   const deal = getDeal(id || '');
+  const { isPick: isClaudePick, toggle: toggleClaudePick } = useIsClaudePick(deal?.id);
+  const [togglingPick, setTogglingPick] = useState(false);
   const { messages: smsMessages, sending: smsSending, sendSms } = useDealMessages(deal?.id);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [localOverrides, setLocalOverrides] = useState(() => dealOverridesToStrings(deal));
@@ -1385,6 +1389,38 @@ export default function DealDetailPage() {
           <div>
             <div className="flex items-center gap-3 mb-1 flex-wrap">
               <h1 className="text-2xl font-bold">{deal.address.street}</h1>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  "h-8 w-8 shrink-0",
+                  isClaudePick ? "text-yellow-400 hover:text-yellow-300" : "text-muted-foreground hover:text-yellow-400"
+                )}
+                title={isClaudePick ? "Remove from Claude's Picks" : "Add to Claude's Picks"}
+                disabled={togglingPick}
+                onClick={async () => {
+                  setTogglingPick(true);
+                  try {
+                    await toggleClaudePick({
+                      marketStatus: 'active',
+                      priority: 'medium',
+                      addedBy: 'manual',
+                    });
+                    toast.success(isClaudePick ? "Removed from Claude's Picks" : "Added to Claude's Picks");
+                  } catch (err) {
+                    const msg = err instanceof Error ? err.message : 'unknown error';
+                    toast.error(`Failed to update pick: ${msg}`);
+                  } finally {
+                    setTogglingPick(false);
+                  }
+                }}
+              >
+                {togglingPick ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Star className={cn("w-4 h-4", isClaudePick && "fill-current")} />
+                )}
+              </Button>
               <DealStatusBadge status={deal.status} />
               {apiData.grade && (
                 <HoverCard>
