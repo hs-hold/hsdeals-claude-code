@@ -33,6 +33,7 @@ import {
   UserCog,
   ClipboardList,
   BookOpen,
+  Hammer,
   Activity,
   BarChart2,
   Crosshair,
@@ -94,6 +95,7 @@ const otherNavItems = [
   { to: '/gmail-history', icon: Mail, label: 'Gmail History' },
   { to: '/investors', icon: Users, label: 'Investors' },
   { to: '/arv-guide', icon: BookOpen, label: 'ARV Guide' },
+  { to: '/rehab-guide', icon: Hammer, label: 'Rehab Guide' },
 ];
 
 const agentsApiSubItems = [
