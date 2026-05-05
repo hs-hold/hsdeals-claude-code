@@ -40,6 +40,7 @@ import PotentialDealsPage from "./pages/PotentialDealsPage";
 import PotentialMarketDealsPage from "./pages/PotentialMarketDealsPage";
 import AcquisitionPage from "./pages/AcquisitionPage";
 import ArvGuidePage from "./pages/ArvGuidePage";
+import RehabGuidePage from "./pages/RehabGuidePage";
 import ErrorLogPage from "./pages/ErrorLogPage";
 import NotFound from "./pages/NotFound";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -78,6 +79,7 @@ const App = () => (
                   <Route path="/pipeline" element={<ProtectedRoute><AppLayout><PipelinePage /></AppLayout></ProtectedRoute>} />
                   <Route path="/acquisition" element={<ProtectedRoute><AppLayout><AcquisitionPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/arv-guide" element={<ProtectedRoute><AppLayout><ArvGuidePage /></AppLayout></ProtectedRoute>} />
+                  <Route path="/rehab-guide" element={<ProtectedRoute><AppLayout><RehabGuidePage /></AppLayout></ProtectedRoute>} />
                   <Route path="/not-relevant" element={<ProtectedRoute><AppLayout><NotRelevantPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/closed" element={<ProtectedRoute><AppLayout><ClosedDealsPage /></AppLayout></ProtectedRoute>} />
                   <Route path="/settings" element={<ProtectedRoute><AppLayout><SettingsPage /></AppLayout></ProtectedRoute>} />
