@@ -1,175 +1,350 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useDeals } from '@/context/DealsContext';
+import { useClaudePicks } from '@/hooks/useClaudePicks';
 import { formatCurrency } from '@/utils/financialCalculations';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Bot, CheckCircle2, Clock, AlertCircle, ExternalLink, TrendingUp, Home, Wrench } from 'lucide-react';
-import { Deal } from '@/types/deal';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
+import {
+  Bot,
+  CheckCircle2,
+  Clock,
+  AlertCircle,
+  ExternalLink,
+  TrendingUp,
+  Home,
+  Wrench,
+  Sparkles,
+  X,
+  Loader2,
+} from 'lucide-react';
+import type { Deal } from '@/types/deal';
+import type { ClaudePick, ClaudePickPriority, ClaudePickMarketStatus } from '@/types/claudePick';
 
-const CLAUDE_PICKS: {
-  id: string;
-  marketStatus: 'active' | 'pending' | 'off-market';
-  priority: 'high' | 'medium' | 'low';
-  marketNote: string;
-  analysisNote: string;
-  checkedAt: string;
-}[] = [
-  {
-    id: '8b7a1a56-54ba-4780-997f-91fd3405b4df',
-    marketStatus: 'active',
-    priority: 'high',
-    marketNote: 'Active — price raised to $204,900 (from $194,900)',
-    analysisNote: 'Grade A with Cap 13.8% — strongest property on the list. Spread $105K with Rehab $47.7K. Submit offer.',
-    checkedAt: '28.3.2026',
-  },
-  {
-    id: '7ee432a6-3e3e-449b-aca2-8b71a07f2773',
-    marketStatus: 'active',
-    priority: 'medium',
-    marketNote: 'Active — reduced from $240K to $204,750, relisted several times',
-    analysisNote: 'Grade B, Cap 10.1%, low Rehab $35K. Seller wants out — good negotiating leverage.',
-    checkedAt: '28.3.2026',
-  },
-  {
-    id: '5db0bfed-f753-4132-ac0d-5bb78457fc7a',
-    marketStatus: 'pending',
-    priority: 'medium',
-    marketNote: 'Pending — under contract since 1/19/2026 (~42 days)',
-    analysisNote: 'Cap 14.1% — highest on the entire list. Worth monitoring if it falls out of contract.',
-    checkedAt: '28.3.2026',
-  },
-  {
-    id: '5ee058c4-7d44-4f3f-940c-e75edcaee8d6',
-    marketStatus: 'off-market',
-    priority: 'low',
-    marketNote: 'Off Market — became a rental property (FirstKey Homes)',
-    analysisNote: 'Cap 12.2%, Grade A. Off market but worth reaching out to owner directly.',
-    checkedAt: '28.3.2026',
-  },
-];
-
-const statusConfig = {
+const statusConfig: Record<ClaudePickMarketStatus, {
+  label: string;
+  icon: typeof CheckCircle2;
+  color: string;
+  bg: string;
+}> = {
   active: { label: 'Active', icon: CheckCircle2, color: 'text-green-400', bg: 'bg-green-500/10 border-green-500/30' },
   pending: { label: 'Pending', icon: Clock, color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/30' },
   'off-market': { label: 'Off Market', icon: AlertCircle, color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/30' },
 };
 
-const priorityConfig = {
-  high: { label: 'Submit Offer', className: 'bg-green-500/20 text-green-400 border-green-400/30' },
-  medium: { label: 'Monitor', className: 'bg-yellow-500/20 text-yellow-400 border-yellow-400/30' },
-  low: { label: 'Check Manually', className: 'bg-red-500/20 text-red-400 border-red-400/30' },
+const priorityConfig: Record<ClaudePickPriority, { label: string; className: string; rank: number }> = {
+  high: { label: 'Submit Offer', className: 'bg-green-500/20 text-green-400 border-green-400/30', rank: 0 },
+  medium: { label: 'Monitor', className: 'bg-yellow-500/20 text-yellow-400 border-yellow-400/30', rank: 1 },
+  low: { label: 'Check Manually', className: 'bg-red-500/20 text-red-400 border-red-400/30', rank: 2 },
 };
 
-export default function ClaudePicksPage() {
-  const { deals, isLoading } = useDeals();
+// Score a deal for auto-discovery. Higher is better. Heuristic blends grade,
+// cap rate, and spread — the same signals a human reviewer scans first.
+function scoreDeal(deal: Deal): number {
+  const a = deal.apiData;
+  if (!a) return -Infinity;
+  const grade = a.grade ?? '?';
+  const gradeBonus = grade === 'A' ? 30 : grade === 'B' ? 18 : grade === 'C' ? 8 : 0;
+  const cap = a.capRate ?? 0;
+  const price = deal.overrides?.purchasePrice ?? a.purchasePrice ?? 0;
+  const arv = deal.overrides?.arv ?? a.arv ?? 0;
+  const spread = arv - price;
+  // Weight cap rate 2× and add spread/$10K. Cap at sane ranges to avoid
+  // outliers dominating the score.
+  return gradeBonus + Math.min(cap, 25) * 2 + Math.min(spread, 200_000) / 10_000;
+}
 
-  const picks = useMemo(() => {
-    return CLAUDE_PICKS.map(pick => {
-      const deal = deals.find(d => d.id === pick.id);
-      return deal && deal.status !== 'not_relevant' ? { deal, ...pick } : null;
-    }).filter(Boolean) as { deal: Deal; id: string; marketStatus: 'active' | 'pending' | 'off-market'; priority: 'high' | 'medium' | 'low'; marketNote: string; analysisNote: string; checkedAt: string }[];
-  }, [deals]);
+function priorityFromScore(score: number): ClaudePickPriority {
+  if (score >= 60) return 'high';
+  if (score >= 40) return 'medium';
+  return 'low';
+}
+
+export default function ClaudePicksPage() {
+  const { deals, isLoading: dealsLoading } = useDeals();
+  const { picks, isLoading: picksLoading, error, upsertPick, removePick, refresh } = useClaudePicks();
+  const { toast } = useToast();
+  const [discovering, setDiscovering] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+
+  // Join picks with deal data; drop picks whose deal is hidden/not-relevant.
+  const visiblePicks = useMemo(() => {
+    return picks
+      .map(pick => {
+        const deal = deals.find(d => d.id === pick.dealId);
+        if (!deal || deal.status === 'not_relevant') return null;
+        return { pick, deal };
+      })
+      .filter((p): p is { pick: ClaudePick; deal: Deal } => p !== null)
+      .sort((a, b) => priorityConfig[a.pick.priority].rank - priorityConfig[b.pick.priority].rank);
+  }, [picks, deals]);
+
+  const lastChecked = picks.length > 0
+    ? picks.reduce((latest, p) => (p.checkedAt > latest ? p.checkedAt : latest), picks[0].checkedAt)
+    : null;
+
+  // Auto-discovery: scan deals not already picked, score them, and add the
+  // top N as new picks with priority derived from score. Idempotent — uses
+  // upsert so re-running just refreshes existing entries.
+  const handleAutoDiscover = async () => {
+    setDiscovering(true);
+    try {
+      const pickedIds = new Set(picks.map(p => p.dealId));
+      const candidates = deals
+        .filter(d => !pickedIds.has(d.id))
+        .filter(d => d.status !== 'not_relevant' && d.status !== 'closed' && d.status !== 'filtered_out')
+        .map(d => ({ deal: d, score: scoreDeal(d) }))
+        .filter(x => Number.isFinite(x.score) && x.score > 35)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 8);
+
+      if (candidates.length === 0) {
+        toast({
+          title: 'No new picks found',
+          description: 'No qualifying deals above the discovery threshold.',
+        });
+        return;
+      }
+
+      for (const { deal, score } of candidates) {
+        const a = deal.apiData;
+        const cap = a?.capRate ?? 0;
+        const grade = a?.grade ?? '?';
+        const price = deal.overrides?.purchasePrice ?? a?.purchasePrice ?? 0;
+        const arv = deal.overrides?.arv ?? a?.arv ?? 0;
+        await upsertPick({
+          dealId: deal.id,
+          marketStatus: 'active',
+          priority: priorityFromScore(score),
+          marketNote: `Auto-discovered from Hot Deals — listed at ${formatCurrency(price)}`,
+          analysisNote: `Grade ${grade}, Cap ${cap.toFixed(1)}%, ARV ${formatCurrency(arv)}, score ${score.toFixed(1)}.`,
+          addedBy: 'auto-discover',
+        });
+      }
+      toast({
+        title: 'Picks updated',
+        description: `Added ${candidates.length} new pick${candidates.length === 1 ? '' : 's'}.`,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'unknown error';
+      toast({ title: 'Auto-discovery failed', description: msg, variant: 'destructive' });
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
+  const handleRemove = async (dealId: string) => {
+    setRemovingId(dealId);
+    try {
+      await removePick(dealId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'unknown error';
+      toast({ title: 'Failed to remove pick', description: msg, variant: 'destructive' });
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
+  const isLoading = dealsLoading || picksLoading;
 
   return (
     <div className="p-4 md:p-6 space-y-6 animate-fade-in">
-      <div>
-        <div className="flex items-center gap-3 mb-1">
-          <Bot className="w-7 h-7 text-blue-400" />
-          <h1 className="text-2xl md:text-3xl font-bold">Claude's Picks</h1>
-          <Badge className="bg-blue-500/20 text-blue-400 border-blue-400/30">AI Research</Badge>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <div className="flex items-center gap-3 mb-1">
+            <Bot className="w-7 h-7 text-blue-400" />
+            <h1 className="text-2xl md:text-3xl font-bold">Claude's Picks</h1>
+            <Badge className="bg-blue-500/20 text-blue-400 border-blue-400/30">AI Research</Badge>
+          </div>
+          <p className="text-muted-foreground text-sm">
+            {lastChecked
+              ? `Latest check ${lastChecked} — including real-time market status.`
+              : 'No picks yet. Star a deal or run auto-discovery to populate this list.'}
+          </p>
         </div>
-        <p className="text-muted-foreground text-sm">
-          Manually researched on {CLAUDE_PICKS[0].checkedAt} — including real-time market status check
-        </p>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleAutoDiscover}
+            disabled={discovering || isLoading}
+          >
+            {discovering ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Sparkles className="w-4 h-4 mr-2" />
+            )}
+            Auto-discover
+          </Button>
+          <Button variant="ghost" size="sm" onClick={refresh} disabled={isLoading}>
+            Refresh
+          </Button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {picks.map(({ deal, marketStatus, priority, marketNote, analysisNote }) => {
-          const a = deal.apiData;
-          const sCfg = statusConfig[marketStatus];
-          const pCfg = priorityConfig[priority];
-          const StatusIcon = sCfg.icon;
-          const price = deal.overrides?.purchasePrice ?? a?.purchasePrice ?? 0;
-          const arv = deal.overrides?.arv ?? a?.arv ?? 0;
-          const rehab = deal.overrides?.rehabCost ?? a?.rehabCost ?? 0;
-          const cap = a?.capRate ?? 0;
-          const rent = a?.rent ?? 0;
-          const grade = a?.grade ?? '?';
-          const spread = arv - price;
+      {error && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
+          Failed to load picks: {error}
+        </div>
+      )}
 
-          return (
-            <Card key={deal.id} className={`border transition-all duration-200 hover:shadow-lg ${marketStatus === 'active' ? 'border-blue-500/30 hover:border-blue-500/60' : 'border-border/50 opacity-80'}`}>
-              <CardContent className="p-5 space-y-4">
-                {/* Header */}
-                <div className="flex items-start justify-between gap-2">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`text-sm font-bold px-2 py-0.5 rounded ${grade === 'A' ? 'bg-green-500/20 text-green-400' : grade === 'B' ? 'bg-blue-500/20 text-blue-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
-                        Grade {grade}
-                      </span>
-                      <Badge variant="outline" className={pCfg.className}>{pCfg.label}</Badge>
+      {isLoading && picks.length === 0 ? (
+        <div className="flex items-center justify-center py-16 text-muted-foreground">
+          <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+          Loading picks…
+        </div>
+      ) : visiblePicks.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="p-8 text-center text-muted-foreground space-y-2">
+            <Bot className="w-8 h-8 mx-auto opacity-50" />
+            <p>No active picks.</p>
+            <p className="text-xs">Star a deal from its detail page or click Auto-discover above.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {visiblePicks.map(({ pick, deal }) => {
+            const a = deal.apiData;
+            const sCfg = statusConfig[pick.marketStatus];
+            const pCfg = priorityConfig[pick.priority];
+            const StatusIcon = sCfg.icon;
+            const price = deal.overrides?.purchasePrice ?? a?.purchasePrice ?? 0;
+            const arv = deal.overrides?.arv ?? a?.arv ?? 0;
+            const rehab = deal.overrides?.rehabCost ?? a?.rehabCost ?? 0;
+            const cap = a?.capRate ?? 0;
+            const rent = a?.rent ?? 0;
+            const grade = a?.grade ?? '?';
+            const spread = arv - price;
+
+            return (
+              <Card
+                key={pick.id}
+                className={`border transition-all duration-200 hover:shadow-lg ${
+                  pick.marketStatus === 'active'
+                    ? 'border-blue-500/30 hover:border-blue-500/60'
+                    : 'border-border/50 opacity-80'
+                }`}
+              >
+                <CardContent className="p-5 space-y-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className={`text-sm font-bold px-2 py-0.5 rounded ${
+                            grade === 'A'
+                              ? 'bg-green-500/20 text-green-400'
+                              : grade === 'B'
+                                ? 'bg-blue-500/20 text-blue-400'
+                                : 'bg-yellow-500/20 text-yellow-400'
+                          }`}
+                        >
+                          Grade {grade}
+                        </span>
+                        <Badge variant="outline" className={pCfg.className}>
+                          {pCfg.label}
+                        </Badge>
+                        {pick.addedBy === 'auto-discover' && (
+                          <Badge variant="outline" className="bg-purple-500/10 text-purple-300 border-purple-400/30">
+                            Auto
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="font-semibold">{deal.address.street}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {deal.address.city}, {deal.address.state} {deal.address.zip}
+                      </p>
                     </div>
-                    <p className="font-semibold">{deal.address.street}</p>
-                    <p className="text-sm text-muted-foreground">{deal.address.city}, {deal.address.state} {deal.address.zip}</p>
+                    <div className="flex items-start gap-2 shrink-0">
+                      <div
+                        className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border ${sCfg.bg} ${sCfg.color}`}
+                      >
+                        <StatusIcon className="w-3.5 h-3.5" />
+                        {sCfg.label}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-red-400"
+                        title="Remove from picks"
+                        disabled={removingId === deal.id}
+                        onClick={() => handleRemove(deal.id)}
+                      >
+                        {removingId === deal.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <X className="w-3.5 h-3.5" />
+                        )}
+                      </Button>
+                    </div>
                   </div>
-                  <div className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border ${sCfg.bg} ${sCfg.color} shrink-0`}>
-                    <StatusIcon className="w-3.5 h-3.5" />
-                    {sCfg.label}
-                  </div>
-                </div>
 
-                {/* Metrics */}
-                <div className="grid grid-cols-4 gap-3 py-3 border-y border-border/50">
-                  <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground uppercase mb-1">Cap Rate</p>
-                    <p className="text-base font-bold text-blue-400">{cap.toFixed(1)}%</p>
+                  <div className="grid grid-cols-4 gap-3 py-3 border-y border-border/50">
+                    <div className="text-center">
+                      <p className="text-[10px] text-muted-foreground uppercase mb-1">Cap Rate</p>
+                      <p className="text-base font-bold text-blue-400">{cap.toFixed(1)}%</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-[10px] text-muted-foreground uppercase mb-1">Spread</p>
+                      <p className="text-base font-bold text-green-400">{formatCurrency(spread)}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-[10px] text-muted-foreground uppercase mb-1 flex items-center justify-center gap-0.5">
+                        <Home className="w-2.5 h-2.5" />
+                        Rent
+                      </p>
+                      <p className="text-base font-bold">{formatCurrency(rent)}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-[10px] text-muted-foreground uppercase mb-1 flex items-center justify-center gap-0.5">
+                        <Wrench className="w-2.5 h-2.5" />
+                        Rehab
+                      </p>
+                      <p className="text-base font-bold text-yellow-400">{formatCurrency(rehab)}</p>
+                    </div>
                   </div>
-                  <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground uppercase mb-1">Spread</p>
-                    <p className="text-base font-bold text-green-400">{formatCurrency(spread)}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground uppercase mb-1 flex items-center justify-center gap-0.5"><Home className="w-2.5 h-2.5" />Rent</p>
-                    <p className="text-base font-bold">{formatCurrency(rent)}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-[10px] text-muted-foreground uppercase mb-1 flex items-center justify-center gap-0.5"><Wrench className="w-2.5 h-2.5" />Rehab</p>
-                    <p className="text-base font-bold text-yellow-400">{formatCurrency(rehab)}</p>
-                  </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="bg-muted/30 rounded-lg px-3 py-2">
-                    <p className="text-[10px] text-muted-foreground">Price</p>
-                    <p className="font-semibold">{formatCurrency(price)}</p>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="bg-muted/30 rounded-lg px-3 py-2">
+                      <p className="text-[10px] text-muted-foreground">Price</p>
+                      <p className="font-semibold">{formatCurrency(price)}</p>
+                    </div>
+                    <div className="bg-muted/30 rounded-lg px-3 py-2">
+                      <p className="text-[10px] text-muted-foreground">ARV</p>
+                      <p className="font-semibold text-green-400">{formatCurrency(arv)}</p>
+                    </div>
                   </div>
-                  <div className="bg-muted/30 rounded-lg px-3 py-2">
-                    <p className="text-[10px] text-muted-foreground">ARV</p>
-                    <p className="font-semibold text-green-400">{formatCurrency(arv)}</p>
-                  </div>
-                </div>
 
-                {/* Notes */}
-                <div className="space-y-2">
-                  <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/20 rounded-lg p-2.5">
-                    <TrendingUp className="w-3.5 h-3.5 shrink-0 mt-0.5 text-blue-400" />
-                    <span>{marketNote}</span>
-                  </div>
-                  <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/20 rounded-lg p-2.5">
-                    <Bot className="w-3.5 h-3.5 shrink-0 mt-0.5 text-blue-400" />
-                    <span>{analysisNote}</span>
-                  </div>
-                </div>
+                  {(pick.marketNote || pick.analysisNote) && (
+                    <div className="space-y-2">
+                      {pick.marketNote && (
+                        <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/20 rounded-lg p-2.5">
+                          <TrendingUp className="w-3.5 h-3.5 shrink-0 mt-0.5 text-blue-400" />
+                          <span>{pick.marketNote}</span>
+                        </div>
+                      )}
+                      {pick.analysisNote && (
+                        <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/20 rounded-lg p-2.5">
+                          <Bot className="w-3.5 h-3.5 shrink-0 mt-0.5 text-blue-400" />
+                          <span>{pick.analysisNote}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
-                <Link to={`/deals/${deal.id}`} className="flex items-center gap-2 text-sm text-blue-400 hover:text-blue-300 transition-colors font-medium">
-                  <ExternalLink className="w-4 h-4" /> Open Full Analysis
-                </Link>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+                  <Link
+                    to={`/deals/${deal.id}`}
+                    className="flex items-center gap-2 text-sm text-blue-400 hover:text-blue-300 transition-colors font-medium"
+                  >
+                    <ExternalLink className="w-4 h-4" /> Open Full Analysis
+                  </Link>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
