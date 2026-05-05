@@ -65,7 +65,7 @@ interface AgentFallback {
   brokerName: string | null;
 }
 
-function mapToDealApiData(analysis: PropertyAnalysis, property?: PropertyData, agentFallback?: AgentFallback): DealApiData {
+export function mapToDealApiData(analysis: PropertyAnalysis, property?: PropertyData, agentFallback?: AgentFallback): DealApiData {
   const mapPropertyType = (type?: string): DealApiData['propertyType'] => {
     const typeMap: Record<string, DealApiData['propertyType']> = {
       SINGLE_FAMILY: 'single_family',
