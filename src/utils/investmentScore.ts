@@ -46,6 +46,24 @@ export interface InvestmentScoreParams {
   inventoryMonths: number | null;      // manual override, may be null
 }
 
+// EQUITY_TABLE is calibrated for net flip profit (target $50K = 10/10), but
+// the score historically received raw equity (ARV − price − rehab) which
+// over-counts by typical sale + holding costs. These constants mirror the
+// `ACQ_*` constants in maoCalculations.ts/calcAtAsk so the scoring matches
+// the Acquisition Engine verdict. Keep in sync if those change.
+const FLIP_CLOSING_BUY_PCT = 0.02;
+const FLIP_REHAB_CONTINGENCY_PCT = 0.10;
+const FLIP_AGENT_PCT = 0.05;
+const FLIP_HOLDING_FLAT = 6_000;   // 4 months × ~$1,500/mo
+const FLIP_NOTARY_TITLE = 900;     // $400 notary + $500 title
+
+function netFlipEquity(arv: number, purchasePrice: number, rehabCost: number): number {
+  const closingBuy = purchasePrice * FLIP_CLOSING_BUY_PCT;
+  const contingency = rehabCost * FLIP_REHAB_CONTINGENCY_PCT;
+  const sellAgent = arv * FLIP_AGENT_PCT;
+  return arv - purchasePrice - rehabCost - closingBuy - contingency - sellAgent - FLIP_HOLDING_FLAT - FLIP_NOTARY_TITLE;
+}
+
 // ─── Linear interpolation from lookup table ──────────────────────────────────
 
 type Table = readonly [number, number][];
@@ -159,7 +177,10 @@ export function calculateInvestmentScore(
   const annualReturnScore = isFullBrrrr ? 10 : calculateAnnualReturnScore(annualReturnPct);
   const cashFlowScore = (monthlyCashFlowScore + annualReturnScore) / 2;
 
-  const trueEquity = arv - purchasePrice - rehabCost;
+  // EQUITY_TABLE is calibrated for net flip profit ($50K target = 10/10).
+  // Score against net equity after sale/holding costs — raw spread inflates
+  // the score by ~$20–25K of fees and produced false Buy verdicts.
+  const trueEquity = netFlipEquity(arv, purchasePrice, rehabCost);
   const equityScore = calculateTrueEquityScore(trueEquity);
 
   const location = calculateLocationScore({ schoolTotal, inventoryMonths });

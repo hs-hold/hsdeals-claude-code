@@ -162,6 +162,7 @@ async function main() {
       buy_threshold: DEFAULT_INVESTMENT_SCORE_SETTINGS.buyThreshold,
     },
     top_buys: buys.slice(0, 30),
+    near_buys: scored.filter(s => s.finalScore >= 6 && s.decision !== 'Buy' && !s.onMajorRoad).slice(0, 30),
     watched,
     score_distribution: {
       ge_8: scored.filter(s => s.finalScore >= 8).length,
