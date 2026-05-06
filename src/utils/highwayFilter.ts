@@ -29,6 +29,13 @@ const HIGHWAY_PATTERNS: RegExp[] = [
   /\bRt\.?\s*\d{1,3}\b/i,
 ];
 
+// Named arterials in metro Atlanta that LOOK like quiet residential roads
+// (just "Rd" / "Dr" / "St") but are actually 4-lane through-roads. Curated
+// from user feedback — extend as new ones are flagged.
+const NAMED_ARTERIAL_PATTERNS: RegExp[] = [
+  /\bBen Hill Rd\b/i,        // East Point/Atlanta — flagged by user 2026-05-06
+];
+
 /**
  * Returns true when the given address string is likely on a major road
  * (highway / freeway / parkway / numbered route).
@@ -39,5 +46,5 @@ const HIGHWAY_PATTERNS: RegExp[] = [
 export function isOnMajorRoad(address: string | null | undefined): boolean {
   if (!address) return false;
   const s = String(address);
-  return HIGHWAY_PATTERNS.some(re => re.test(s));
+  return HIGHWAY_PATTERNS.some(re => re.test(s)) || NAMED_ARTERIAL_PATTERNS.some(re => re.test(s));
 }
