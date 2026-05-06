@@ -26,13 +26,14 @@ const METRO_ZIPS = new Set(
 );
 
 async function fetchAllDeals(): Promise<any[]> {
-  // Light SELECT — full api_data is huge and times out PostgREST on 869 rows.
-  // We only need basic fields + a flag for whether rawResponse exists.
+  // Light SELECT (no rawResponse) — paginated. Order by created_at DESC so
+  // newest leads come first; old email-extracted addresses tend to be off-
+  // market by the time we get to them.
   const out: any[] = [];
   const PAGE = 250;
   for (let off = 0; ; off += PAGE) {
     const r = await fetch(
-      `${SUPABASE_URL}/rest/v1/deals?select=id,address_full,address_zip,address_city,status,findmedeals_processed_at,api_data&order=created_at.asc&offset=${off}&limit=${PAGE}`,
+      `${SUPABASE_URL}/rest/v1/deals?select=id,address_full,address_zip,address_city,status,findmedeals_processed_at,api_data,created_at&order=created_at.desc&offset=${off}&limit=${PAGE}`,
       { headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` } },
     );
     if (!r.ok) {
@@ -54,22 +55,31 @@ function getZip(d: any): string | null {
 }
 
 function rankCandidate(d: any): number {
-  // Heuristic ranking. Higher = more promising. We want:
-  //  - Real list price (not too high) so flip math has room
-  //  - Atlanta metro, prefer ITP/Decatur over far-out
-  //  - Some signal there's a property here (has address_full + zip)
+  // Heuristic ranking. Higher = more promising:
+  //  - FRESH (created recently) — old email-extracted leads often off-market
+  //  - Real list price in $50K flip-friendly band
+  //  - Atlanta metro, prefer ITP/Decatur over outer suburbs
   const api = d.api_data || {};
   const price = api.emailPurchasePrice ?? api.purchasePrice ?? null;
   let score = 0;
+  // Freshness — half-life around 14 days. Newer = much higher signal that
+  // the listing is still active.
+  if (d.created_at) {
+    const ageDays = (Date.now() - Date.parse(d.created_at)) / 86_400_000;
+    if (ageDays <= 7) score += 40;
+    else if (ageDays <= 21) score += 25;
+    else if (ageDays <= 60) score += 10;
+    // Older than 60 days: stale, no bonus
+  }
   // Sweet-spot price: $80-180K = best for $50K net flip
   if (price != null) {
     if (price >= 80_000 && price <= 180_000) score += 30;
     else if (price >= 60_000 && price <= 250_000) score += 15;
     else if (price > 0) score += 5;
   } else {
-    score += 10; // unknown — give a chance
+    score += 10;
   }
-  // Zip quality: ITP (Decatur, Edgewood, etc.) > inner metro > outer metro
+  // Zip quality
   const ITP = new Set(['30030', '30033', '30307', '30308', '30309', '30312', '30317', '30318', '30319']);
   const INNER = new Set(['30311', '30314', '30315', '30316', '30310', '30032', '30354', '30344']);
   const z = getZip(d);

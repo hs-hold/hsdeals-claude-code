@@ -15,18 +15,19 @@ const SUPABASE_URL = process.env.VITE_SUPABASE_URL!;
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 async function fetchAllDeals(): Promise<any[]> {
+  // Smaller pages — full api_data with rawResponse can be 50–200KB per row
+  // and SELECT * with limit=1000 hits PostgREST statement timeout.
   const out: any[] = [];
-  const PAGE = 1000;
+  const PAGE = 100;
   for (let off = 0; ; off += PAGE) {
     const r = await fetch(
       `${SUPABASE_URL}/rest/v1/deals?select=*&order=created_at.asc&offset=${off}&limit=${PAGE}`,
-      {
-        headers: {
-          apikey: SERVICE,
-          Authorization: `Bearer ${SERVICE}`,
-        },
-      },
+      { headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` } },
     );
+    if (!r.ok) {
+      console.error(`fetch page off=${off} HTTP ${r.status}`);
+      break;
+    }
     const page = await r.json();
     if (!Array.isArray(page) || page.length === 0) break;
     out.push(...page);
