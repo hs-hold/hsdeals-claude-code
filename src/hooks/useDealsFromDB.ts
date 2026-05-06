@@ -246,27 +246,32 @@ export function useDealsFromDB() {
       const mappedDeals = (data || []).map(d => mapDBDealToDeal(d, loanDefaults));
 
       // Deduplicate by normalized address.
-      // Priority: analyzed deal > unanalyzed deal (regardless of creation date).
-      // Tie-break: most recently updated/created wins.
+      // Priority order:
+      //   1. Active status > rejected status — a reviewer's "not_relevant"
+      //      on one row of the property must not hide a sibling row that's
+      //      still in the funnel (this was the Ben Hill bug where a 2nd
+      //      duplicate row marked not_relevant masked the in-picks row).
+      //   2. Analyzed deal > unanalyzed deal.
+      //   3. Tie: keep existing (=most recent created_at since deals_list is
+      //      queried desc).
+      const HIDDEN_DEAL_STATUSES = new Set(['not_relevant', 'filtered_out', 'closed', 'pending_other']);
+      const isActiveStatus = (s: string) => !HIDDEN_DEAL_STATUSES.has(s);
+      const isAnalyzedDeal = (d: Deal) => !!(d.apiData && Object.keys(d.apiData).length > 0 &&
+        (d.apiData.grade || d.apiData.aiSummary || d.apiData.rawResponse || (d.apiData.arv && d.apiData.arv > 0)));
       const seen = new Map<string, Deal>();
       for (const deal of mappedDeals) {
         const key = deal.address.full
           .toLowerCase()
           .replace(/[^a-z0-9]/g, '');
         const existing = seen.get(key);
-        if (!existing) {
-          seen.set(key, deal);
-        } else {
-          // Prefer the analyzed deal; if both have same analysis state, keep most recent
-          const dealAnalyzed = !!(deal.apiData && Object.keys(deal.apiData).length > 0 &&
-            (deal.apiData.grade || deal.apiData.aiSummary || deal.apiData.rawResponse || (deal.apiData.arv && deal.apiData.arv > 0)));
-          const existingAnalyzed = !!(existing.apiData && Object.keys(existing.apiData).length > 0 &&
-            (existing.apiData.grade || existing.apiData.aiSummary || existing.apiData.rawResponse || (existing.apiData.arv && existing.apiData.arv > 0)));
-          if (dealAnalyzed && !existingAnalyzed) {
-            seen.set(key, deal); // replace unanalyzed with analyzed
-          }
-          // if existing is already analyzed (or both unanalyzed), keep existing (more recent created_at)
-        }
+        if (!existing) { seen.set(key, deal); continue; }
+        const dealActive = isActiveStatus(deal.status);
+        const existingActive = isActiveStatus(existing.status);
+        if (dealActive && !existingActive) { seen.set(key, deal); continue; }
+        if (!dealActive && existingActive) { continue; }
+        // Same active-bucket — break tie by analysis.
+        if (isAnalyzedDeal(deal) && !isAnalyzedDeal(existing)) seen.set(key, deal);
+        // else keep existing
       }
       setDeals(Array.from(seen.values()));
       setError(null);

@@ -169,8 +169,12 @@ export default function ClaudePicksPage() {
           }, settings.investmentScoreSettings);
         }
         const askProfit = analysis?.atAsk.profit ?? null;
+        // analysisArv is the same ARV that drives the Acquisition Engine score
+        // (override → min(comp, api) fallback). Display this so the ARV shown
+        // on the card matches the ARV used for the Buy/Pass decision.
+        const analysisArv = analysis?.arv ?? null;
 
-        return { pick, deal, tierInfo, score, invScore, askProfit };
+        return { pick, deal, tierInfo, score, invScore, askProfit, analysisArv };
       })
       .filter(
         (p): p is {
@@ -180,6 +184,7 @@ export default function ClaudePicksPage() {
           score: number;
           invScore: InvestmentScoreResult | null;
           askProfit: number | null;
+          analysisArv: number | null;
         } => p !== null,
       )
       .filter(({ deal }) => {
@@ -363,13 +368,16 @@ export default function ClaudePicksPage() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {visiblePicks.map(({ pick, deal, tierInfo, invScore, askProfit }) => {
+          {visiblePicks.map(({ pick, deal, tierInfo, invScore, askProfit, analysisArv }) => {
             const a = deal.apiData;
             const sCfg = statusConfig[pick.marketStatus];
             const pCfg = priorityConfig[pick.priority];
             const StatusIcon = sCfg.icon;
             const price = deal.overrides?.purchasePrice ?? a?.purchasePrice ?? 0;
-            const arv = deal.overrides?.arv ?? a?.arv ?? 0;
+            // ARV display matches what the Acquisition Engine score uses:
+            // analysisArv is override → min(comp, api). Fall back to api only
+            // when comps haven't been computed yet (analysis returned null).
+            const arv = analysisArv ?? deal.overrides?.arv ?? a?.arv ?? 0;
             const rehab = deal.overrides?.rehabCost ?? a?.rehabCost ?? 0;
             const cap = a?.capRate ?? 0;
             const rent = a?.rent ?? 0;
